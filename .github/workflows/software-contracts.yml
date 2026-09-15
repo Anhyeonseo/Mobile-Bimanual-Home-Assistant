@@ -8,32 +8,134 @@ permissions:
   contents: read
 
 jobs:
+  stm32-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        profile: [legacy, resident]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
+      - name: Build firmware without flashing a board
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          resident=OFF
+          if [ "$PROFILE" = resident ]; then resident=ON; fi
+          cmake -S firmware/stm32_g474_single_arm -B build/stm32 \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE="$resident"
+          cmake --build build/stm32 --parallel 2
   hardware-free:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements/host.txt
+          cache-dependency-path: requirements/offline.lock.txt
       - name: Install host test dependencies
-        run: python -m pip install -r requirements/host.txt
+        run: python -m pip install -r requirements/offline.lock.txt
       - name: Test arm communication and household task plans
         run: python -m pytest -c config/pytest.ini --rootdir=. -q
       - name: Validate firmware protocol sources
         run: |
           python tools/run/validate_protocol_manifest.py
           python tools/setup/firmware/generate_protocol_header.py --check
+          python tools/setup/firmware/generate_joint_limits.py --check
       - name: Build and test firmware core on host
         run: |
           cmake -S firmware/stm32_actuator -B build/stm32_actuator-host
           cmake --build build/stm32_actuator-host --parallel 2
           ctest --test-dir build/stm32_actuator-host --output-on-failure
+      - name: Accelerated one-hour native mobile soak
+        env:
+          PYTHONPATH: ros2_ws/src/so101_arm_bridge
+        run: python tools/run/soak_mobile_core.py --library build/stm32_actuator-host/libactuator_mobile_simulator.so --duration-s 3600
       - name: Generate a non-executable fetch plan
         env:
           PYTHONPATH: ros2_ws/src/home_robot_tasks
         run: |
           python -m home_robot_tasks.cli --world config/home.example.json --request config/fetch_remote.example.json > fetch-plan.json
           python -c "import json; p=json.load(open('fetch-plan.json')); assert p['mode']=='plan_only' and not p['executable'] and not p['motion_authorized'] and not p['physical_task_completed']"
+      - name: Replay synthetic sofa-to-bed evidence without hardware
+        env:
+          PYTHONPATH: ros2_ws/src/home_robot_tasks
+        run: |
+          python -m home_robot_tasks.replay_cli --world config/home.example.json --request config/fetch_remote.example.json --recording config/fetch_remote.replay.example.json > fetch-replay.json
+          python -c "import json; r=json.load(open('fetch-replay.json')); assert r['replay_completed'] and r['motion_commands']==0 and not r['physical_task_completed'] and not r['stop_command_sent']"
+
+      - name: Execute simulated fetch and app map navigation
+        env:
+          PYTHONPATH: ros2_ws/src/home_robot_tasks
+        run: |
+          python -m home_robot_tasks.simulate_cli --world config/home.example.json --map config/navigation_map.simulation.json --request config/fetch_remote.example.json > fetch-execution.json
+          python -m home_robot_tasks.simulate_cli --world config/home.example.json --map config/navigation_map.simulation.json --request config/navigate_to.simulation.json > navigate-execution.json
+          python -c "import json; reports=[json.load(open(p)) for p in ['fetch-execution.json','navigate-execution.json']]; assert all(r['status']=='SUCCEEDED' and r['mode']=='simulation' and r['hardware_commands']==0 and not r['physical_task_completed'] for r in reports)"
+
+  ros-contracts:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install model and action message dependencies
+        run: |
+          apt-get update
+          apt-get install --no-install-recommends -y ros-jazzy-nav2-msgs ros-jazzy-xacro ros-jazzy-urdf-parser-py python3-numpy
+      - name: Check assembly FK and synthetic ROS action transport
+        shell: bash
+        env:
+          ROS_DOMAIN_ID: "173"
+          ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          export PYTHONPATH="$PWD/ros2_ws/src/home_robot_tasks:$PYTHONPATH"
+          python3 tools/run/check_mobile_model.py
+          python3 tools/run/check_nav2_action_port.py
+
+  ros-integration:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actual navigation and manipulation planners
+        run: |
+          apt-get update
+          apt-get install --no-install-recommends -y build-essential cmake python3-serial python3-yaml python3-numpy \
+            ros-jazzy-nav2-amcl ros-jazzy-nav2-planner ros-jazzy-nav2-navfn-planner \
+            ros-jazzy-nav2-controller ros-jazzy-nav2-dwb-controller ros-jazzy-nav2-bt-navigator \
+            ros-jazzy-moveit-ros-move-group ros-jazzy-moveit-kinematics ros-jazzy-moveit-planners-ompl \
+            ros-jazzy-moveit-simple-controller-manager ros-jazzy-robot-state-publisher ros-jazzy-xacro
+      - name: Verify actual ROS planning with synthetic sensors and C motor feedback
+        shell: bash
+        env:
+          ROS_DOMAIN_ID: "173"
+          ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          export PYTHONPATH="$PWD/ros2_ws/src/home_robot_tasks:$PWD/ros2_ws/src/so101_arm_bridge:$PYTHONPATH"
+          cmake -S firmware/stm32_actuator -B build/offline-core
+          cmake --build build/offline-core --parallel 2
+          python3 tools/run/check_moveit_planning.py --retain-moveit-plugin
+          for fault in none scan_loss tf_loss; do
+            python3 tools/run/check_nav2_closed_loop.py --fault "$fault" --output "output/nav2-$fault"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ros-integration-reports
+          path: |
+            output/moveit-planning
+            output/nav2-*

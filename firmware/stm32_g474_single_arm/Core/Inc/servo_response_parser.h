@@ -1,41 +1,21 @@
 #ifndef SERVO_RESPONSE_PARSER_H
 #define SERVO_RESPONSE_PARSER_H
 
-#include <stdint.h>
-
-#define SERVO_RESPONSE_MAX_BODY_LENGTH UINT8_C(18)
-
-typedef enum
-{
-    SERVO_RESPONSE_REJECT_NONE = 0,
-    SERVO_RESPONSE_REJECT_HEADER = 1,
-    SERVO_RESPONSE_REJECT_ID = 2,
-    SERVO_RESPONSE_REJECT_LENGTH = 3,
-    SERVO_RESPONSE_REJECT_CHECKSUM = 4
-} ServoResponseRejectReason;
-
-typedef enum
-{
-    SERVO_RESPONSE_NEED_MORE = 0,
-    SERVO_RESPONSE_FRAME_READY = 1,
-    SERVO_RESPONSE_FRAME_REJECTED = 2,
-    SERVO_RESPONSE_STATUS_ERROR = 3
-} ServoResponseParseResult;
-
-typedef struct
-{
-    uint8_t expected_id;
-    uint8_t expected_data_length;
-    uint8_t sync_count;
-    uint8_t frame_id;
-    uint8_t frame_length;
-    uint8_t body_index;
-    uint8_t body[SERVO_RESPONSE_MAX_BODY_LENGTH];
-    uint8_t servo_status;
-    ServoResponseRejectReason last_reject;
-    uint16_t discarded_bytes;
-} ServoResponseParser;
-
+#include "actuator_core/sts3215_response.h"
+/* Existing arm API delegates to the shared mobile/arm response parser. */
+#define SERVO_RESPONSE_MAX_BODY_LENGTH ACTUATOR_STS_RESPONSE_MAX_BODY_LENGTH
+#define SERVO_RESPONSE_REJECT_NONE ACTUATOR_STS_RESPONSE_REJECT_NONE
+#define SERVO_RESPONSE_REJECT_HEADER ACTUATOR_STS_RESPONSE_REJECT_HEADER
+#define SERVO_RESPONSE_REJECT_ID ACTUATOR_STS_RESPONSE_REJECT_ID
+#define SERVO_RESPONSE_REJECT_LENGTH ACTUATOR_STS_RESPONSE_REJECT_LENGTH
+#define SERVO_RESPONSE_REJECT_CHECKSUM ACTUATOR_STS_RESPONSE_REJECT_CHECKSUM
+#define SERVO_RESPONSE_NEED_MORE ACTUATOR_STS_RESPONSE_NEED_MORE
+#define SERVO_RESPONSE_FRAME_READY ACTUATOR_STS_RESPONSE_FRAME_READY
+#define SERVO_RESPONSE_FRAME_REJECTED ACTUATOR_STS_RESPONSE_FRAME_REJECTED
+#define SERVO_RESPONSE_STATUS_ERROR ACTUATOR_STS_RESPONSE_STATUS_ERROR
+typedef actuator_sts_response_reject_t ServoResponseRejectReason;
+typedef actuator_sts_response_result_t ServoResponseParseResult;
+typedef actuator_sts_response_t ServoResponseParser;
 void ServoResponseParser_Init(
     ServoResponseParser *parser,
     uint8_t expected_id,
@@ -51,4 +31,4 @@ const uint8_t *ServoResponseParser_Data(
     const ServoResponseParser *parser
 );
 
-#endif /* SERVO_RESPONSE_PARSER_H */
+#endif

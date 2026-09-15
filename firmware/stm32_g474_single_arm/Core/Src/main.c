@@ -24,6 +24,9 @@
 #include "single_arm_app.h"
 #include "right_servo_bus.h"
 #include "control_tick.h"
+#include "mobile_servo_output.h"
+#include "mobile_servo_feedback.h"
+#include "mobile_board.h"
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
 #include "bimanual_servo_dispatch.h"
 #endif
@@ -123,6 +126,7 @@ int main(void)
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
   BimanualServoDispatch_Init(&huart1, &huart4);
 #endif
+  (void)MobileBoard_Boot(&huart1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -133,7 +137,13 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     F0Metrics_LoopBegin();
+#if HOST_BIMANUAL_DMA_DISPATCH_BUILD
+    BimanualServoDispatch_Poll();
+#endif
     SingleArmApp_Process();
+    MobileBoard_Poll();
+    MobileServoOutput_Poll();
+    MobileServoFeedback_Poll();
     F0Metrics_LoopEnd();
     /* USER CODE END 3 */
   }

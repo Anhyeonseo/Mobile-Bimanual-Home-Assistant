@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "operation": "navigate_to",
+  "request_id": "phone-goal-001",
+  "map_id": "demo-home",
+  "map_revision": "synthetic-1",
+  "floor_id": "ground",
+  "frame_id": "map",
+  "point": {"x": 7.25, "y": 4.25, "z": 0.0},
+  "yaw_rad": 0.0
+}

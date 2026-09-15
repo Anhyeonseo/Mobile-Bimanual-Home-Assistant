@@ -4,6 +4,11 @@
 #include "stm32g4xx_hal.h"
 
 #include <stdint.h>
+#include "actuator_core/mobile_endpoint.h"
+
+/* Main-loop startup only, before entering binary mode; immutable until reset.
+ * Caller supplies commissioned limits, unique boot ID and real feedback. */
+bool BinaryControl_AttachMobileEndpoint(actuator_mobile_endpoint_t *endpoint);
 
 void BinaryControl_Init(UART_HandleTypeDef *host_uart);
 void BinaryControl_Service(void);

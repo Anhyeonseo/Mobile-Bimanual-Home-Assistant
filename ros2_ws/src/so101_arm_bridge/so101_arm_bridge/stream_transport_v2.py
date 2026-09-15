@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import struct
+import math
+from functools import wraps
+from threading import RLock
 import time
 from typing import Any
 
@@ -44,10 +47,27 @@ class StreamResponseTimeoutError(StreamTransportV2Error):
     """No matching response arrived before the bounded receive deadline."""
 
 
+def _serialized(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with self._transaction_lock:
+            return method(self, *args, **kwargs)
+
+    return call
+
+
 class StreamValidationTransportV2:
     """Exchange v2 packets; motion admission belongs to the resident adapter."""
 
     def __init__(self, port: Any, response_timeout_s: float = 0.4) -> None:
+        if (
+            isinstance(response_timeout_s, bool)
+            or not isinstance(response_timeout_s, (int, float))
+            or not math.isfinite(response_timeout_s)
+            or not 0 < response_timeout_s <= 3
+        ):
+            raise ValueError("bounded response timeout required")
+        self._transaction_lock = RLock()
         self._port = port
         self._timeout_s = response_timeout_s
         self._sequence = 1
@@ -58,8 +78,10 @@ class StreamValidationTransportV2:
         return int(time.monotonic() * 1000.0) & 0xFFFFFFFF
 
     def _next_sequence(self) -> int:
+        if self._sequence > 0xFFFFFFFF:
+            raise StreamTransportV2Error("new transport required before sequence wrap")
         sequence = self._sequence
-        self._sequence = (self._sequence + 1) & 0xFFFFFFFF
+        self._sequence += 1
         return sequence
 
     def _send(
@@ -69,7 +91,7 @@ class StreamValidationTransportV2:
     ) -> tuple[int, int]:
         sequence = self._next_sequence()
         sender_time_ms = self._now_ms()
-        self._port.write(
+        self._write_packet(
             encode_frame_v2(
                 FrameV2(
                     message_type=message_type,
@@ -79,8 +101,15 @@ class StreamValidationTransportV2:
                 )
             )
         )
-        self._port.flush()
         return sequence, sender_time_ms
+
+    def _write_packet(self, packet: bytes) -> None:
+        # Serial.write uses the configured finite write timeout. Do not flush:
+        # POSIX tcdrain can wait indefinitely on a stalled USB/flow-control path.
+        if self._port.write(packet) != len(packet):
+            raise StreamTransportV2Error(
+                "partial serial write; command delivery is uncertain"
+            )
 
     def _read_packet(self) -> bytes | None:
         if b"\x00" in self._rx_residual:
@@ -126,10 +155,10 @@ class StreamValidationTransportV2:
             f"observed={observed or 'none'}"
         )
 
+    @_serialized
     def enter_binary_mode(self) -> HelloV2:
         self._port.reset_input_buffer()
-        self._port.write(b"P")
-        self._port.flush()
+        self._write_packet(b"P")
         deadline = time.monotonic() + self._timeout_s
         acknowledged = False
         while time.monotonic() < deadline:
@@ -140,8 +169,7 @@ class StreamValidationTransportV2:
             if not line:
                 break
         if not acknowledged:
-            self._port.write(b"\x00")
-            self._port.flush()
+            self._write_packet(b"\x00")
             self._port.reset_input_buffer()
         sequence, _ = self._send(StreamMessageTypeV2.HELLO_REQUEST)
         hello = parse_hello_v2(
@@ -149,6 +177,7 @@ class StreamValidationTransportV2:
         )
         return hello
 
+    @_serialized
     def arm(self, calibration_hash: int) -> None:
         sequence, _ = self._send(
             StreamMessageTypeV2.ARM_REQUEST,
@@ -167,6 +196,7 @@ class StreamValidationTransportV2:
                 f"hash=0x{returned_hash:08X}"
             )
 
+    @_serialized
     def enable(self) -> StateV2:
         sequence, _ = self._send(StreamMessageTypeV2.ENABLE)
         state = parse_state_v2(
@@ -179,6 +209,7 @@ class StreamValidationTransportV2:
             )
         return state
 
+    @_serialized
     def safe_stop(self) -> StateV2:
         sequence, _ = self._send(StreamMessageTypeV2.SAFE_STOP)
         state = parse_state_v2(
@@ -190,12 +221,14 @@ class StreamValidationTransportV2:
             raise StreamTransportV2Error("SAFE_STOP was not latched")
         return state
 
+    @_serialized
     def heartbeat(self) -> StateV2:
         sequence, _ = self._send(StreamMessageTypeV2.HEARTBEAT)
         return parse_state_v2(
             self._receive(sequence, StreamMessageTypeV2.STATE_FEEDBACK).payload
         )
 
+    @_serialized
     def get_state(self) -> StateV2:
         sequence, _ = self._send(StreamMessageTypeV2.GET_STATE)
         return parse_state_v2(
@@ -217,24 +250,28 @@ class StreamValidationTransportV2:
             raise StreamTransportV2Error("STREAM_STATUS sender-time echo mismatch")
         return status
 
+    @_serialized
     def open_stream(self, policy: StreamPolicyV2) -> StreamStatusV2:
         return self._stream_exchange(
             StreamMessageTypeV2.STREAM_OPEN,
             encode_stream_open_v2(policy),
         )
 
+    @_serialized
     def append(self, batch: StreamBatchV2) -> StreamStatusV2:
         return self._stream_exchange(
             StreamMessageTypeV2.SETPOINT_BATCH,
             encode_stream_batch_v2(batch, BatchKindV2.APPEND),
         )
 
+    @_serialized
     def splice(self, batch: StreamBatchV2) -> StreamStatusV2:
         return self._stream_exchange(
             StreamMessageTypeV2.SPLICE,
             encode_stream_batch_v2(batch, BatchKindV2.SPLICE),
         )
 
+    @_serialized
     def get_executor_diagnostics(self) -> StreamExecutorDiagnosticsV2:
         sequence, sender_time_ms = self._send(
             StreamMessageTypeV2.GET_EXECUTOR_DIAGNOSTICS
@@ -246,15 +283,14 @@ class StreamValidationTransportV2:
             ).payload
         )
         if diagnostics.request_sequence != sequence:
-            raise StreamTransportV2Error(
-                "executor diagnostics sequence echo mismatch"
-            )
+            raise StreamTransportV2Error("executor diagnostics sequence echo mismatch")
         if diagnostics.sender_time_ms_echo != sender_time_ms:
             raise StreamTransportV2Error(
                 "executor diagnostics sender-time echo mismatch"
             )
         return diagnostics
 
+    @_serialized
     def get_dispatch_diagnostics(self) -> BimanualDispatchDiagnosticsV2:
         sequence, sender_time_ms = self._send(
             StreamMessageTypeV2.GET_DISPATCH_DIAGNOSTICS
@@ -266,15 +302,14 @@ class StreamValidationTransportV2:
             ).payload
         )
         if diagnostics.request_sequence != sequence:
-            raise StreamTransportV2Error(
-                "dispatch diagnostics sequence echo mismatch"
-            )
+            raise StreamTransportV2Error("dispatch diagnostics sequence echo mismatch")
         if diagnostics.sender_time_ms_echo != sender_time_ms:
             raise StreamTransportV2Error(
                 "dispatch diagnostics sender-time echo mismatch"
             )
         return diagnostics
 
+    @_serialized
     def get_tracking_diagnostics(self) -> BimanualTrackingDiagnosticsV2:
         sequence, sender_time_ms = self._send(
             StreamMessageTypeV2.GET_TRACKING_DIAGNOSTICS
@@ -286,21 +321,16 @@ class StreamValidationTransportV2:
             ).payload
         )
         if diagnostics.request_sequence != sequence:
-            raise StreamTransportV2Error(
-                "tracking diagnostics sequence echo mismatch"
-            )
+            raise StreamTransportV2Error("tracking diagnostics sequence echo mismatch")
         if diagnostics.sender_time_ms_echo != sender_time_ms:
             raise StreamTransportV2Error(
                 "tracking diagnostics sender-time echo mismatch"
             )
         return diagnostics
 
-
-
+    @_serialized
     def get_feedback_snapshot(self) -> BimanualFeedbackSnapshotV2:
-        sequence, sender_time_ms = self._send(
-            StreamMessageTypeV2.GET_FEEDBACK_SNAPSHOT
-        )
+        sequence, sender_time_ms = self._send(StreamMessageTypeV2.GET_FEEDBACK_SNAPSHOT)
         snapshot = parse_feedback_snapshot_v2(
             self._receive(
                 sequence,
@@ -308,15 +338,12 @@ class StreamValidationTransportV2:
             ).payload
         )
         if snapshot.request_sequence != sequence:
-            raise StreamTransportV2Error(
-                "feedback snapshot sequence echo mismatch"
-            )
+            raise StreamTransportV2Error("feedback snapshot sequence echo mismatch")
         if snapshot.sender_time_ms_echo != sender_time_ms:
-            raise StreamTransportV2Error(
-                "feedback snapshot sender-time echo mismatch"
-            )
+            raise StreamTransportV2Error("feedback snapshot sender-time echo mismatch")
         return snapshot
 
+    @_serialized
     def prepare_shadow(
         self,
         reference_unwrapped_raw: tuple[int, ...] | None = None,
@@ -344,3 +371,55 @@ class StreamValidationTransportV2:
                 timeout_s=6.0,
             ).payload
         )
+
+    @_serialized
+    def exchange_mobile(self, packet: bytes) -> bytes:
+        """Same port/sequence/lock as arm traffic; does not open another device.
+
+        Hardware defaults to an unbound endpoint and rejects this operation.
+        Caller must still own the whole-robot task; locking is only wire ownership.
+        """
+        from .mobile_wire import MobileCommand, crc32c
+
+        if (
+            not isinstance(packet, bytes)
+            or len(packet) != 36
+            or packet[:3] not in (b"AM\x01", b"AL\x01")
+        ):
+            raise StreamTransportV2Error("invalid mobile payload")
+        if struct.unpack_from("<I", packet, 32)[0] != crc32c(packet[:32]):
+            raise StreamTransportV2Error("invalid mobile payload CRC")
+        if packet[:3] == b"AL\x01":
+            from .lift_wire import LiftCommand
+            LiftCommand.decode(packet)
+        elif packet[3] in (1, 2, 3):
+            MobileCommand.decode(packet)
+        elif (
+            packet[3] not in (4, 5, 6)
+            or not struct.unpack_from("<I", packet, 4)[0]
+            or any(packet[16:32])
+        ):
+            raise StreamTransportV2Error("invalid mobile query")
+        seq, _ = self._send(StreamMessageTypeV2.MOBILE_REQUEST, packet)
+        payload = self._receive(seq, StreamMessageTypeV2.MOBILE_RESPONSE).payload
+        if payload == b"\x01":
+            raise StreamTransportV2Error(
+                "mobile endpoint is not attached on this firmware"
+            )
+        if payload == b"\x04":
+            raise StreamTransportV2Error("mobile output is unavailable or inhibited")
+        if payload == b"\x03":
+            raise StreamTransportV2Error("host fault inhibits mobile motion")
+        if len(payload) != 65 or payload[0] != 0:
+            raise StreamTransportV2Error("mobile envelope rejected or malformed")
+        return payload[1:]
+
+
+class MobileV2Exchange:
+    """Inject into MobileClient; retain the resident adapter's existing transport."""
+
+    def __init__(self, transport: StreamValidationTransportV2):
+        self.transport = transport
+
+    def exchange(self, packet: bytes) -> bytes:
+        return self.transport.exchange_mobile(packet)

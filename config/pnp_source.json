@@ -1,0 +1,44 @@
+{
+  "repository": "https://github.com/Anhyeonseo/Bimanual-Pick-And-Place",
+  "commit": "b3d7a3714f134e760a4d146039686c08eeaa622d",
+  "license": "Apache-2.0",
+  "reused": [
+    {
+      "source": "tools/lib/grasp_yaw_kinematics.py",
+      "sha256": "d400c6de5d7cab775cb61d71afd2ee9983894f611d504459d1a8bab0c40a4e6d",
+      "destination": "home_robot_tasks/grasp_yaw.py",
+      "changes": [
+        "require moving mount joint state",
+        "support prismatic FK",
+        "default root base_link"
+      ]
+    },
+    {
+      "source": "ros2_ws/src/so101_moveit_config/config/so101_dual.srdf",
+      "sha256": "8682284172b46311b4639d35c86ba3617606147a666625662df6f94be0a896f7",
+      "destination": "so101_description/config/alohamini.simulation.srdf",
+      "changes": [
+        "replace fixed workcell with stationary mobile assembly",
+        "retain baseline within-arm collision exclusions only",
+        "passive lift/wheels and separate gripper groups"
+      ]
+    }
+  ],
+  "adapted_algorithms": [
+    "top_pick_place_application.step_target",
+    "top_pick_place_application.split_finite_targets",
+    "top_pick_place_application.interpolate_finite_points",
+    "dual MoveIt KDL position-only IK and OMPL planning parameters"
+  ],
+  "not_copied": [
+    "fixed workcell translations",
+    "old calibration/route hashes",
+    "pixel-side arm selection",
+    "old pinned joint poses"
+  ],
+  "remaining": [
+    "RGB-D detector binding",
+    "validated mobile collision geometry and grasp orientation",
+    "live manipulation adapter"
+  ]
+}

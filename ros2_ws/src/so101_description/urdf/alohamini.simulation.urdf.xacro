@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<robot name="alohamini_simulation" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- Simulation geometry ONLY: dimensions, masses, mounts and joint zeros
+       below are unmeasured examples, not a commissioned robot description. -->
+  <xacro:arg name="base_length" default="0.42"/>
+  <xacro:arg name="base_width" default="0.38"/>
+  <xacro:arg name="lift_travel" default="0.50"/>
+  <xacro:arg name="arm_spacing" default="0.28"/>
+  <xacro:arg name="camera_xyz" default="0.08 0 0.25"/>
+  <xacro:include filename="so101_arm_macro.xacro"/>
+  <material name="3d_printed"><color rgba="0.95 0.7 0.12 1"/></material>
+  <material name="sts3215"><color rgba="0.12 0.12 0.12 1"/></material>
+  <material name="base_gray"><color rgba="0.3 0.35 0.4 1"/></material>
+  <link name="base_footprint"/>
+  <link name="base_link">
+    <visual><origin xyz="0 0 0.10"/><geometry><box size="$(arg base_length) $(arg base_width) 0.20"/></geometry><material name="base_gray"/></visual>
+    <collision><origin xyz="0 0 0.10"/><geometry><box size="$(arg base_length) $(arg base_width) 0.20"/></geometry></collision>
+  </link>
+  <joint name="base_footprint_joint" type="fixed"><parent link="base_footprint"/><child link="base_link"/></joint>
+  <link name="lift_column">
+    <visual><origin xyz="0 0 0.30"/><geometry><box size="0.07 0.07 0.60"/></geometry><material name="base_gray"/></visual>
+    <collision><origin xyz="0 0 0.30"/><geometry><box size="0.07 0.07 0.60"/></geometry></collision>
+  </link>
+  <joint name="column_mount" type="fixed"><parent link="base_link"/><child link="lift_column"/><origin xyz="-0.12 0 0.20"/></joint>
+  <link name="lift_link">
+    <visual><geometry><box size="0.15 0.36 0.03"/></geometry><material name="base_gray"/></visual>
+    <collision><geometry><box size="0.15 0.36 0.03"/></geometry></collision>
+  </link>
+  <joint name="lift_joint" type="prismatic"><parent link="base_link"/><child link="lift_link"/><origin xyz="0 0 0.25"/><axis xyz="0 0 1"/><limit lower="0" upper="$(arg lift_travel)" effort="20" velocity="0.05"/></joint>
+  <xacro:so101_arm prefix="left_" parent="lift_link" mount_xyz="0 ${float('$(arg arm_spacing)')/2} 0.02" mount_rpy="0 0 0"/>
+  <xacro:so101_arm prefix="right_" parent="lift_link" mount_xyz="0 ${-float('$(arg arm_spacing)')/2} 0.02" mount_rpy="0 0 0"/>
+  <link name="camera_link"/><link name="camera_color_optical_frame"/>
+  <joint name="camera_mount" type="fixed"><parent link="lift_link"/><child link="camera_link"/><origin xyz="$(arg camera_xyz)"/></joint>
+  <joint name="camera_optical" type="fixed"><parent link="camera_link"/><child link="camera_color_optical_frame"/><origin rpy="-1.57079632679 0 -1.57079632679"/></joint>
+  <link name="lidar_a"/><link name="lidar_b"/>
+  <joint name="lidar_a_mount" type="fixed"><parent link="base_link"/><child link="lidar_a"/><origin xyz="0.15 0 0.15"/></joint>
+  <joint name="lidar_b_mount" type="fixed"><parent link="base_link"/><child link="lidar_b"/><origin xyz="-0.15 0 0.15" rpy="0 0 3.14159265359"/></joint>
+  <xacro:macro name="wheel" params="name x y yaw">
+    <link name="${name}_wheel"><visual><origin rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.05" length="0.03"/></geometry><material name="sts3215"/></visual><collision><origin rpy="1.57079632679 0 0"/><geometry><cylinder radius="0.05" length="0.03"/></geometry></collision></link>
+    <joint name="${name}_wheel_joint" type="continuous"><parent link="base_link"/><child link="${name}_wheel"/><origin xyz="${x} ${y} 0.05" rpy="0 0 ${yaw}"/><axis xyz="0 1 0"/></joint>
+  </xacro:macro>
+  <xacro:wheel name="left" x="0.1" y="0.15" yaw="2.09439510239"/>
+  <xacro:wheel name="back" x="-0.17" y="0" yaw="0"/>
+  <xacro:wheel name="right" x="0.1" y="-0.15" yaw="-2.09439510239"/>
+</robot>

@@ -34,8 +34,8 @@ SERVO = (
 
 def test_f88_preserves_terminal_settle_and_has_a_unique_firmware_identity() -> None:
     assert "HOST_BINARY_FIRMWARE_VERSION=0x00024806UL" in CMAKE
-    assert "HOST_BINARY_FIRMWARE_VERSION=0x00024809UL" in CMAKE
-    assert "F8_FIRMWARE_VERSION = 0x00024809" in ADAPTER
+    assert "HOST_BINARY_FIRMWARE_VERSION=0x00024903UL" in CMAKE
+    assert "F8_FIRMWARE_VERSION = 0x00024903" in ADAPTER
 
 
 def test_tracking_read_failure_limit_is_exactly_three() -> None:

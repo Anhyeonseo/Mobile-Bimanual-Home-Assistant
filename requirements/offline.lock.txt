@@ -1,0 +1,12 @@
+# Verified together in a fresh Python 3.12 venv on 2026-09-15.
+# Host tests + optional URDF geometry; excludes development formatters and ROS.
+iniconfig==2.3.0
+lxml==6.1.3
+numpy==1.26.4
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
+pyserial==3.5
+pytest==8.4.2
+PyYAML==6.0.3
+urdf-parser-py==0.0.4

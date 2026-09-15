@@ -20,7 +20,7 @@ def test_resident_finite_candidate_has_isolated_identity() -> None:
     assert "HOST_BINARY_FIRMWARE_VERSION=0x00024806UL" in cmake
     assert "HOST_BIMANUAL_TERMINAL_SETTLE_BUILD=1U" in cmake
     assert "BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE" in cmake
-    assert "HOST_BINARY_FIRMWARE_VERSION=0x00024809UL" in cmake
+    assert "HOST_BINARY_FIRMWARE_VERSION=0x00024903UL" in cmake
     assert "HOST_BIMANUAL_GRIPPER_TERMINAL_SETTLE_BUILD=1U" in cmake
 
 

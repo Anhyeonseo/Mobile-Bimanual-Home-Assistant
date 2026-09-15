@@ -51,6 +51,7 @@ class TaskStep:
     success_requires: tuple[str, ...]
     timeout_s: int
     max_attempts: int = 1
+    start_requires: tuple[str, ...] = ()
 
 
 def plan_fetch(request: FetchRequest, world: Mapping[str, Any]) -> dict[str, Any]:
@@ -84,18 +85,49 @@ def plan_fetch(request: FetchRequest, world: Mapping[str, Any]) -> dict[str, Any
            for location in locations):
         raise InvalidTask("each search location must belong to the source room")
     target = {"object_id": object_id}
+    stationary = ("base_stopped", "lift_stopped")
+    travel_ready = ("arm_in_transport_pose", "lift_in_transport_position")
+    destination_target = {**target, "destination_place": destination}
     steps = (
-        TaskStep("navigate", {"room": room_id}, ("localized_in_source_room", "base_stopped"), 180),
+        TaskStep("prepare_navigation", {}, (*stationary, *travel_ready), 30,
+                 start_requires=(*stationary, "hardware_ready")),
+        TaskStep("navigate", {"room": room_id},
+                 ("localized_in_source_room", "base_stopped", *travel_ready), 180,
+                 start_requires=(*stationary, *travel_ready, "localized")),
         TaskStep("search", {**target, "locations": locations},
-                 ("target_observed", "fresh_observation", "target_pose_resolved"), 120),
-        TaskStep("pick", target, ("base_stopped", "grasp_verified"), 60),
-        TaskStep("prepare_transport", target, ("arm_in_transport_pose", "load_retained"), 30),
+                 ("target_observed", "target_pose_resolved", "fresh_observation"), 120,
+                 start_requires=stationary),
+        TaskStep("align_for_pick", target, ("base_stopped", "alignment_verified"), 30,
+                 start_requires=(*stationary, "base_control_available", "arms_safe_for_alignment", "fresh_target_pose")),
+        TaskStep("adjust_lift_for_pick", target, ("lift_stopped", "lift_height_verified"), 30,
+                 start_requires=(*stationary, "arms_safe_for_lift", "lift_homed", "fresh_work_surface")),
+        TaskStep("reobserve_target", target,
+                 ("fresh_observation", "target_pose_resolved", "transform_valid", "reachable"), 30,
+                 start_requires=stationary),
+        TaskStep("pick", target, (*stationary, "grasp_verified"), 60,
+                 start_requires=(*stationary, "fresh_target_pose", "transform_valid", "collision_checked")),
+        TaskStep("prepare_transport", target, (*stationary, *travel_ready, "load_retained"), 30,
+                 start_requires=(*stationary, "grasp_verified")),
         TaskStep("navigate_with_load", {"destination_place": destination},
-                 ("localized_at_destination", "load_retained", "base_stopped"), 180),
-        TaskStep("place", {**target, "destination_place": destination},
-                 ("base_stopped", "release_verified", "arm_clear"), 60),
-        TaskStep("verify_delivery", {**target, "destination_place": destination},
-                 ("fresh_observation", "object_at_destination"), 30),
+                 ("localized_at_destination", "load_retained", "base_stopped", *travel_ready), 180,
+                 start_requires=(*stationary, *travel_ready, "load_retained", "localized")),
+        TaskStep("inspect_destination", destination_target,
+                 ("fresh_observation", "placement_surface_valid"), 30,
+                 start_requires=(*stationary, "load_retained")),
+        TaskStep("align_for_place", destination_target, ("base_stopped", "alignment_verified", "load_retained"), 30,
+                 start_requires=(*stationary, "base_control_available", "arms_safe_for_alignment", "load_retained", "fresh_work_surface")),
+        TaskStep("adjust_lift_for_place", destination_target,
+                 ("lift_stopped", "lift_height_verified", "load_retained"), 30,
+                 start_requires=(*stationary, "arms_safe_for_lift", "load_retained", "lift_homed", "fresh_work_surface")),
+        TaskStep("reobserve_destination", destination_target,
+                 ("fresh_observation", "placement_surface_valid", "transform_valid", "reachable"), 30,
+                 start_requires=(*stationary, "load_retained")),
+        TaskStep("place", destination_target,
+                 (*stationary, "release_verified", "arm_clear"), 60,
+                 start_requires=(*stationary, "load_retained", "fresh_work_surface", "transform_valid", "collision_checked")),
+        TaskStep("verify_delivery", destination_target,
+                 ("fresh_observation", "object_at_destination"), 30,
+                 start_requires=stationary),
     )
     return {
         "schema_version": 1,
@@ -106,12 +138,14 @@ def plan_fetch(request: FetchRequest, world: Mapping[str, Any]) -> dict[str, Any
         "executable": False,
         "physical_task_completed": False,
         "transport_mode": "carry_in_gripper",
-        "steps": [asdict(step) for step in steps],
+        "steps": [{"step_id": f"{index:02d}_{step.skill}", **asdict(step)}
+                  for index, step in enumerate(steps, 1)],
         "failure_policy": {
             "automatic_retry": False,
             "abort_on": ["timeout", "object_not_found", "stale_observation", "localization_lost",
                          "grasp_failed", "load_lost", "path_blocked", "release_failed", "cancelled"],
-            "required_response": "stop_base_and_hold_arms_then_report",
+            "required_response": "stop_base_stop_lift_preserve_load_then_report",
         },
-        "unimplemented_dependencies": ["navigation", "perception", "pick_and_place", "task_executor"],
+        "unimplemented_dependencies": ["navigation", "perception", "fine_alignment", "lift",
+                                       "pick_and_place", "physical_task_executor"],
     }

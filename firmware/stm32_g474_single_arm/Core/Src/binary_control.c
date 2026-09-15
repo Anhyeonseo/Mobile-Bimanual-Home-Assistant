@@ -1,4 +1,7 @@
+#include "mobile_board.h"
+#include "mobile_servo_output.h"
 #include "binary_control.h"
+#include "actuator_core/mobile_framed.h"
 
 #include "f0_metrics.h"
 #include "control_tick.h"
@@ -79,12 +82,27 @@ typedef struct
 } HostBinaryBufferedMotion;
 
 static UART_HandleTypeDef *binary_host_uart = NULL;
+/* No synthetic limits, boot ID or feedback are attached on hardware boot. */
+static actuator_mobile_endpoint_t *host_mobile_endpoint = NULL;
+
 static volatile uint8_t host_stop_latched = 0U;
 static actuator_stream_parser_t host_binary_parser;
 static uint32_t host_binary_heartbeat_count = 0U;
 static uint32_t host_binary_rejected_frame_count = 0U;
 static uint32_t host_binary_last_heartbeat_ms = 0U;
 static uint8_t host_binary_mode = 0U;
+bool BinaryControl_AttachMobileEndpoint(actuator_mobile_endpoint_t *endpoint)
+{
+    if (host_binary_mode || host_mobile_endpoint != NULL || endpoint == NULL ||
+        endpoint->supervisor == NULL || !endpoint->supervisor->configured ||
+        endpoint->supervisor->state != ACTUATOR_MOBILE_DISABLED || endpoint->boot_id == 0U)
+    {
+        return false;
+    }
+    host_mobile_endpoint = endpoint;
+    return true;
+}
+
 static actuator_safety_t host_binary_safety;
 static HostBinaryMotion host_binary_motion;
 static uint8_t host_binary_servos_configured = 0U;
@@ -500,7 +518,7 @@ static void Host_SendBinaryStateWithPositions(
         if (host_position_read_failure_streak >=
             HOST_POSITION_READ_FAILURE_LIMIT)
         {
-            host_stop_latched = 1U;
+            BinaryControl_LatchStop();
             if (actuator_safety_accepts_setpoint(&host_binary_safety))
             {
                 (void)actuator_safety_request_hold(&host_binary_safety);
@@ -1052,7 +1070,7 @@ static void Host_SendRightArmDisableVerified(uint32_t request_sequence)
     }
     else
     {
-        host_stop_latched = 1U;
+        BinaryControl_LatchStop();
         actuator_safety_report_fault(
             &host_binary_safety, UINT16_C(0xFF04));
     }
@@ -1299,7 +1317,7 @@ static void Host_StartBinaryMotion(
 
     if (host_binary_servos_configured == 0U)
     {
-        host_stop_latched = 1U;
+        BinaryControl_LatchStop();
         Host_SendBinarySetpointStatus(
             request->sequence,
             7U,
@@ -1380,7 +1398,7 @@ static void Host_ServiceBinaryMotion(void)
         if (start_status != HAL_OK)
         {
             host_binary_motion.active = 0U;
-            host_stop_latched = 1U;
+            BinaryControl_LatchStop();
             Host_SendBinarySetpointStatus(
                 host_binary_motion.request_sequence,
                 7U,
@@ -1415,7 +1433,7 @@ static void Host_ServiceBinaryMotion(void)
             const ServoMotionSafetyDiagnostics *diagnostics =
                 Servo_MotionSafetyGetDiagnostics();
             host_binary_motion.active = 0U;
-            host_stop_latched = 1U;
+            BinaryControl_LatchStop();
             Servo_MotionSafetyEnd();
             Host_SendBinarySetpointStatus(
                 host_binary_motion.request_sequence,
@@ -1450,7 +1468,7 @@ static void Host_ServiceBinaryMotion(void)
         if (verify_status != HAL_OK)
         {
             host_binary_motion.active = 0U;
-            host_stop_latched = 1U;
+            BinaryControl_LatchStop();
             Servo_MotionSafetyEnd();
             Host_SendBinarySetpointStatus(
                 host_binary_motion.request_sequence,
@@ -1523,7 +1541,7 @@ static void Host_ServiceBinaryMotion(void)
         const ServoMotionSafetyDiagnostics *diagnostics =
             Servo_MotionSafetyGetDiagnostics();
         host_binary_motion.active = 0U;
-        host_stop_latched = 1U;
+        BinaryControl_LatchStop();
         Servo_MotionSafetyEnd();
         Host_SendBinarySetpointStatus(
             host_binary_motion.request_sequence,
@@ -1576,7 +1594,7 @@ static void Host_ServiceBinaryMotion(void)
             if ((raw_position < 0) || (raw_position > 4095))
             {
                 host_binary_motion.active = 0U;
-                host_stop_latched = 1U;
+                BinaryControl_LatchStop();
                 Servo_MotionSafetyEnd();
                 Host_SendBinarySetpointStatus(
                     host_binary_motion.request_sequence,
@@ -1595,7 +1613,7 @@ static void Host_ServiceBinaryMotion(void)
     if (Servo_SyncWritePositions(setpoints) != HAL_OK)
     {
         host_binary_motion.active = 0U;
-        host_stop_latched = 1U;
+        BinaryControl_LatchStop();
         Servo_MotionSafetyEnd();
         Host_SendBinarySetpointStatus(
             host_binary_motion.request_sequence,
@@ -1851,7 +1869,7 @@ static void Host_FinalizeBufferedExecution(uint8_t detail)
             diagnostics->last_applied_tick : diagnostics->terminal_tick;
         if (diagnostics->safe_stop_required)
         {
-            host_stop_latched = 1U;
+            BinaryControl_LatchStop();
             if (actuator_safety_accepts_setpoint(&host_binary_safety))
             {
                 (void)actuator_safety_request_hold(&host_binary_safety);
@@ -1921,7 +1939,7 @@ static void Host_AbortBufferedExecution(
     }
     else
     {
-        host_stop_latched = 1U;
+        BinaryControl_LatchStop();
         Servo_MotionSafetyEnd();
         Host_ResetBufferedExecution();
     }
@@ -2032,7 +2050,7 @@ static void Host_ExecuteBufferedCandidate(
                             &host_buffered_execution_route,
                             HAL_GetTick()
                         );
-                        host_stop_latched = 1U;
+                        BinaryControl_LatchStop();
                         status_code = 2U;
                         command_result =
                             ACTUATOR_BUFFERED_COMMAND_BAD_STATE;
@@ -2681,7 +2699,7 @@ static void Host_RequestV2CoordinatedStop(void)
     host_v2_executor_start_pending = 0U;
 #endif
     host_v2_executor_clock_active = 0U;
-    host_stop_latched = 1U;
+    BinaryControl_LatchStop();
 }
 
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
@@ -2717,7 +2735,7 @@ static uint8_t Host_PerformV2CoordinatedStop(uint8_t dispatch_fault)
     host_bimanual_arm_watchdog_grace_started_ms = 0U;
     host_v2_coordinated_stop_pending = 0U;
     host_v2_executor_start_pending = 0U;
-    host_stop_latched = 1U;
+    BinaryControl_LatchStop();
     if (status != 0U)
     {
         actuator_safety_report_fault(&host_binary_safety, UINT16_C(0xFF06));
@@ -3640,7 +3658,7 @@ static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
     }
     else
     {
-        host_stop_latched = 1U;
+        BinaryControl_LatchStop();
         actuator_safety_report_fault(
             &host_binary_safety,
             UINT16_C(0xFF05)
@@ -3699,6 +3717,54 @@ static void Host_HandleBinaryFrame(
 
     switch (request->message_type)
     {
+#if ACTUATOR_PROTOCOL_VERSION == 2
+        case ACTUATOR_V2_MSG_MOBILE_REQUEST:
+        {
+            actuator_frame_t response;
+            if(request->payload_length==36 && request->payload[0]=='A' && request->payload[1]=='L') {
+                memset(&response,0,sizeof(response));response.message_type=ACTUATOR_V2_MSG_MOBILE_RESPONSE;
+                response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();response.payload_length=1;
+                actuator_lift_endpoint_t *lift=MobileBoard_LiftEndpoint();
+                response.payload[0]=lift==NULL?1:2;
+                if(host_stop_latched && (request->payload[3]==1 || request->payload[3]==2))response.payload[0]=3;
+                else if(request->flags==0 && lift!=NULL && actuator_lift_endpoint_exchange(lift,request->payload,36,
+                        HAL_GetTick(),response.payload+1)){response.payload[0]=0;response.payload_length=65;}
+                (void)Host_SendBinaryFrame(&response);break;
+            }
+            /* Global host fault cannot be cleared by a mobile-only ARM. */
+            if (host_stop_latched && request->payload_length == ACTUATOR_MOBILE_WIRE_SIZE &&
+                (request->payload[3] == 1U || request->payload[3] == 2U))
+            {
+                memset(&response, 0, sizeof(response));
+                response.message_type = ACTUATOR_V2_MSG_MOBILE_RESPONSE;
+                response.sequence = request->sequence;
+                response.sender_time_ms = HAL_GetTick();
+                response.payload_length = 1U;
+                response.payload[0] = 3U; /* host fault inhibits motion */
+                (void)Host_SendBinaryFrame(&response);
+                break;
+            }
+            if (host_mobile_endpoint != NULL && request->payload_length == ACTUATOR_MOBILE_WIRE_SIZE &&
+                (request->payload[3] == 1U || request->payload[3] == 2U) &&
+                !MobileServoOutput_CommandAllowed(host_mobile_endpoint->supervisor))
+            {
+                memset(&response, 0, sizeof(response));
+                response.message_type = ACTUATOR_V2_MSG_MOBILE_RESPONSE;
+                response.sequence = request->sequence;
+                response.sender_time_ms = HAL_GetTick();
+                response.payload_length = 1U;
+                response.payload[0] = 4U; /* endpoint cannot acknowledge an unavailable output */
+                (void)Host_SendBinaryFrame(&response);
+                break;
+            }
+            if (actuator_mobile_framed_reply(host_mobile_endpoint, request,
+                                             HAL_GetTick(), &response))
+            {
+                (void)Host_SendBinaryFrame(&response);
+            }
+            break;
+        }
+#endif
         case ACTUATOR_MSG_HELLO_REQUEST:
             if (request->payload_length == 0U)
             {
@@ -4018,7 +4084,7 @@ static void Host_HandleBinaryFrame(
                         &host_binary_safety
                     );
                 }
-                host_stop_latched = 1U;
+                BinaryControl_LatchStop();
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
                 Host_SendBinaryState(
                     request->sequence,
@@ -4106,7 +4172,7 @@ static void Host_HandleBinaryFrame(
                     actuator_safety_request_hold(
                         &host_binary_safety
                     );
-                host_stop_latched = 1U;
+                BinaryControl_LatchStop();
                 Host_SendBinaryState(
                     request->sequence,
                     (uint8_t)hold_result
@@ -4153,7 +4219,7 @@ static void Host_HandleBinaryFrame(
                 host_binary_servos_configured = 0U;
                 if (Servo_DisableTorqueAll() != HAL_OK)
                 {
-                    host_stop_latched = 1U;
+                    BinaryControl_LatchStop();
                     actuator_safety_report_fault(
                         &host_binary_safety,
                         UINT16_C(0xFF02)
@@ -4168,7 +4234,7 @@ static void Host_HandleBinaryFrame(
                 if ((host_right_arm_output_active != 0U) &&
                     (RightServoBus_DisableTorqueAll() != HAL_OK))
                 {
-                    host_stop_latched = 1U;
+                    BinaryControl_LatchStop();
                     actuator_safety_report_fault(
                         &host_binary_safety,
                         UINT16_C(0xFF03)
@@ -4222,6 +4288,7 @@ static void Host_ProcessBinaryByte(uint8_t byte, uint32_t received_at_ms)
 void BinaryControl_Init(UART_HandleTypeDef *host_uart)
 {
     binary_host_uart = host_uart;
+    host_mobile_endpoint = NULL;
     HostUartTx_Init(host_uart);
     host_stop_latched = 0U;
     host_binary_heartbeat_count = 0U;
@@ -4335,6 +4402,10 @@ void BinaryControl_Init(UART_HandleTypeDef *host_uart)
 void BinaryControl_Service(void)
 {
     uint32_t now_ms = HAL_GetTick();
+    if (host_mobile_endpoint != NULL)
+    {
+        actuator_mobile_poll(host_mobile_endpoint->supervisor, now_ms);
+    }
 
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
     if ((host_v2_coordinated_stop_pending != 0U) ||
@@ -4348,7 +4419,7 @@ void BinaryControl_Service(void)
     {
         /* No response is trustworthy after a DMA/queue fault. Latch HOLD
          * before parsing or applying another host command. */
-        host_stop_latched = 1U;
+        BinaryControl_LatchStop();
         Host_AbortBufferedExecution(
             ACTUATOR_BUFFERED_REASON_CONNECTION_LOSS,
             0U
@@ -4366,7 +4437,7 @@ void BinaryControl_Service(void)
         ((uint32_t)(now_ms - host_binary_last_heartbeat_ms) >
             HOST_BINARY_HEARTBEAT_TIMEOUT_MS))
     {
-        host_stop_latched = 1U;
+        BinaryControl_LatchStop();
     }
 
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
@@ -4384,7 +4455,7 @@ void BinaryControl_Service(void)
              HOST_BINARY_HEARTBEAT_TIMEOUT_MS)))
 #endif
     {
-        host_stop_latched = 1U;
+        BinaryControl_LatchStop();
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
         (void)Host_PerformV2CoordinatedStop(1U);
 #else
@@ -4400,7 +4471,7 @@ void BinaryControl_Service(void)
     actuator_safety_tick(&host_binary_safety, now_ms);
     if (host_binary_safety.state == ACTUATOR_STATE_HOLD)
     {
-        host_stop_latched = 1U;
+        BinaryControl_LatchStop();
     }
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
     if ((host_stop_latched != 0U) &&
@@ -4460,7 +4531,7 @@ void BinaryControl_HandleHostUartError(void)
     {
         (void)actuator_safety_request_hold(&host_binary_safety);
     }
-    host_stop_latched = 1U;
+    BinaryControl_LatchStop();
 }
 
 uint8_t BinaryControl_StopIsLatched(void)
@@ -4470,7 +4541,13 @@ uint8_t BinaryControl_StopIsLatched(void)
 
 void BinaryControl_LatchStop(void)
 {
+    MobileServoOutput_Stop();
+    actuator_lift_endpoint_stop(MobileBoard_LiftEndpoint());
     host_stop_latched = 1U;
+    if (host_mobile_endpoint != NULL)
+    {
+        actuator_mobile_stop(host_mobile_endpoint->supervisor);
+    }
 }
 
 void BinaryControl_ClearStopLatch(void)

@@ -139,6 +139,7 @@ int main(void)
         ACTUATOR_BIMANUAL_GOAL_MAP_OK) return 16;
     if (left_raw[1] != 91U || left_raw[2] != 286U) return 17;
     if (failed_joint != UINT8_MAX) return 18;
+    if (BimanualOperationalLimits_Get((BimanualArm)-1, 0U) != 0) return 19;
     return 0;
 }
 ''',

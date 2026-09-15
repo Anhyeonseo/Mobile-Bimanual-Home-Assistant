@@ -5,6 +5,7 @@
 | 구성 요소 | 위치 | License |
 |---|---|---|
 | TheRobotStudio SO-101 URDF geometry and STL meshes (commit `fda892cba81032c46c40976a48c9ceadbf40a9ca`) | `ros2_ws/src/so101_description` | Apache-2.0; package README and root `LICENSE` 참조 |
+| Anhyeonseo/Bimanual-Pick-And-Place (commit `b3d7a3714f134e760a4d146039686c08eeaa622d`) | `home_robot_tasks/grasp_yaw.py`, `classical.py`; 원본·수정 목록은 `config/pnp_source.json` | Apache-2.0; 이동식 팔 장착 FK와 경로 경계를 수정 |
 | ARM CMSIS Core | `firmware/stm32_g474_single_arm/Drivers/CMSIS` | Apache-2.0, 해당 디렉터리의 `LICENSE.txt` 참조 |
 | STM32G4 CMSIS Device | `firmware/stm32_g474_single_arm/Drivers/CMSIS/Device/ST/STM32G4xx` | Apache-2.0, 해당 디렉터리의 `LICENSE.txt` 참조 |
 | STM32G4 HAL Driver | `firmware/stm32_g474_single_arm/Drivers/STM32G4xx_HAL_Driver` | BSD-3-Clause, 해당 디렉터리의 `LICENSE.txt` 참조 |

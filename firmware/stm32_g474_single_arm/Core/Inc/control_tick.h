@@ -2,6 +2,7 @@
 #define CONTROL_TICK_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 /*
  * F3.0 reserves TIM6 as the sole 5 ms control-clock source, but deliberately
@@ -25,6 +26,8 @@ typedef struct
     uint32_t missed_count;
 } ControlTickEvent;
 
+/* Non-consuming, atomic observation of the last real timer interrupt. */
+bool ControlTick_PeekEpoch(uint32_t *epoch_us);
 void ControlTick_Init(void);
 void ControlTick_OnInterrupt(void);
 void ControlTick_Reset(void);
