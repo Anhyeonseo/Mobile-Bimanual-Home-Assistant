@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ALOHA · 집으로</title><link rel="stylesheet" href="/app.css"><script src="/map.js" defer></script><script src="/app.js" defer></script></head>
+<body><header><a href="/" class="brand">ALOHA <span>HOME</span></a><span class="badge">PC 시뮬레이션</span></header>
+<main><section id="connect"><h1>집 안의 목적지를 선택하세요.</h1><p>접속 키를 입력하면 지도가 열립니다. 키는 이 화면의 메모리에만 보관됩니다.</p><form id="login"><label for="token">접속 키</label><div class="row"><input id="token" type="password" autocomplete="off" minlength="32" required><button>연결</button></div></form></section>
+<section id="workspace" hidden><div class="heading"><div><p class="eyebrow">우리 집 지도</p><h1>어디로 갈까요?</h1></div><button id="disconnect" class="secondary">연결 해제</button></div><p id="map-label"></p><div class="map-wrap"><canvas id="map" aria-label="입체 지도. 바닥을 눌러 목적지를 선택하세요."></canvas><div class="legend"><span>바닥을 눌러 선택</span><span>짙은 블록: 장애물</span></div></div>
+<div class="controls"><div><strong id="selection">목적지를 선택하세요</strong><p>가구 위와 미확인 영역은 선택할 수 없어요.</p></div><label>도착 방향 <output id="angle-label">0°</output><input id="angle" type="range" min="-180" max="180" step="5" value="0"></label><div class="row"><button id="preview" class="secondary" disabled>경로 확인</button><button id="go" disabled>여기로 이동</button><button id="cancel" class="danger" disabled>이동 취소</button></div></div>
+<section class="status"><h2 id="status-title">연결됨</h2><p id="status-detail">목적지를 선택하고 경로를 확인하세요.</p><p id="simulation-note">합성 지도로 실행하는 소프트웨어 시험입니다. 실제 로봇은 움직이지 않습니다.</p></section></section>
+<p id="error" role="alert"></p></main><footer>ALOHA Mini 1 · 이동 중에는 취소 후 새 목적지를 선택할 수 있어요.</footer></body></html>

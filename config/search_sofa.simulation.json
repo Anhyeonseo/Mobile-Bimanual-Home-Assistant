@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "mode": "simulation",
+  "description": "Synthetic lift-mounted D415 search; distances, settling and confidence are PC test candidates, not calibrated hardware limits. View IDs require a future checked Nav2/lift adapter.",
+  "object_id": "remote_control",
+  "location": "sofa",
+  "scene_revision": "synthetic-sofa-v1",
+  "camera": {
+    "model": "D415",
+    "camera_frame": "camera_color_optical_frame",
+    "root_frame": "base_link",
+    "calibration_id": "simulation-only",
+    "width": 1280,
+    "height": 720,
+    "minimum_depth_m": 0.5,
+    "maximum_depth_m": 3.0,
+    "settle_s": 0.25,
+    "maximum_age_s": 0.5,
+    "maximum_tf_skew_s": 0.02
+  },
+  "viewpoints": [
+    {"view_id": "sofa_front", "location": "sofa", "expected_regions": ["seat_left", "seat_right", "armrest"]},
+    {"view_id": "sofa_left", "location": "sofa", "expected_regions": ["seat_left", "armrest"]},
+    {"view_id": "sofa_high", "location": "sofa", "expected_regions": ["seat_right", "armrest"]}
+  ]
+}

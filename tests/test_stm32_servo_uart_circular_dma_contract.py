@@ -89,14 +89,16 @@ def test_transaction_lazy_arm_requires_idle_high_stability() -> None:
 
 
 def test_dma_is_transaction_scoped_and_disarmed_after_success() -> None:
-    read_start = SERVO_BUS.rindex("HAL_StatusTypeDef Servo_ReadData(")
-    write_start = SERVO_BUS.index("HAL_StatusTypeDef Servo_WriteData(", read_start)
-    position_start = SERVO_BUS.index("HAL_StatusTypeDef Servo_ReadPosition(", write_start)
+    read_start = SERVO_BUS.rindex("HAL_StatusTypeDef Servo_ReadDataOwned(")
+    write_start = SERVO_BUS.index("HAL_StatusTypeDef Servo_WriteDataOwned(", read_start)
+    position_start = SERVO_BUS.index(
+        "HAL_StatusTypeDef Servo_ReadPosition(", write_start
+    )
     read_path = SERVO_BUS[read_start:write_start]
     write_path = SERVO_BUS[write_start:position_start]
     for path in (read_path, write_path):
         assert path.index("ServoBus_PrepareTransaction(") < path.index(
-            "HAL_UART_Transmit("
+            "ServoTransport_Transmit("
         )
         assert "ServoBus_DisarmReceiver()" in path
         assert "HAL_UARTEx_ReceiveToIdle_DMA(" not in path
@@ -137,14 +139,10 @@ def test_failure_snapshot_is_captured_before_ring_clear() -> None:
 
 
 def test_hal_error_abort_is_disabled_and_dma_gate_checks_hardware() -> None:
-    policy = function_body(
-        SERVO_BUS, "static void ServoBus_DisableHalErrorAbort(void)"
-    )
+    policy = function_body(SERVO_BUS, "static void ServoBus_DisableHalErrorAbort(void)")
     assert "USART_CR1_PEIE | USART_CR1_RTOIE" in policy
     assert "USART_CR3_EIE" in policy
-    gate = function_body(
-        SERVO_BUS, "static uint8_t ServoBus_DmaHardwareActive(void)"
-    )
+    gate = function_body(SERVO_BUS, "static uint8_t ServoBus_DmaHardwareActive(void)")
     for condition in (
         "servo_bus_health.dma_started == 0U",
         "servo_uart_handle->RxState == HAL_UART_STATE_BUSY_RX",
@@ -155,8 +153,8 @@ def test_hal_error_abort_is_disabled_and_dma_gate_checks_hardware() -> None:
 
 
 def test_error_policy_hard_resyncs_fe_ore_rto_and_dma() -> None:
-    read_start = SERVO_BUS.rindex("HAL_StatusTypeDef Servo_ReadData(")
-    write_start = SERVO_BUS.index("HAL_StatusTypeDef Servo_WriteData(", read_start)
+    read_start = SERVO_BUS.rindex("HAL_StatusTypeDef Servo_ReadDataOwned(")
+    write_start = SERVO_BUS.index("HAL_StatusTypeDef Servo_WriteDataOwned(", read_start)
     read_path = SERVO_BUS[read_start:write_start]
     assert "NE/PE bytes remain checksum-gated" in read_path
     assert "ServoRxWindow_HardResyncRequired(" in read_path
@@ -188,7 +186,7 @@ def test_buffered_setpoint_hot_path_never_opens_an_rx_transaction() -> None:
     packet is transmitted without arming, recovering, or delaying.
     """
     sync_write = function_body(
-        SERVO_BUS, "HAL_StatusTypeDef Servo_SyncWritePositions("
+        SERVO_BUS, "HAL_StatusTypeDef Servo_SyncWritePositionsOwned("
     )
     for blocking_call in (
         "ServoBus_PrepareTransaction(",
@@ -200,7 +198,7 @@ def test_buffered_setpoint_hot_path_never_opens_an_rx_transaction() -> None:
         "HAL_Delay(",
     ):
         assert blocking_call not in sync_write
-    assert "HAL_UART_Transmit(" in sync_write
+    assert "ServoTransport_Transmit(" in sync_write
     executor = function_body(
         BINARY_CONTROL, "static void Host_ServiceBufferedExecution(void)"
     )

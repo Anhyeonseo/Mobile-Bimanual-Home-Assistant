@@ -70,6 +70,8 @@ class StreamMessageTypeV2(IntEnum):
     TRACKING_DIAGNOSTICS = 60
     GET_FEEDBACK_SNAPSHOT = 61
     FEEDBACK_SNAPSHOT = 62
+    MOBILE_REQUEST = 64
+    MOBILE_RESPONSE = 65
 
 
 class BatchKindV2(IntEnum):

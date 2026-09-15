@@ -1,0 +1,3 @@
+# Optional P&P geometry reuse; core command/executor tests do not need these.
+numpy==1.26.4
+urdf-parser-py==0.0.4

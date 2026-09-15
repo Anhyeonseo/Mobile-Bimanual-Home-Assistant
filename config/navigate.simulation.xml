@@ -1,0 +1,9 @@
+<!-- PC baseline: real Nav2 compute/follow actions, no untested recovery motions. -->
+<root BTCPP_format="4" main_tree_to_execute="Navigate">
+  <BehaviorTree ID="Navigate">
+    <Sequence>
+      <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased" error_code_id="{compute_path_error_code}"/>
+      <FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="goal_checker" error_code_id="{follow_path_error_code}"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

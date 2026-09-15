@@ -6,15 +6,15 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVO_BUS = (
-    ROOT / "firmware/stm32_g474_single_arm/Core/Src/servo_bus.c"
-).read_text(encoding="utf-8")
+SERVO_BUS = (ROOT / "firmware/stm32_g474_single_arm/Core/Src/servo_bus.c").read_text(
+    encoding="utf-8"
+)
 CONFIG = (
     ROOT / "firmware/stm32_g474_single_arm/Core/Inc/single_arm_config.h"
 ).read_text(encoding="utf-8")
-BINARY = (
-    ROOT / "firmware/stm32_g474_single_arm/Core/Src/binary_control.c"
-).read_text(encoding="utf-8")
+BINARY = (ROOT / "firmware/stm32_g474_single_arm/Core/Src/binary_control.c").read_text(
+    encoding="utf-8"
+)
 
 
 def test_native_response_parser_fault_injection(tmp_path: Path) -> None:
@@ -33,7 +33,12 @@ def test_native_response_parser_fault_injection(tmp_path: Path) -> None:
             "-Werror",
             "-I",
             str(ROOT / "firmware/stm32_g474_single_arm/Core/Inc"),
-            str(ROOT / "firmware/stm32_g474_single_arm/Core/Src/servo_response_parser.c"),
+            "-I",
+            str(ROOT / "firmware/stm32_actuator/include"),
+            str(ROOT / "firmware/stm32_actuator/src/sts3215_response.c"),
+            str(
+                ROOT / "firmware/stm32_g474_single_arm/Core/Src/servo_response_parser.c"
+            ),
             str(ROOT / "tests/native/test_servo_response_parser.c"),
             "-o",
             str(executable),
@@ -60,7 +65,12 @@ def test_native_circular_dma_window_fault_injection(tmp_path: Path) -> None:
             "-Werror",
             "-I",
             str(ROOT / "firmware/stm32_g474_single_arm/Core/Inc"),
-            str(ROOT / "firmware/stm32_g474_single_arm/Core/Src/servo_response_parser.c"),
+            "-I",
+            str(ROOT / "firmware/stm32_actuator/include"),
+            str(ROOT / "firmware/stm32_actuator/src/sts3215_response.c"),
+            str(
+                ROOT / "firmware/stm32_g474_single_arm/Core/Src/servo_response_parser.c"
+            ),
             str(ROOT / "firmware/stm32_g474_single_arm/Core/Src/servo_rx_window.c"),
             str(ROOT / "tests/native/test_servo_rx_window.c"),
             "-o",
@@ -74,7 +84,9 @@ def test_native_circular_dma_window_fault_injection(tmp_path: Path) -> None:
 
 def test_uart_recovery_clears_all_blocking_rx_faults() -> None:
     assert "HAL_UART_AbortReceive(servo_uart_handle)" in SERVO_BUS
-    assert "ATOMIC_CLEAR_BIT(servo_uart_handle->Instance->CR1, USART_CR1_RE)" in SERVO_BUS
+    assert (
+        "ATOMIC_CLEAR_BIT(servo_uart_handle->Instance->CR1, USART_CR1_RE)" in SERVO_BUS
+    )
     assert "ATOMIC_SET_BIT(servo_uart_handle->Instance->CR1, USART_CR1_RE)" in SERVO_BUS
     for flag in (
         "UART_CLEAR_OREF",
@@ -92,8 +104,8 @@ def test_reads_use_transaction_scoped_circular_dma_window() -> None:
     assert "SERVO_BUS_READ_TIMEOUT_MS UINT32_C(50)" in SERVO_BUS
     assert "SERVO_BUS_DMA_RING_CAPACITY UINT16_C(256)" in SERVO_BUS
     assert "HAL_UARTEx_ReceiveToIdle_DMA(" in SERVO_BUS
-    read_start = SERVO_BUS.rindex("HAL_StatusTypeDef Servo_ReadData(")
-    write_start = SERVO_BUS.index("HAL_StatusTypeDef Servo_WriteData(", read_start)
+    read_start = SERVO_BUS.rindex("HAL_StatusTypeDef Servo_ReadDataOwned(")
+    write_start = SERVO_BUS.index("HAL_StatusTypeDef Servo_WriteDataOwned(", read_start)
     read_body = SERVO_BUS[read_start:write_start]
     assert "HAL_UART_Receive(" not in read_body
     assert "HAL_UARTEx_ReceiveToIdle(" not in read_body
@@ -119,7 +131,7 @@ def test_uart_diagnostics_map_all_receive_faults() -> None:
 
 
 def test_partial_write_reply_drain_is_removed() -> None:
-    write_start = SERVO_BUS.rindex("HAL_StatusTypeDef Servo_WriteData(")
+    write_start = SERVO_BUS.rindex("HAL_StatusTypeDef Servo_WriteDataOwned(")
     write_end = SERVO_BUS.rindex("HAL_StatusTypeDef Servo_ReadPosition(")
     write_body = SERVO_BUS[write_start:write_end]
     assert "HAL_UART_Receive(" not in write_body

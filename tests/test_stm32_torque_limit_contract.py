@@ -38,7 +38,7 @@ def test_payload_torque_caps_and_watchdogs_are_fixed() -> None:
 
 
 def test_servo_table_uses_named_payload_torque_caps() -> None:
-    source = SERVO_BUS.read_text(encoding="utf-8")
+    source = SERVO_BUS.with_name("servo_joint_config.c").read_text(encoding="utf-8")
     assert source.count("SERVO_SHOULDER_TORQUE_LIMIT_RAW") == 1
     assert source.count("SERVO_ELBOW_TORQUE_LIMIT_RAW") == 1
     assert "\"SHOULDER\"" in source

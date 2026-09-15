@@ -125,6 +125,12 @@ set(CORE_SOURCES
     "${CORE_DIR}/Src/host_uart_tx.c"
     "${CORE_DIR}/Src/main.c"
     "${CORE_DIR}/Src/servo_bus.c"
+    "${CORE_DIR}/Src/servo_transport.c"
+    "${CORE_DIR}/Src/mobile_servo_output.c"
+    "${CORE_DIR}/Src/mobile_servo_feedback.c"
+    "${CORE_DIR}/Src/mobile_boot_identity.c"
+    "${CORE_DIR}/Src/mobile_board.c"
+    "${CORE_DIR}/Src/servo_joint_config.c"
     "${CORE_DIR}/Src/right_servo_bus.c"
     "${CORE_DIR}/Src/servo_response_parser.c"
     "${CORE_DIR}/Src/servo_rx_window.c"
@@ -157,6 +163,22 @@ set(HAL_SOURCES
 )
 
 set(ACTUATOR_SOURCES
+    "${ACTUATOR_CORE_DIR}/src/shared_bus.c"
+    "${ACTUATOR_CORE_DIR}/src/bus_schedule.c"
+    "${ACTUATOR_CORE_DIR}/src/lift_endpoint.c"
+    "${ACTUATOR_CORE_DIR}/src/device_startup.c"
+    "${ACTUATOR_CORE_DIR}/src/mobile_feedback.c"
+    "${ACTUATOR_CORE_DIR}/src/sts3215_response.c"
+    "${ACTUATOR_CORE_DIR}/src/mobile_output.c"
+    "${ACTUATOR_CORE_DIR}/src/mobile_supervisor.c"
+    "${ACTUATOR_CORE_DIR}/src/mobile_wire.c"
+    "${ACTUATOR_CORE_DIR}/src/mobile_endpoint.c"
+    "${ACTUATOR_CORE_DIR}/src/mobile_framed.c"
+    "${ACTUATOR_CORE_DIR}/src/lift_controller.c"
+    "${ACTUATOR_CORE_DIR}/src/bus_router.c"
+    "${ACTUATOR_CORE_DIR}/src/system_stop.c"
+    "${ACTUATOR_CORE_DIR}/src/motor_groups.c"
+    "${ACTUATOR_CORE_DIR}/src/sts3215_packet.c"
     "${ACTUATOR_CORE_DIR}/src/buffered_command_route.c"
     "${ACTUATOR_CORE_DIR}/src/buffered_executor.c"
     "${ACTUATOR_CORE_DIR}/src/calibration.c"
@@ -221,7 +243,6 @@ if(BIMANUAL_DISPATCH_REFACTOR_CANDIDATE)
         PRIVATE
             "${CORE_DIR}/Src/bimanual_operational_limits.c"
             "${ACTUATOR_CORE_DIR}/src/bimanual_goal_map.c"
-            "${ACTUATOR_CORE_DIR}/src/sts3215_packet.c"
     )
     target_compile_definitions(
         "${TARGET_NAME}"
@@ -251,7 +272,6 @@ if(BIMANUAL_DMA_DISPATCH_CANDIDATE OR
             "${ACTUATOR_CORE_DIR}/src/stream_contract_v2.c"
             "${ACTUATOR_CORE_DIR}/src/stream_executor_v2.c"
             "${ACTUATOR_CORE_DIR}/src/stream_session_v2.c"
-            "${ACTUATOR_CORE_DIR}/src/sts3215_packet.c"
     )
     target_compile_definitions(
         "${TARGET_NAME}"
@@ -308,7 +328,7 @@ if(BIMANUAL_DMA_DISPATCH_CANDIDATE OR
                 target_compile_definitions(
                     "${TARGET_NAME}"
                     PRIVATE
-                        HOST_BINARY_FIRMWARE_VERSION=0x00024809UL
+                        HOST_BINARY_FIRMWARE_VERSION=0x00024903UL
                         HOST_BIMANUAL_RESIDENT_FINITE_BUILD=1U
                         HOST_BIMANUAL_FEEDBACK_SNAPSHOT_BUILD=1U
                         HOST_BIMANUAL_TERMINAL_SETTLE_BUILD=1U
@@ -560,6 +580,15 @@ target_link_options(
         -Wl,--end-group
 )
 
+# Refuse firmware/host range drift even in a local build outside CI.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_custom_target(check_joint_limits
+    COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/setup/firmware/generate_joint_limits.py" --check
+    VERBATIM
+)
+add_dependencies("${TARGET_NAME}" check_joint_limits)
+
 set_target_properties(
     "${TARGET_NAME}"
     PROPERTIES
@@ -580,3 +609,8 @@ add_custom_command(
     COMMAND "${CMAKE_SIZE}" "$<TARGET_FILE:${TARGET_NAME}>"
     VERBATIM
 )
+
+set(MOBILE_BOARD_PROFILE_HEADER "" CACHE FILEPATH "Explicit commissioned mobile profile header; empty disables boot setup")
+if(MOBILE_BOARD_PROFILE_HEADER)
+    target_compile_definitions(${TARGET_NAME} PRIVATE MOBILE_BOARD_PROFILE_HEADER="${MOBILE_BOARD_PROFILE_HEADER}")
+endif()

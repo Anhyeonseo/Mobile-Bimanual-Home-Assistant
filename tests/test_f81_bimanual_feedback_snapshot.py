@@ -153,5 +153,5 @@ def test_f81_ros_contract_publishes_standard_and_fresh_feedback() -> None:
     assert '"~/joint_states"' in node
     assert '"~/feedback"' in node
     assert "snapshot.sample_age_ms" in node
-    assert "F8_FIRMWARE_VERSION = 0x00024809" in adapter
+    assert "F8_FIRMWARE_VERSION = 0x00024903" in adapter
     assert "def feedback_snapshot" in adapter

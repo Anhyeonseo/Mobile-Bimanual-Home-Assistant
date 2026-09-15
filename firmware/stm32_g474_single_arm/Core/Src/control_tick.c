@@ -4,8 +4,8 @@
 #include "timebase.h"
 
 static ControlTickSnapshot control_tick;
-static uint32_t previous_started_us;
-static uint8_t previous_started_valid;
+static volatile uint32_t previous_started_us;
+static volatile uint8_t previous_started_valid;
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
 static volatile uint8_t control_tick_pending;
 static volatile uint32_t control_tick_pending_ms;
@@ -149,3 +149,14 @@ void ControlTick_ClearPending(void)
     }
 }
 #endif
+
+bool ControlTick_PeekEpoch(uint32_t *epoch_us)
+{
+    if (epoch_us == NULL) return false;
+    const uint32_t mask = __get_PRIMASK();
+    __disable_irq();
+    bool valid = previous_started_valid != 0U;
+    *epoch_us = previous_started_us;
+    if (mask == 0U) __enable_irq();
+    return valid;
+}

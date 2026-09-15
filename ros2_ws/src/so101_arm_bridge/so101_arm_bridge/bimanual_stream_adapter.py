@@ -7,7 +7,6 @@ FSM, or a learned-policy process can all translate their output into the same
 
 from __future__ import annotations
 
-import json
 import math
 import time
 from dataclasses import dataclass
@@ -43,7 +42,7 @@ CANONICAL_JOINT_NAMES = (
     "right_wrist_roll_joint",
     "right_gripper_joint",
 )
-F8_FIRMWARE_VERSION = 0x00024809
+F8_FIRMWARE_VERSION = 0x00024903
 F8_CAPABILITIES = 0xEFFFFFFF
 CALIBRATION_HASH = 0x2D90167E
 PROTOCOL_VERSION = 2
@@ -150,56 +149,19 @@ class StreamTransportV2(Protocol):
     def safe_stop(self): ...
 
 
-def _flatten_limit_entries(document: dict) -> tuple[dict, ...]:
-    entries = []
-    for arm in ("left", "right"):
-        arm_limits = document["arms"][arm]
-        for joint in (
-            "base",
-            "shoulder",
-            "elbow",
-            "wrist_flex",
-            "wrist_roll",
-            "gripper",
-        ):
-            entries.append(arm_limits[joint])
-    return tuple(entries)
-
-
 def load_operational_limits(path: Path) -> OperationalLimits:
-    """Load only the operator-approved full task envelope."""
-    document = json.loads(path.read_text(encoding="utf-8"))
-    if (
-        document.get("record_kind") != "bimanual_operational_limits"
-        or document.get("status") != "OPERATOR_VERIFIED_FULL_TASK_ENVELOPE"
-        or document.get("operator_approved") is not True
-        or document.get("firmware_limit_authorized") is not True
-    ):
-        raise BimanualStreamContractError(
-            "operational-limit document is not operator-authorized"
-        )
-    joint_names = tuple(document.get("joint_order", ()))
-    if joint_names != CANONICAL_JOINT_NAMES:
-        raise BimanualStreamContractError(
-            "operational-limit joint order does not match the 12-axis contract"
-        )
+    """Load the calibrated, authorized envelope without numeric coercion."""
+    from .limit_manifest import read_limit_manifest
+
     try:
-        entries = _flatten_limit_entries(document)
-        minimum = tuple(int(entry["minimum_urad"]) for entry in entries)
-        maximum = tuple(int(entry["maximum_urad"]) for entry in entries)
-    except (KeyError, TypeError, ValueError) as error:
-        raise BimanualStreamContractError(
-            "operational-limit document is incomplete"
-        ) from error
-    if len(minimum) != JOINT_COUNT or any(
-        lower >= upper for lower, upper in zip(minimum, maximum, strict=True)
-    ):
-        raise BimanualStreamContractError("operational limits are invalid")
+        document, entries = read_limit_manifest(path)
+    except (ValueError, TypeError) as error:
+        raise BimanualStreamContractError(str(error)) from error
     source = document.get("source", {})
     return OperationalLimits(
-        joint_names=joint_names,
-        minimum_urad=minimum,
-        maximum_urad=maximum,
+        joint_names=tuple(document["joint_order"]),
+        minimum_urad=tuple(entry["minimum_urad"] for entry in entries),
+        maximum_urad=tuple(entry["maximum_urad"] for entry in entries),
         source_sha256=source.get("sha256") if isinstance(source, dict) else None,
     )
 

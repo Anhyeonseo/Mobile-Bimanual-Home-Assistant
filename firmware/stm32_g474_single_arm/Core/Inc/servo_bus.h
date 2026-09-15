@@ -3,26 +3,11 @@
 
 #include "stm32g4xx_hal.h"
 #include "single_arm_config.h"
+#include "servo_joint_config.h"
 
 #include <stdint.h>
 
 #define SERVO_BUS_FAILURE_SNAPSHOT_MAX_BYTES UINT8_C(16)
-
-typedef struct
-{
-    uint8_t id;
-    const char *name;
-    uint8_t motion_enabled;
-    uint16_t home_position;
-    uint16_t min_position;
-    uint16_t max_position;
-    uint8_t p_gain;
-    uint8_t d_gain;
-    int8_t test_direction;
-    uint16_t test_delta;
-    uint32_t duration_ms;
-    uint16_t torque_limit;
-} ServoJointConfig;
 
 typedef uint8_t (*ServoStopRequestedFn)(void);
 typedef void (*ServoReadFailureFn)(uint8_t servo_id);
@@ -122,8 +107,6 @@ typedef struct
     uint32_t maximum_reply_latency_ms;
 } ServoInMotionTelemetrySnapshot;
 
-extern const ServoJointConfig servo_joints[SINGLE_ARM_JOINT_COUNT];
-extern const uint8_t servo_joint_count;
 extern uint8_t servo_last_all_read_failed_id;
 
 void ServoBus_Init(

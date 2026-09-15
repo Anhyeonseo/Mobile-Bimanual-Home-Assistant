@@ -4,6 +4,7 @@
 
 #include "actuator_core/cobs.h"
 #include "actuator_core/crc32c.h"
+#include "actuator_core/mobile_framed.h"
 #if defined(ACTUATOR_ENABLE_STREAM_V2_MESSAGES) && \
     ACTUATOR_ENABLE_STREAM_V2_MESSAGES
 #include "actuator_core/stream_contract_v2.h"
@@ -34,6 +35,10 @@ static uint32_t read_u32_le(const uint8_t *source) {
 
 bool actuator_protocol_message_is_known(uint8_t message_type) {
     switch (message_type) {
+#if ACTUATOR_PROTOCOL_VERSION == 2
+        case ACTUATOR_V2_MSG_MOBILE_REQUEST:
+        case ACTUATOR_V2_MSG_MOBILE_RESPONSE:
+#endif
         case ACTUATOR_MSG_HELLO_REQUEST:
         case ACTUATOR_MSG_HELLO_RESPONSE:
         case ACTUATOR_MSG_HEARTBEAT:

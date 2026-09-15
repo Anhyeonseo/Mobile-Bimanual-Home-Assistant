@@ -32,6 +32,23 @@ ros2 launch so101_arm_bridge bimanual_stream.launch.py motion_authorized:=false
 - `~/feedback`: `BimanualJointFeedback`, 축별 측정 나이와 유효 축 표시.
 - `~/status`: 상태 조회 서비스. 준비 상태·소유자·오류 정보는 구현의 응답을 따른다.
 
-팔 브릿지는 모터 UART를 단독 소유한다. 베이스 이동, 카메라 인식, 작업 성공 판정은 상위 기능의 책임이다. 관절 피드백만으로 물체의 집기·놓기를 확인할 수 없다.
+ROS 브릿지는 STM32로 가는 host USB UART를 단독 소유하고, 모터 UART는 STM32가 소유한다. 베이스 이동, 카메라 인식, 작업 성공 판정은 상위 기능의 책임이다. 관절 피드백만으로 물체의 집기·놓기를 확인할 수 없다.
 
-현재 어댑터는 펌웨어 `0x00024809`와 보존된 관절 한계를 요구한다. 이는 기존 펌웨어 계약이며 새 모바일 플랫폼의 실물 동작 승인이 아니다. 하드웨어 변경 시 명령·충돌·정지·관측 조건을 다시 확인한다.
+현재 어댑터는 펌웨어 `0x00024903`와 보존된 관절 한계를 요구한다. 이는 이번 오프라인 소프트웨어 후보 계약이며 이전 `0x00024809`의 실기 승인과 구분한다. 이 버전도 새 모바일 플랫폼의 실물 동작 승인이 아니다. 하드웨어 변경 시 명령·충돌·정지·관측 조건을 다시 확인한다.
+
+
+## 모바일 명령 연결 상태
+
+`MobileClient(MobileV2Exchange(existing_transport), clock_ms)`는 팔 transport와
+같은 포트·transaction lock을 공유한다. Python→v2 COBS→실제 C parser→모바일
+endpoint/supervisor/router 왕복을 `test_mobile_framed_transport.py`에서 검사한다.
+여기서 팔 GET_STATE는 합성 응답이며 실물이나 실제 팔 executor 시험은 아니다.
+
+부분 송신은 오류로 반환하고 명령을 자동 재전송하지 않는다. USB 송신 완료의
+무기한 flush를 제거했고 sequence는 wrap 전에 거절한다. 각 직렬 읽기/쓰기는
+기존 finite timeout을 사용한다. 동기 요청 하나가 끝날 때까지 다른 요청은 기다리므로
+실제 모바일 운용 전에 서비스/ARM 같은 긴 요청과 주기 출력을 모드별로 분리해야 한다.
+
+실제 ROS node는 아직 모바일 client를 생성하거나 cmd_vel을 전달하지 않는다.
+보드 endpoint 기본값도 미연결이다. 주기 출력·실제 feedback·전체 stop/hold를
+연결한 뒤 같은 소유자 안에서 활성화해야 한다.

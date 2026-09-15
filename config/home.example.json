@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Plan-only sofa-to-bed example for ALOHA Mini 1; no measured poses, lift control or fine alignment.",
+  "description": "Plan-only sofa-to-bed example for ALOHA Mini 1; semantic alignment and lift phases, no measured poses or hardware execution.",
   "transport_mode": "carry_in_gripper",
   "rooms": {
     "living_room": {

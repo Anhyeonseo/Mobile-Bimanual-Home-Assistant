@@ -30,9 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE = ROOT / "firmware/stm32_g474_single_arm"
 SERVO_BUS = (FIRMWARE / "Core/Src/servo_bus.c").read_text(encoding="utf-8")
-BINARY_CONTROL = (
-    FIRMWARE / "Core/Src/binary_control.c"
-).read_text(encoding="utf-8")
+BINARY_CONTROL = (FIRMWARE / "Core/Src/binary_control.c").read_text(encoding="utf-8")
 CONFIG = (FIRMWARE / "Core/Inc/single_arm_config.h").read_text(encoding="utf-8")
 
 
@@ -118,9 +116,7 @@ def test_buffered_start_does_not_arm_motion_safety_polling() -> None:
     """
     assert BINARY_CONTROL.count("Servo_MotionSafetyBegin(") == 1
     arming = BINARY_CONTROL.index("Servo_MotionSafetyBegin(")
-    buffered_start = BINARY_CONTROL.index(
-        "actuator_buffered_command_route_start("
-    )
+    buffered_start = BINARY_CONTROL.index("actuator_buffered_command_route_start(")
     assert arming < buffered_start
 
 
@@ -135,9 +131,7 @@ def test_single_point_motion_keeps_its_monitoring() -> None:
 
 def test_buffered_hot_path_write_is_transmit_only() -> None:
     """5 ms sync-write 는 arm/recover/delay 를 지불하지 않아야 한다."""
-    body = function_body(
-        SERVO_BUS, "HAL_StatusTypeDef Servo_SyncWritePositions("
-    )
+    body = function_body(SERVO_BUS, "HAL_StatusTypeDef Servo_SyncWritePositionsOwned(")
     for blocking_call in (
         "ServoBus_PrepareTransaction(",
         "ServoBus_Recover(",

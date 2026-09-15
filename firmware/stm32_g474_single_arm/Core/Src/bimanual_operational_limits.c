@@ -11,6 +11,8 @@
  * workspace. Shoulder entries use unwrapped raw coordinates so 4095 -> 0 is
  * continuous. Gripper limits are servo-command bounds, not jaw-gap geometry.
  */
+/* BEGIN GENERATED OPERATIONAL LIMITS */
+/* config/bimanual_operational_limits.json SHA256: 436a5cfdc80aeaacfc4fd55812ec7ce102c7ecfe7443071484a942cad0946263 */
 static const BimanualOperationalLimit operational_limits
     [BIMANUAL_ARM_COUNT][BIMANUAL_OPERATIONAL_LIMIT_JOINT_COUNT / 2U] = {
     [BIMANUAL_ARM_LEFT] = {
@@ -30,6 +32,7 @@ static const BimanualOperationalLimit operational_limits
         {2048U, -1, {1907, 3299}, {-1919010,  216291}},
     },
 };
+/* END GENERATED OPERATIONAL LIMITS */
 
 /* Archived table for reproducible 0x00024100 no-output validation only. */
 static const actuator_v2_joint_limit_t j1l_shadow_limits[
@@ -53,7 +56,7 @@ const BimanualOperationalLimit *BimanualOperationalLimits_Get(
     uint8_t joint_index
 )
 {
-    if ((arm >= BIMANUAL_ARM_COUNT) ||
+    if (((unsigned int)arm >= BIMANUAL_ARM_COUNT) ||
         (joint_index >= (BIMANUAL_OPERATIONAL_LIMIT_JOINT_COUNT / 2U)))
     {
         return NULL;

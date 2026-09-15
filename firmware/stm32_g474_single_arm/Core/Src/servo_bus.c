@@ -1,4 +1,6 @@
+#include "servo_bus_reader.h"
 #include "servo_bus.h"
+#include "servo_transport.h"
 #include "actuator_core/sts3215_packet.h"
 #include "f0_metrics.h"
 #include "timebase.h"
@@ -29,6 +31,8 @@
 #define SERVO_IN_MOTION_TELEMETRY_TIMEOUT_MS UINT32_C(4)
 
 static UART_HandleTypeDef *servo_uart_handle = NULL;
+static uint32_t servo_service_token;
+static uint32_t servo_feedback_token;
 static ServoStopRequestedFn servo_stop_requested = NULL;
 static ServoReadFailureFn servo_read_failure = NULL;
 static volatile uint8_t servo_dma_rx_ring[SERVO_BUS_DMA_RING_CAPACITY]
@@ -168,18 +172,6 @@ static ServoMotionSafetyDiagnostics servo_motion_safety_diagnostics = {
     SERVO_MOTION_SAFETY_NONE, 0U, 0U, 0U, 0U, 0U
 };
 
-const ServoJointConfig servo_joints[SINGLE_ARM_JOINT_COUNT] = {
-    {1U, "BASE",        1U, 2048U, 1988U, 2610U, 16U, 32U,  1,  34U,  600U, 400U},
-    {2U, "SHOULDER",    1U, 2048U, 1988U, 3766U, 64U, 64U,  1,  34U, 1200U,
-        SERVO_SHOULDER_TORQUE_LIMIT_RAW},
-    {3U, "ELBOW",       1U, 2048U, 627U, 2258U, 56U, 64U, -1,  34U, 1000U,
-        SERVO_ELBOW_TORQUE_LIMIT_RAW},
-    {4U, "WRIST_FLEX",  1U, 2048U, 1194U, 2108U, 16U, 32U, -1,  34U,  800U, 400U},
-    {5U, "WRIST_ROLL",  1U, 2048U, 1874U, 2219U, 16U, 32U,  1,  34U,  500U, 250U},
-    {6U, "GRIPPER",     1U, 2048U, 1866U, 2048U, 16U, 32U, -1,  34U,  800U, 150U}
-};
-
-const uint8_t servo_joint_count = SINGLE_ARM_JOINT_COUNT;
 uint8_t servo_last_all_read_failed_id = 0U;
 
 void ServoBus_Init(
@@ -189,6 +181,7 @@ void ServoBus_Init(
 )
 {
     servo_uart_handle = servo_uart;
+    (void)ServoTransport_Register(servo_uart);
     servo_stop_requested = stop_requested;
     servo_read_failure = read_failure;
     servo_last_all_read_failed_id = 0U;
@@ -745,21 +738,6 @@ static ServoBusFailureReason ServoBus_MapRejectReason(
     }
 }
 
-static uint8_t Servo_Checksum(
-    const uint8_t *packet,
-    uint8_t last_index
-)
-{
-    uint8_t sum = 0U;
-
-    for (uint8_t i = 2U; i <= last_index; i++)
-    {
-        sum = (uint8_t)(sum + packet[i]);
-    }
-
-    return (uint8_t)(~sum);
-}
-
 void Servo_InMotionTelemetryBegin(void)
 {
     memset(&servo_in_motion_telemetry, 0, sizeof(servo_in_motion_telemetry));
@@ -769,18 +747,16 @@ void Servo_InMotionTelemetryBegin(void)
 
 void Servo_InMotionTelemetryEnd(void)
 {
-    if (servo_in_motion_telemetry.enabled != 0U)
+    if (servo_feedback_token == 0U && !ServoTransport_BeginCleanup(
+            servo_uart_handle, &servo_feedback_token)) return;
+    if (HAL_UART_AbortTransmit(servo_uart_handle) != HAL_OK ||
+        ServoBus_DisarmReceiver() != HAL_OK) return;
+    HAL_Delay(SERVO_BUS_RECOVERY_QUIET_MS);
+    if (ServoTransport_End(servo_uart_handle, servo_feedback_token, false) == HAL_OK)
     {
-        if (servo_uart_handle != NULL)
-        {
-            (void)HAL_UART_AbortTransmit(servo_uart_handle);
-        }
-        if (ServoBus_DmaHardwareActive() != 0U)
-        {
-            (void)ServoBus_DisarmReceiver();
-        }
+        memset(&servo_in_motion_telemetry, 0, sizeof(servo_in_motion_telemetry));
+        servo_feedback_token = 0U;
     }
-    memset(&servo_in_motion_telemetry, 0, sizeof(servo_in_motion_telemetry));
 }
 
 uint8_t Servo_InMotionTelemetryPending(void)
@@ -795,7 +771,7 @@ Servo_InMotionTelemetryGetSnapshot(void)
     return &servo_in_motion_snapshot;
 }
 
-HAL_StatusTypeDef Servo_InMotionTelemetryStart(
+static HAL_StatusTypeDef Servo_InMotionTelemetryStartOwned(
     uint8_t joint_index,
     uint32_t started_at_ms
 )
@@ -822,14 +798,11 @@ HAL_StatusTypeDef Servo_InMotionTelemetryStart(
     telemetry->servo_id = servo_id;
     telemetry->started_at_ms = started_at_ms;
     telemetry->tx_completed = 0U;
-    telemetry->request[0] = 0xFFU;
-    telemetry->request[1] = 0xFFU;
-    telemetry->request[2] = servo_id;
-    telemetry->request[3] = 0x04U;
-    telemetry->request[4] = 0x02U;
-    telemetry->request[5] = 56U;
-    telemetry->request[6] = 2U;
-    telemetry->request[7] = Servo_Checksum(telemetry->request, 6U);
+    if (actuator_sts3215_build_read(servo_id, 56U, 2U,
+            telemetry->request) != ACTUATOR_STS3215_PACKET_OK)
+    {
+        return HAL_ERROR;
+    }
     ServoRxWindow_Init(
         &telemetry->window,
         servo_id,
@@ -837,8 +810,8 @@ HAL_StatusTypeDef Servo_InMotionTelemetryStart(
         transaction_start_absolute
     );
 
-    HAL_StatusTypeDef status = HAL_UART_Transmit_IT(
-        servo_uart_handle,
+    HAL_StatusTypeDef status = ServoTransport_TransmitIT(
+        servo_uart_handle, servo_feedback_token,
         telemetry->request,
         sizeof(telemetry->request)
     );
@@ -852,6 +825,21 @@ HAL_StatusTypeDef Servo_InMotionTelemetryStart(
     telemetry->state = SERVO_IN_MOTION_TELEMETRY_TX_PENDING;
     servo_in_motion_snapshot.requested_samples++;
     return HAL_OK;
+}
+
+HAL_StatusTypeDef Servo_InMotionTelemetryStart(
+    uint8_t joint_index,
+    uint32_t started_at_ms
+)
+{
+    if (!ServoTransport_Begin(servo_uart_handle, ACTUATOR_BUS_WORK_FEEDBACK, &servo_feedback_token))
+        return HAL_BUSY;
+    HAL_StatusTypeDef status = Servo_InMotionTelemetryStartOwned(joint_index, started_at_ms);
+    if (status == HAL_OK) return status;
+    HAL_StatusTypeDef ended = ServoTransport_End(servo_uart_handle, servo_feedback_token, status != HAL_OK);
+    if (ended == HAL_OK) servo_feedback_token = 0U;
+    if (status == HAL_OK && ended != HAL_OK) return HAL_BUSY;
+    return status;
 }
 
 void Servo_InMotionTelemetryOnTxComplete(UART_HandleTypeDef *uart)
@@ -885,7 +873,7 @@ static HAL_StatusTypeDef ServoInMotionTelemetry_Fail(
     return status;
 }
 
-HAL_StatusTypeDef Servo_InMotionTelemetryPoll(
+static HAL_StatusTypeDef Servo_InMotionTelemetryPollOwned(
     uint32_t now_ms,
     const uint16_t commanded_positions[SINGLE_ARM_JOINT_COUNT]
 )
@@ -1036,6 +1024,26 @@ HAL_StatusTypeDef Servo_InMotionTelemetryPoll(
     return HAL_BUSY;
 }
 
+HAL_StatusTypeDef Servo_InMotionTelemetryPoll(
+    uint32_t now_ms,
+    const uint16_t commanded_positions[SINGLE_ARM_JOINT_COUNT]
+)
+{
+    HAL_StatusTypeDef status = Servo_InMotionTelemetryPollOwned(now_ms, commanded_positions);
+    if (servo_feedback_token != 0U && status != HAL_OK && status != HAL_BUSY)
+    {
+        Servo_InMotionTelemetryEnd();
+        return status;
+    }
+    if (servo_feedback_token != 0U && status != HAL_BUSY)
+    {
+        HAL_StatusTypeDef ended = ServoTransport_End(servo_uart_handle, servo_feedback_token, status != HAL_OK);
+        if (ended == HAL_OK) servo_feedback_token = 0U;
+        if (status == HAL_OK && ended != HAL_OK) return ended;
+    }
+    return status;
+}
+
 HAL_StatusTypeDef Servo_ReadPosition(
     uint8_t servo_id,
     uint16_t *position
@@ -1057,6 +1065,7 @@ HAL_StatusTypeDef Servo_WriteData(
 
 HAL_StatusTypeDef Servo_DisableTorqueAll(void)
 {
+    if (!ServoTransport_ServiceAllowed()) return HAL_ERROR;
     uint8_t torque_off[1] = {0U};
     HAL_StatusTypeDef result = HAL_OK;
 
@@ -1196,6 +1205,7 @@ HAL_StatusTypeDef Servo_CenterAtCurrentPosition(
     int16_t *offset_before
 )
 {
+    if (!ServoTransport_ServiceAllowed()) return HAL_ERROR;
     if ((position_before == NULL) ||
         (offset_before == NULL))
     {
@@ -1270,6 +1280,7 @@ HAL_StatusTypeDef Servo_WaitForPosition(
     uint16_t *actual_position
 )
 {
+    if (!ServoTransport_ServiceAllowed()) return HAL_ERROR;
     if (actual_position == NULL)
     {
         return HAL_ERROR;
@@ -1307,7 +1318,7 @@ HAL_StatusTypeDef Servo_WaitForPosition(
     return HAL_TIMEOUT;
 }
 
-HAL_StatusTypeDef Servo_ReadData(
+static HAL_StatusTypeDef Servo_ReadDataOwned(
     uint8_t servo_id,
     uint8_t start_address,
     uint8_t data_length,
@@ -1322,15 +1333,12 @@ HAL_StatusTypeDef Servo_ReadData(
         return HAL_ERROR;
     }
 
-    uint8_t request[8] = {
-        0xFFU, 0xFFU, 0x00U, 0x04U,
-        0x02U, 0x00U, 0x00U, 0x00U
-    };
-
-    request[2] = servo_id;
-    request[5] = start_address;
-    request[6] = data_length;
-    request[7] = Servo_Checksum(request, 6U);
+    uint8_t request[ACTUATOR_STS3215_READ_PACKET_SIZE];
+    if (actuator_sts3215_build_read(servo_id, start_address, data_length,
+            request) != ACTUATOR_STS3215_PACKET_OK)
+    {
+        return HAL_ERROR;
+    }
 
     uint32_t transaction_start_absolute = 0U;
     if (ServoBus_PrepareTransaction(
@@ -1342,8 +1350,8 @@ HAL_StatusTypeDef Servo_ReadData(
     }
     uint32_t transaction_start_tick = HAL_GetTick();
 
-    HAL_StatusTypeDef status = HAL_UART_Transmit(
-        servo_uart_handle,
+    HAL_StatusTypeDef status = ServoTransport_Transmit(
+        servo_uart_handle, servo_service_token,
         request,
         sizeof(request),
         SERVO_BUS_READ_TX_TIMEOUT_MS
@@ -1516,7 +1524,23 @@ HAL_StatusTypeDef Servo_ReadData(
     return HAL_TIMEOUT;
 }
 
-HAL_StatusTypeDef Servo_WriteData(
+HAL_StatusTypeDef Servo_ReadData(
+    uint8_t servo_id,
+    uint8_t start_address,
+    uint8_t data_length,
+    uint8_t *data
+)
+{
+    if (!ServoTransport_BeginService(servo_uart_handle, ACTUATOR_BUS_WORK_FEEDBACK, &servo_service_token))
+        return HAL_BUSY;
+    HAL_StatusTypeDef status = Servo_ReadDataOwned(servo_id, start_address, data_length, data);
+    HAL_StatusTypeDef ended = ServoTransport_End(servo_uart_handle, servo_service_token, status != HAL_OK);
+    if (ended == HAL_OK) servo_service_token = 0U;
+    if (status == HAL_OK && ended != HAL_OK) return HAL_BUSY;
+    return status;
+}
+
+static HAL_StatusTypeDef Servo_WriteDataOwned(
     uint8_t servo_id,
     uint8_t start_address,
     const uint8_t *data,
@@ -1531,26 +1555,13 @@ HAL_StatusTypeDef Servo_WriteData(
         return HAL_ERROR;
     }
 
-    uint8_t packet[23] = {0U};
-
-    packet[0] = 0xFFU;
-    packet[1] = 0xFFU;
-    packet[2] = servo_id;
-    packet[3] = (uint8_t)(data_length + 3U);
-    packet[4] = 0x03U;
-    packet[5] = start_address;
-
-    for (uint8_t i = 0U; i < data_length; i++)
+    uint8_t packet[ACTUATOR_STS3215_WRITE_PACKET_SIZE];
+    size_t packet_length = 0U;
+    if (actuator_sts3215_build_write(servo_id, start_address, data,
+            data_length, packet, &packet_length) != ACTUATOR_STS3215_PACKET_OK)
     {
-        packet[6U + i] = data[i];
+        return HAL_ERROR;
     }
-
-    uint8_t checksum_index = (uint8_t)(6U + data_length);
-
-    packet[checksum_index] = Servo_Checksum(
-        packet,
-        (uint8_t)(checksum_index - 1U)
-    );
 
     uint32_t transaction_start_absolute = 0U;
     if (ServoBus_PrepareTransaction(
@@ -1562,10 +1573,10 @@ HAL_StatusTypeDef Servo_WriteData(
     }
     (void)transaction_start_absolute;
 
-    HAL_StatusTypeDef status = HAL_UART_Transmit(
-        servo_uart_handle,
+    HAL_StatusTypeDef status = ServoTransport_Transmit(
+        servo_uart_handle, servo_service_token,
         packet,
-        (uint16_t)data_length + 7U,
+        (uint16_t)packet_length,
         100U
     );
 
@@ -1598,6 +1609,22 @@ HAL_StatusTypeDef Servo_WriteData(
     }
     servo_bus_health.success_count++;
     return HAL_OK;
+}
+
+HAL_StatusTypeDef Servo_WriteData(
+    uint8_t servo_id,
+    uint8_t start_address,
+    const uint8_t *data,
+    uint8_t data_length
+)
+{
+    if (!ServoTransport_BeginService(servo_uart_handle, ACTUATOR_BUS_WORK_ARM, &servo_service_token))
+        return HAL_BUSY;
+    HAL_StatusTypeDef status = Servo_WriteDataOwned(servo_id, start_address, data, data_length);
+    HAL_StatusTypeDef ended = ServoTransport_End(servo_uart_handle, servo_service_token, status != HAL_OK);
+    if (ended == HAL_OK) servo_service_token = 0U;
+    if (status == HAL_OK && ended != HAL_OK) return HAL_BUSY;
+    return status;
 }
 
 HAL_StatusTypeDef Servo_ReadPosition(
@@ -1867,6 +1894,7 @@ HAL_StatusTypeDef Servo_RunSmoothstep(
     uint32_t duration_ms
 )
 {
+    if (!ServoTransport_ServiceAllowed()) return HAL_ERROR;
     const uint32_t control_period_ms = 20U;
     uint8_t joint_mask = 0U;
 
@@ -1978,6 +2006,7 @@ HAL_StatusTypeDef Servo_ConfigureForTrajectory(
     uint16_t *initial_position
 )
 {
+    if (!ServoTransport_ServiceAllowed()) return HAL_ERROR;
     if (Servo_ReadPosition(
             servo_id,
             initial_position
@@ -2075,6 +2104,7 @@ void Servo_PositionSweepBegin(ServoPositionSweep *sweep)
 
 HAL_StatusTypeDef Servo_PositionSweepStep(ServoPositionSweep *sweep)
 {
+    if (!ServoTransport_ServiceAllowed()) return HAL_ERROR;
     if (sweep == NULL)
     {
         return HAL_ERROR;
@@ -2120,6 +2150,7 @@ HAL_StatusTypeDef Servo_ReadAllPositions(
     uint16_t positions[6]
 )
 {
+    if (!ServoTransport_ServiceAllowed()) return HAL_ERROR;
     if (positions == NULL)
     {
         return HAL_ERROR;
@@ -2140,8 +2171,7 @@ HAL_StatusTypeDef Servo_ReadAllPositions(
     return status;
 }
 
-#if HOST_BIMANUAL_DISPATCH_REFACTOR_BUILD
-HAL_StatusTypeDef Servo_SyncWritePositions(
+static HAL_StatusTypeDef Servo_SyncWritePositionsOwned(
     const uint16_t positions[6]
 )
 {
@@ -2169,8 +2199,8 @@ HAL_StatusTypeDef Servo_SyncWritePositions(
     }
 
     uint32_t started_us = Timebase_NowUs();
-    HAL_StatusTypeDef status = HAL_UART_Transmit(
-        servo_uart_handle,
+    HAL_StatusTypeDef status = ServoTransport_Transmit(
+        servo_uart_handle, servo_service_token,
         packet,
         (uint16_t)packet_length,
         100U
@@ -2178,60 +2208,20 @@ HAL_StatusTypeDef Servo_SyncWritePositions(
     F0Metrics_ObserveServoSyncWrite(Timebase_ElapsedUs(started_us));
     return status;
 }
-#else
+
 HAL_StatusTypeDef Servo_SyncWritePositions(
     const uint16_t positions[6]
 )
 {
-    if (positions == NULL)
-    {
-        return HAL_ERROR;
-    }
-
-    /*
-     * FEETECH protocol-0 SYNC WRITE:
-     * FF FF FE LEN 83 START_ADDR DATA_LEN [ID DATA...] CHECKSUM
-     */
-    uint8_t packet[26] = {0U};
-    uint8_t packet_index = 0U;
-
-    packet[0] = 0xFFU;
-    packet[1] = 0xFFU;
-    packet[2] = 0xFEU;
-    packet[3] = (uint8_t)(
-        4U + (servo_joint_count * 3U)
-    );
-    packet[4] = 0x83U;
-    packet[5] = 42U;
-    packet[6] = 2U;
-    packet_index = 7U;
-
-    for (uint8_t i = 0U; i < servo_joint_count; i++)
-    {
-        packet[packet_index++] = servo_joints[i].id;
-        packet[packet_index++] =
-            (uint8_t)(positions[i] & 0xFFU);
-        packet[packet_index++] =
-            (uint8_t)((positions[i] >> 8) & 0xFFU);
-    }
-
-    packet[packet_index] = Servo_Checksum(
-        packet,
-        (uint8_t)(packet_index - 1U)
-    );
-    packet_index++;
-
-    uint32_t started_us = Timebase_NowUs();
-    HAL_StatusTypeDef status = HAL_UART_Transmit(
-        servo_uart_handle,
-        packet,
-        packet_index,
-        100U
-    );
-    F0Metrics_ObserveServoSyncWrite(Timebase_ElapsedUs(started_us));
+    if (!ServoTransport_BeginService(servo_uart_handle, ACTUATOR_BUS_WORK_ARM, &servo_service_token))
+        return HAL_BUSY;
+    HAL_StatusTypeDef status = Servo_SyncWritePositionsOwned(positions);
+    HAL_StatusTypeDef ended = ServoTransport_End(servo_uart_handle, servo_service_token, status != HAL_OK);
+    if (ended == HAL_OK) servo_service_token = 0U;
+    if (status == HAL_OK && ended != HAL_OK) return HAL_BUSY;
     return status;
 }
-#endif
+
 
 HAL_StatusTypeDef Servo_ConfigureAllForTrajectory(
     uint16_t initial_positions[6]
@@ -2279,6 +2269,7 @@ HAL_StatusTypeDef Servo_RunSynchronizedSmoothstep(
     uint32_t duration_ms
 )
 {
+    if (!ServoTransport_ServiceAllowed()) return HAL_ERROR;
     const uint32_t control_period_ms = 20U;
 
     if ((start_positions == NULL) ||
@@ -2373,4 +2364,62 @@ HAL_StatusTypeDef Servo_RunSynchronizedSmoothstep(
 
     Servo_MotionSafetyEnd();
     return HAL_OK;
+}
+
+/* Mobile reads share the existing circular DMA and physical transport gate.
+ * Runtime paths deliberately avoid PrepareTransaction's maintenance waits. */
+static bool ServoBus_ReaderHealthy(UART_HandleTypeDef *uart, uint32_t token)
+{
+    return uart == servo_uart_handle && ServoTransport_Owns(uart, token) &&
+        ServoBus_DmaHardwareActive() &&
+        ServoBus_CurrentUartErrorCode() == HAL_UART_ERROR_NONE &&
+        servo_uart_async_errors == 0U && servo_dma_async_error == 0U &&
+        uart->hdmarx->ErrorCode == HAL_DMA_ERROR_NONE;
+}
+bool ServoBus_PrepareReader(UART_HandleTypeDef *uart, bool proof)
+{
+    uint32_t token;
+    if (!proof || uart != servo_uart_handle || !ServoTransport_ServiceAllowed() ||
+        !ServoTransport_BeginService(uart, ACTUATOR_BUS_WORK_FEEDBACK, &token)) return false;
+    HAL_StatusTypeDef ready = ServoBus_ArmReceiver();
+    HAL_StatusTypeDef ended = ServoTransport_End(uart, token, false);
+    if (ready != HAL_OK || ended != HAL_OK) {
+        ServoTransport_RequestStop(uart); return false;
+    }
+    return true;
+}
+bool ServoBus_ReaderCursor(UART_HandleTypeDef *uart, uint32_t token, uint32_t *cursor)
+{
+    if (cursor == NULL || !ServoBus_ReaderHealthy(uart, token)) return false;
+    *cursor = ServoBus_ProducerAbsolute(); return true;
+}
+bool ServoBus_ReaderSlice(UART_HandleTypeDef *uart, uint32_t token,
+    uint32_t *cursor, uint8_t *bytes, size_t capacity, size_t *length)
+{
+    uint32_t producer;
+    if (cursor == NULL || bytes == NULL || length == NULL ||
+        !ServoBus_ReaderCursor(uart, token, &producer)) return false;
+    uint32_t available = producer - *cursor;
+    if (available > SERVO_BUS_DMA_RING_CAPACITY || available > capacity) return false;
+    for (uint32_t i = 0; i < available; ++i)
+        bytes[i] = servo_dma_rx_ring[(*cursor + i) % SERVO_BUS_DMA_RING_CAPACITY];
+    /* Reject if DMA caught the copy and overwrote the transaction window. */
+    if (!ServoBus_ReaderHealthy(uart, token) ||
+        ServoBus_ProducerAbsolute() - *cursor > SERVO_BUS_DMA_RING_CAPACITY) return false;
+    *cursor = producer; *length = available; return true;
+}
+bool ServoBus_ReaderQuiet(UART_HandleTypeDef *uart, uint32_t token, uint32_t cursor)
+{
+    uint32_t producer;
+    return ServoBus_ReaderCursor(uart, token, &producer) && producer == cursor &&
+        __HAL_UART_GET_FLAG(uart, UART_FLAG_BUSY) == RESET &&
+        HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_5) == GPIO_PIN_SET;
+}
+
+bool ServoBus_RecoverReader(UART_HandleTypeDef *uart, uint32_t token)
+{
+    if (uart != servo_uart_handle || !ServoTransport_Owns(uart, token)) return false;
+    ServoTransport_RequestStop(uart);
+    return HAL_UART_AbortTransmit(uart) == HAL_OK &&
+        ServoBus_HardResyncReceiver() == HAL_OK && ServoBus_ArmReceiver() == HAL_OK;
 }

@@ -17,6 +17,8 @@ HAL_StatusTypeDef BimanualServoDispatch_Launch(
     uint32_t control_tick_started_us);
 
 void BimanualServoDispatch_OnTxComplete(UART_HandleTypeDef *uart);
+/* Drain ISR events and release completed TX leases from the main loop. */
+void BimanualServoDispatch_Poll(void);
 void BimanualServoDispatch_OnUartError(UART_HandleTypeDef *uart);
 void BimanualServoDispatch_Stop(void);
 void BimanualServoDispatch_LatchFault(void);

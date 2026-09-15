@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<!-- SPDX-License-Identifier: Apache-2.0
+Adapted from Bimanual-Pick-And-Place b3d7a3714f134e760a4d146039686c08eeaa622d.
+Stationary planning with unmeasured mobile geometry; baseline arm collision
+exclusions retained. No cross-arm or arm/environment collision exclusions. -->
+<robot name="alohamini_simulation">
+  <group name="left_arm">
+    <chain base_link="left_base_link" tip_link="left_gripper_frame_link" />
+  </group>
+  <group name="right_arm">
+    <chain base_link="right_base_link" tip_link="right_gripper_frame_link" />
+  </group>
+  <group name="both_arms">
+    <group name="left_arm" />
+    <group name="right_arm" />
+  </group>
+  <group_state name="home" group="left_arm">
+    <joint name="left_base_joint" value="0" />
+    <joint name="left_shoulder_joint" value="0" />
+    <joint name="left_elbow_joint" value="0" />
+    <joint name="left_wrist_flex_joint" value="0" />
+    <joint name="left_wrist_roll_joint" value="0" />
+  </group_state>
+  <group_state name="home" group="right_arm">
+    <joint name="right_base_joint" value="0" />
+    <joint name="right_shoulder_joint" value="0" />
+    <joint name="right_elbow_joint" value="0" />
+    <joint name="right_wrist_flex_joint" value="0" />
+    <joint name="right_wrist_roll_joint" value="0" />
+  </group_state>
+  <disable_collisions link1="left_base_link" link2="left_shoulder_link" reason="Adjacent" />
+  <disable_collisions link1="left_base_link" link2="left_upper_arm_link" reason="Never" />
+  <disable_collisions link1="left_gripper_link" link2="left_lower_arm_link" reason="Never" />
+  <disable_collisions link1="left_gripper_link" link2="left_moving_jaw_link" reason="Adjacent" />
+  <disable_collisions link1="left_gripper_link" link2="left_wrist_link" reason="Adjacent" />
+  <disable_collisions link1="left_lower_arm_link" link2="left_moving_jaw_link" reason="Never" />
+  <disable_collisions link1="left_lower_arm_link" link2="left_upper_arm_link" reason="Adjacent" />
+  <disable_collisions link1="left_lower_arm_link" link2="left_wrist_link" reason="Adjacent" />
+  <disable_collisions link1="left_moving_jaw_link" link2="left_wrist_link" reason="Never" />
+  <disable_collisions link1="left_shoulder_link" link2="left_upper_arm_link" reason="Adjacent" />
+  <disable_collisions link1="right_base_link" link2="right_shoulder_link" reason="Adjacent" />
+  <disable_collisions link1="right_base_link" link2="right_upper_arm_link" reason="Never" />
+  <disable_collisions link1="right_gripper_link" link2="right_lower_arm_link" reason="Never" />
+  <disable_collisions link1="right_gripper_link" link2="right_moving_jaw_link" reason="Adjacent" />
+  <disable_collisions link1="right_gripper_link" link2="right_wrist_link" reason="Adjacent" />
+  <disable_collisions link1="right_lower_arm_link" link2="right_moving_jaw_link" reason="Never" />
+  <disable_collisions link1="right_lower_arm_link" link2="right_upper_arm_link" reason="Adjacent" />
+  <disable_collisions link1="right_lower_arm_link" link2="right_wrist_link" reason="Adjacent" />
+  <disable_collisions link1="right_moving_jaw_link" link2="right_wrist_link" reason="Never" />
+  <disable_collisions link1="right_shoulder_link" link2="right_upper_arm_link" reason="Adjacent" />
+  <virtual_joint name="stationary_planning_root" type="fixed" parent_frame="planning_world" child_link="base_footprint" />
+  <disable_collisions link1="base_link" link2="lift_column" reason="Adjacent" />
+  <disable_collisions link1="base_link" link2="lift_link" reason="Adjacent" />
+  <disable_collisions link1="lift_link" link2="left_base_link" reason="Adjacent" />
+  <disable_collisions link1="lift_link" link2="right_base_link" reason="Adjacent" />
+  <group name="left_gripper">
+    <joint name="left_gripper_joint" />
+  </group>
+  <end_effector name="left_hand" parent_link="left_gripper_link" group="left_gripper" parent_group="left_arm" />
+  <group name="right_gripper">
+    <joint name="right_gripper_joint" />
+  </group>
+  <end_effector name="right_hand" parent_link="right_gripper_link" group="right_gripper" parent_group="right_arm" />
+  <passive_joint name="lift_joint" />
+  <passive_joint name="left_wheel_joint" />
+  <passive_joint name="back_wheel_joint" />
+  <passive_joint name="right_wheel_joint" />
+  <disable_collisions link1="base_link" link2="left_wheel" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="back_wheel" reason="Adjacent"/>
+  <disable_collisions link1="base_link" link2="right_wheel" reason="Adjacent"/>
+</robot>
