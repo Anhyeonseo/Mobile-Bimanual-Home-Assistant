@@ -7,6 +7,12 @@
   <xacro:arg name="lift_travel" default="0.50"/>
   <xacro:arg name="arm_spacing" default="0.28"/>
   <xacro:arg name="camera_xyz" default="0.08 0 0.25"/>
+  <xacro:arg name="camera_rpy" default="0 0 0"/>
+  <xacro:arg name="front_rgb_xyz" default="0.18 0 0.18"/>
+  <xacro:arg name="front_rgb_rpy" default="0 0.25 0"/>
+  <xacro:arg name="rear_rgb_xyz" default="-0.18 0 0.18"/>
+  <xacro:arg name="rear_rgb_rpy" default="0 0.25 3.14159265359"/>
+  <xacro:arg name="depth_optical_xyz" default="0 0 0"/>
   <xacro:include filename="so101_arm_macro.xacro"/>
   <material name="3d_printed"><color rgba="0.95 0.7 0.12 1"/></material>
   <material name="sts3215"><color rgba="0.12 0.12 0.12 1"/></material>
@@ -30,8 +36,19 @@
   <xacro:so101_arm prefix="left_" parent="lift_link" mount_xyz="0 ${float('$(arg arm_spacing)')/2} 0.02" mount_rpy="0 0 0"/>
   <xacro:so101_arm prefix="right_" parent="lift_link" mount_xyz="0 ${-float('$(arg arm_spacing)')/2} 0.02" mount_rpy="0 0 0"/>
   <link name="camera_link"/><link name="camera_color_optical_frame"/>
-  <joint name="camera_mount" type="fixed"><parent link="lift_link"/><child link="camera_link"/><origin xyz="$(arg camera_xyz)"/></joint>
+  <joint name="camera_mount" type="fixed"><parent link="lift_link"/><child link="camera_link"/><origin xyz="$(arg camera_xyz)" rpy="$(arg camera_rpy)"/></joint>
   <joint name="camera_optical" type="fixed"><parent link="camera_link"/><child link="camera_color_optical_frame"/><origin rpy="-1.57079632679 0 -1.57079632679"/></joint>
+  <!-- Native depth and colour are distinct calibrated frames. Zero translation
+       is a simulation placeholder, never a physical D415 extrinsic. -->
+  <link name="camera_depth_optical_frame"/>
+  <joint name="depth_optical" type="fixed"><parent link="camera_link"/><child link="camera_depth_optical_frame"/><origin xyz="$(arg depth_optical_xyz)" rpy="-1.57079632679 0 -1.57079632679"/></joint>
+  <xacro:macro name="rgb_camera" params="name xyz rpy">
+    <link name="${name}_rgb_link"/><link name="${name}_rgb_optical_frame"/>
+    <joint name="${name}_rgb_mount" type="fixed"><parent link="base_link"/><child link="${name}_rgb_link"/><origin xyz="${xyz}" rpy="${rpy}"/></joint>
+    <joint name="${name}_rgb_optical" type="fixed"><parent link="${name}_rgb_link"/><child link="${name}_rgb_optical_frame"/><origin rpy="-1.57079632679 0 -1.57079632679"/></joint>
+  </xacro:macro>
+  <xacro:rgb_camera name="front" xyz="$(arg front_rgb_xyz)" rpy="$(arg front_rgb_rpy)"/>
+  <xacro:rgb_camera name="rear" xyz="$(arg rear_rgb_xyz)" rpy="$(arg rear_rgb_rpy)"/>
   <link name="lidar_a"/><link name="lidar_b"/>
   <joint name="lidar_a_mount" type="fixed"><parent link="base_link"/><child link="lidar_a"/><origin xyz="0.15 0 0.15"/></joint>
   <joint name="lidar_b_mount" type="fixed"><parent link="base_link"/><child link="lidar_b"/><origin xyz="-0.15 0 0.15" rpy="0 0 3.14159265359"/></joint>

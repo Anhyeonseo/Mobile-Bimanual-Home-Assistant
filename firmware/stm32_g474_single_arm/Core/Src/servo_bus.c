@@ -33,6 +33,7 @@
 static UART_HandleTypeDef *servo_uart_handle = NULL;
 static uint32_t servo_service_token;
 static uint32_t servo_feedback_token;
+static bool servo_reader_shared;
 static ServoStopRequestedFn servo_stop_requested = NULL;
 static ServoReadFailureFn servo_read_failure = NULL;
 static volatile uint8_t servo_dma_rx_ring[SERVO_BUS_DMA_RING_CAPACITY]
@@ -747,6 +748,20 @@ void Servo_InMotionTelemetryBegin(void)
 
 void Servo_InMotionTelemetryEnd(void)
 {
+    /* Shared circular RX belongs to the periodic runtime. A finite arm action
+     * ends only its read lease; it must not dismantle the mobile receiver. */
+    if (servo_reader_shared || !ServoTransport_ServiceAllowed())
+    {
+        if (servo_feedback_token != 0U)
+        {
+            if (HAL_UART_AbortTransmit(servo_uart_handle) != HAL_OK) return;
+            HAL_Delay(SERVO_BUS_RECOVERY_QUIET_MS);
+            if (ServoTransport_End(servo_uart_handle, servo_feedback_token, false) != HAL_OK) return;
+            servo_feedback_token = 0U;
+        }
+        memset(&servo_in_motion_telemetry, 0, sizeof(servo_in_motion_telemetry));
+        return;
+    }
     if (servo_feedback_token == 0U && !ServoTransport_BeginCleanup(
             servo_uart_handle, &servo_feedback_token)) return;
     if (HAL_UART_AbortTransmit(servo_uart_handle) != HAL_OK ||
@@ -757,6 +772,17 @@ void Servo_InMotionTelemetryEnd(void)
         memset(&servo_in_motion_telemetry, 0, sizeof(servo_in_motion_telemetry));
         servo_feedback_token = 0U;
     }
+}
+
+uint8_t Servo_InMotionTelemetryReleased(void)
+{
+    return servo_feedback_token == 0U;
+}
+
+uint8_t Servo_InMotionTelemetryCanStart(void)
+{
+    return servo_in_motion_telemetry.enabled && !Servo_InMotionTelemetryPending() &&
+        ServoTransport_ReadReady(servo_uart_handle);
 }
 
 uint8_t Servo_InMotionTelemetryPending(void)
@@ -832,7 +858,7 @@ HAL_StatusTypeDef Servo_InMotionTelemetryStart(
     uint32_t started_at_ms
 )
 {
-    if (!ServoTransport_Begin(servo_uart_handle, ACTUATOR_BUS_WORK_FEEDBACK, &servo_feedback_token))
+    if (!ServoTransport_BeginReadOnly(servo_uart_handle, &servo_feedback_token))
         return HAL_BUSY;
     HAL_StatusTypeDef status = Servo_InMotionTelemetryStartOwned(joint_index, started_at_ms);
     if (status == HAL_OK) return status;
@@ -2028,10 +2054,11 @@ HAL_StatusTypeDef Servo_ConfigureForTrajectory(
     };
 
     uint8_t runtime_data[9] = {
-        0U,
+        SERVO_STREAM_ACCELERATION_RAW,
         (uint8_t)(*initial_position & 0xFFU),
         (uint8_t)((*initial_position >> 8) & 0xFFU),
-        0U, 0U,
+        (uint8_t)(SERVO_STREAM_GOAL_TIME_RAW & 0xFFU),
+        (uint8_t)(SERVO_STREAM_GOAL_TIME_RAW >> 8U),
         (uint8_t)(SERVO_GOAL_SPEED_RAW & 0xFFU),
         (uint8_t)((SERVO_GOAL_SPEED_RAW >> 8) & 0xFFU),
         (uint8_t)(torque_limit & 0xFFU),
@@ -2064,8 +2091,14 @@ HAL_StatusTypeDef Servo_ConfigureForTrajectory(
 
     uint8_t pid_readback[3] = {0U};
     uint8_t torque_limit_readback[2] = {0U};
+    uint8_t runtime_readback[7] = {0U};
+    uint8_t mode_readback = 255U;
 
-    if ((Servo_ReadData(
+    if ((Servo_ReadData(servo_id, 33U, 1U, &mode_readback) != HAL_OK) ||
+        (mode_readback != 0U) ||
+        (Servo_ReadData(servo_id, 41U, sizeof(runtime_readback), runtime_readback) != HAL_OK) ||
+        (memcmp(runtime_readback, runtime_data, sizeof(runtime_readback)) != 0) ||
+        (Servo_ReadData(
             servo_id,
             21U,
             sizeof(pid_readback),
@@ -2386,6 +2419,7 @@ bool ServoBus_PrepareReader(UART_HandleTypeDef *uart, bool proof)
     if (ready != HAL_OK || ended != HAL_OK) {
         ServoTransport_RequestStop(uart); return false;
     }
+    servo_reader_shared = true;
     return true;
 }
 bool ServoBus_ReaderCursor(UART_HandleTypeDef *uart, uint32_t token, uint32_t *cursor)

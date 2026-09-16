@@ -50,6 +50,14 @@ bool ServoTransport_Idle(UART_HandleTypeDef *uart)
         __HAL_UART_GET_FLAG(uart, UART_FLAG_BUSY) == RESET;
 }
 
+bool ServoTransport_ReadReady(UART_HandleTypeDef *uart)
+{
+    ServoTransportOwner *bus = find_bus(uart);
+    return bus != NULL && !bus->active && bus->token != UINT32_MAX &&
+        uart->gState == HAL_UART_STATE_READY &&
+        __HAL_UART_GET_FLAG(uart, UART_FLAG_BUSY) == RESET;
+}
+
 void ServoTransport_RequestStop(UART_HandleTypeDef *uart)
 {
     ServoTransportOwner *bus = find_bus(uart);

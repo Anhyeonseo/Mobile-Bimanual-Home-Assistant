@@ -1,4 +1,5 @@
 #include "mobile_servo_output.h"
+#include "mobile_hold_output.h"
 #include "mobile_servo_feedback.h"
 #include "host_uart_rx.h"
 #include "host_uart_tx.h"
@@ -155,6 +156,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     MobileServoOutput_OnUartError(huart);
+    MobileHoldOutput_OnUartError(huart);
     MobileServoFeedback_OnUartError(huart);
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
     BimanualServoDispatch_OnUartError(huart);

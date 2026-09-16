@@ -9,6 +9,7 @@ objects are never declared absent. All positions remain unapproved grasp inputs.
 
 from copy import deepcopy
 from dataclasses import dataclass
+import re
 
 from .fetch import InvalidTask
 from .navigation import identifier, number
@@ -54,7 +55,11 @@ class SearchSession:
         captures_per_view=2,
         minimum_confidence=0.7,
     ):
-        self.run_id = identifier(run_id, "search run")
+        # Internal task/step IDs include slashes; keep object/place identifiers
+        # strict while allowing bounded child action identity propagation.
+        if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,256}", run_id):
+            raise InvalidTask("invalid search run")
+        self.run_id = run_id
         self.object_id = identifier(object_id, "object id")
         self.location = identifier(location, "location")
         self.scene_revision = identifier(scene_revision, "scene revision")
@@ -282,6 +287,7 @@ class SearchSession:
         if candidates:
             self.visited.add(self.view.view_id)
             self.target = max(candidates, key=lambda value: value[0])[1]
+            self.target["view_id"] = self.view.view_id
             self.state, self.action = "FOUND", None
         elif self.captures < self.capture_limit and any(
             d.object_id == self.object_id for d in detections

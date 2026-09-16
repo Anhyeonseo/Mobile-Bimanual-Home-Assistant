@@ -130,6 +130,8 @@ set(CORE_SOURCES
     "${CORE_DIR}/Src/mobile_servo_feedback.c"
     "${CORE_DIR}/Src/mobile_boot_identity.c"
     "${CORE_DIR}/Src/mobile_board.c"
+    "${CORE_DIR}/Src/mobile_hold_output.c"
+    "${CORE_DIR}/Src/mobile_arm_observer.c"
     "${CORE_DIR}/Src/servo_joint_config.c"
     "${CORE_DIR}/Src/right_servo_bus.c"
     "${CORE_DIR}/Src/servo_response_parser.c"
@@ -167,6 +169,7 @@ set(ACTUATOR_SOURCES
     "${ACTUATOR_CORE_DIR}/src/bus_schedule.c"
     "${ACTUATOR_CORE_DIR}/src/lift_endpoint.c"
     "${ACTUATOR_CORE_DIR}/src/device_startup.c"
+    "${ACTUATOR_CORE_DIR}/src/robot_evidence.c"
     "${ACTUATOR_CORE_DIR}/src/mobile_feedback.c"
     "${ACTUATOR_CORE_DIR}/src/sts3215_response.c"
     "${ACTUATOR_CORE_DIR}/src/mobile_output.c"
@@ -177,6 +180,7 @@ set(ACTUATOR_SOURCES
     "${ACTUATOR_CORE_DIR}/src/lift_controller.c"
     "${ACTUATOR_CORE_DIR}/src/bus_router.c"
     "${ACTUATOR_CORE_DIR}/src/system_stop.c"
+    "${ACTUATOR_CORE_DIR}/src/arm_hold_monitor.c"
     "${ACTUATOR_CORE_DIR}/src/motor_groups.c"
     "${ACTUATOR_CORE_DIR}/src/sts3215_packet.c"
     "${ACTUATOR_CORE_DIR}/src/buffered_command_route.c"
@@ -328,7 +332,7 @@ if(BIMANUAL_DMA_DISPATCH_CANDIDATE OR
                 target_compile_definitions(
                     "${TARGET_NAME}"
                     PRIVATE
-                        HOST_BINARY_FIRMWARE_VERSION=0x00024903UL
+                        HOST_BINARY_FIRMWARE_VERSION=0x00024908UL
                         HOST_BIMANUAL_RESIDENT_FINITE_BUILD=1U
                         HOST_BIMANUAL_FEEDBACK_SNAPSHOT_BUILD=1U
                         HOST_BIMANUAL_TERMINAL_SETTLE_BUILD=1U

@@ -67,6 +67,7 @@ class LiftPort:
             if now < e["start"]:
                 raise InvalidTask("lift clock moved backwards")
             if e["cancel"]:
+                self.stop.request(goal_id, True, now)
                 proof = self.stop.poll(goal_id, now)
                 if proof.status == "STOPPED":
                     e["status"] = e["destination"]
@@ -153,6 +154,7 @@ class ResidentArmPort:
             return PortResult(e["status"], e["reason"])
         try:
             if e["cancel"]:
+                self.stop.request(goal_id, True, self.clock())
                 if self.stop.poll(goal_id, self.clock()).status == "STOPPED":
                     e["status"] = e["destination"]
                     self.owner = None

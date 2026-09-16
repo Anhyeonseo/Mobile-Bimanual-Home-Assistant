@@ -19,6 +19,7 @@ typedef enum
 typedef struct
 {
     uint8_t joint_index;
+    uint32_t observed_ms; /* Request start, never response delivery time. */
     uint16_t left_position_raw;
     uint16_t right_position_raw;
     int32_t left_commanded_urad;
@@ -39,6 +40,7 @@ typedef struct
 HAL_StatusTypeDef BimanualTrackingFeedback_Begin(void);
 void BimanualTrackingFeedback_End(void);
 uint8_t BimanualTrackingFeedback_Active(void);
+uint8_t BimanualTrackingFeedback_CanStart(void);
 uint8_t BimanualTrackingFeedback_Pending(void);
 HAL_StatusTypeDef BimanualTrackingFeedback_Start(
     uint8_t joint_index,

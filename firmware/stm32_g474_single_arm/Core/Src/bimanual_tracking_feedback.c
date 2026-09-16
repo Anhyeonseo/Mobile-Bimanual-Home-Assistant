@@ -12,6 +12,7 @@ typedef struct
     BimanualTrackingFeedbackSnapshot snapshot;
     uint8_t joint_index;
     uint32_t started_at_ms;
+    uint8_t pair_failed;
     uint16_t left_commanded_raw[BIMANUAL_TRACKING_ARM_JOINT_COUNT];
     uint16_t right_commanded_raw[BIMANUAL_TRACKING_ARM_JOINT_COUNT];
     int32_t left_commanded_urad;
@@ -57,13 +58,22 @@ void BimanualTrackingFeedback_End(void)
 {
     Servo_InMotionTelemetryEnd();
     RightServoBus_InMotionTelemetryEnd();
-    tracking.snapshot.active = 0U;
-    tracking.snapshot.pending = 0U;
+    if (Servo_InMotionTelemetryReleased() && RightServoBus_InMotionTelemetryReleased())
+    {
+        tracking.snapshot.active = 0U;
+        tracking.snapshot.pending = 0U;
+    }
 }
 
 uint8_t BimanualTrackingFeedback_Active(void)
 {
     return tracking.snapshot.active;
+}
+
+uint8_t BimanualTrackingFeedback_CanStart(void)
+{
+    return tracking.snapshot.active && !tracking.snapshot.pending &&
+        Servo_InMotionTelemetryCanStart() && RightServoBus_InMotionTelemetryCanStart();
 }
 
 uint8_t BimanualTrackingFeedback_Pending(void)
@@ -86,6 +96,7 @@ HAL_StatusTypeDef BimanualTrackingFeedback_Start(
     {
         return HAL_BUSY;
     }
+    tracking.pair_failed = 0U;
     tracking.joint_index = joint_index;
     tracking.started_at_ms = started_at_ms;
     memcpy(tracking.left_commanded_raw, left_commanded_raw,
@@ -132,13 +143,16 @@ BimanualTrackingFeedbackResult BimanualTrackingFeedback_Poll(
     if ((left_status == HAL_ERROR) || (left_status == HAL_TIMEOUT) ||
         (right_status == HAL_ERROR) || (right_status == HAL_TIMEOUT))
     {
-        return RecordPairFailure();
+        tracking.pair_failed = 1U;
     }
+    /* One failed response cannot orphan the other UART's pending read lease.
+     * Drain/timeout both sides before accounting a recoverable pair failure. */
     if ((Servo_InMotionTelemetryPending() != 0U) ||
         (RightServoBus_InMotionTelemetryPending() != 0U))
     {
         return BIMANUAL_TRACKING_PENDING;
     }
+    if (tracking.pair_failed) return RecordPairFailure();
     left = Servo_InMotionTelemetryGetSnapshot();
     right = RightServoBus_InMotionTelemetryGetSnapshot();
     if ((left == NULL) || (right == NULL) ||
@@ -149,6 +163,7 @@ BimanualTrackingFeedbackResult BimanualTrackingFeedback_Poll(
         return RecordPairFailure();
     }
     sample->joint_index = tracking.joint_index;
+    sample->observed_ms = tracking.started_at_ms;
     sample->left_position_raw = left->last_position_raw;
     sample->right_position_raw = right->last_position_raw;
     sample->left_commanded_urad = tracking.left_commanded_urad;

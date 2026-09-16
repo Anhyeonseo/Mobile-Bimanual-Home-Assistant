@@ -1,4 +1,9 @@
-/* Arm calibration/service configuration only; never append mobile motors. */
+/* Arm calibration/service configuration only; never append mobile motors.
+ * Retain shoulder P/D=64/64 and elbow=56/64: the operator reports that lower
+ * gains caused load-dependent following error. I remains 0 in both writers.
+ * These are the prior operating settings, not a newly optimized PID result.
+ * Tune damping with measured hold/motion traces; do not mask tracking faults.
+ */
 #include "servo_joint_config.h"
 #include "single_arm_config.h"
 

@@ -59,7 +59,7 @@ MCU와 호스트의 절대 시각이 같다고 가정하지 않는다. 적용 �
 
 양팔은 왼팔 6축·오른팔 6축의 순서로 하나의 목표 스트림을 사용한다. 한 batch는 최대 9개 표본을 담으며 각 표본에는 12축 목표가 모두 필요하다. ROS 입력은 radian, wire 목표는 부호 있는 micro-radian이다.
 
-세션 준비는 펌웨어 버전 `0x00024903`, capabilities `0xEFFFFFFF`, 양팔 보정 hash `0x2D90167E` 등 식별 계약을 확인한다. `0x00024903`은 이번 소프트웨어 후보이며 이전 `0x00024809` 실기 기록과 구분한다. 설치된 펌웨어와 맞지 않으면 실행을 거절한다. 이 값의 존재는 새 모바일 플랫폼의 실물 검증을 의미하지 않는다.
+세션 준비는 펌웨어 버전 `0x00024908`, capabilities `0xEFFFFFFF`, 양팔 보정 hash `0x2D90167E` 등 식별 계약을 확인한다. `0x00024908`은 이번 소프트웨어 후보이며 이전 `0x00024809` 실기 기록과 구분한다. 설치된 펌웨어와 맞지 않으면 실행을 거절한다. 이 값의 존재는 새 모바일 플랫폼의 실물 검증을 의미하지 않는다.
 
 `START_FINITE`, `START_OPEN`, `APPEND`, `SPLICE`, `STOP`은 ROS `BimanualStreamCommand`의 연산이다. 브릿지는 이를 wire 세션·batch·stop 명령으로 변환한다. 상위 작업 계층은 UART를 직접 사용하지 않는다.
 
@@ -196,3 +196,47 @@ LAN bind는 인증서/키와 TLS≥1.2를 요구한다. 외부 포트를 자동�
 | 24..31,32 | 예약 0, CRC32C(앞 32B) |
 
 LS 64B: magic/version/opcode(거절은 bit7), request sequence(4), MCU tick(8), boot ID(12), session(16), accepted sequence(20), state/fault/flags(24/25/26), 예약0(27), observed_ms(28), height/target/command/current(32/36/40/44, i32), position_raw(48), rejected_count(52), lease deadline(56), CRC32C(60). Flags: homed=1, active=2, interlocked=4, sample=8, holding=16. 상태는 lift_controller enum과 동일하다. 부팅 뒤 자동 HOME/MOVE는 없다.
+
+
+### AQ/AT 전체 정지 조회 (후보 0x00024908)
+
+기존 v2 MOBILE_REQUEST/RESPONSE envelope와 팔/리프트의 단일 전송 잠금을 사용한다.
+AQ 요청은 36B: `AQ`, version 1, opcode 1, u32 request sequence(offset 4, 0 금지),
+reserved 8–31=0, CRC32C(offset 32). 상태 조회는 정지 요청·임대 갱신·재활성화를 하지 않는다.
+정지 요청은 기존 SAFE_STOP이며 접수 응답은 물리 완료를 의미하지 않는다.
+
+AT 응답은 64B: `AT`, version/opcode 1, 요청 sequence(4), MCU tick(8), boot ID(12),
+stop 시작(16), 모든 전송 완료 시각(20), state byte(24: IDLE=0/PENDING=1/CONFIRMED=2/
+UNCONFIRMED=3), flags(25), reserved26–27=0, 증거 시각(28), 증거 나이(32),
+최대 나이(36), reserved40–59=0, CRC32C(60). 다중 바이트 정수는 little endian이다.
+flags bit0..7은 configured/runtime/output/actions/base/lift/arms/load 순서다.
+상위 완료 조건은 state=2, flags=255, 유효한 새 증거 및 boot/sequence 일치다.
+호스트는 전체 왕복 시간을 보수적으로 빼서 표본 시각을 환산하고 전송 중 만료도 거절한다.
+MCU 미설정/예약 필드/CRC 오류에는 기존 1B envelope 오류를 반환한다.
+
+
+### AE/AF 독립 관측 입력 (후보 0x00024908)
+
+기존 v2 MOBILE envelope 안의 36B AE 요청 / 64B AF 응답. 모든 정수는 little-endian.
+응답 envelope는 기존 status+64B 규칙이며 오류 시 기존 1B status다.
+
+| offset | AE 요청 | AF 응답 |
+|---|---|---|
+| 0–3 | `AE`, version=1, op=1 | `AF`, version=1, op=1 |
+| 4–7 | 증가하는 nonzero sequence | sequence echo |
+| 8–11 | MCU boot ID | boot ID |
+| 12–15 | 원 관측 MCU ms | 수신 처리 MCU ms |
+| 16–19 | 관측 만료 MCU ms | 원 관측 MCU ms echo |
+| 20 | bit0 arms_safe, bit1 lift_hold, bit2 payload_safe | flags echo |
+| 21–31 / 21–59 | 예약 0 | 예약 0 |
+| 32–35 / 60–63 | CRC32C 앞 32B | CRC32C 앞 60B |
+
+수신 age 한계는 stop feedback/lift feedback 중 더 짧은 값(1–1000ms). 원 관측과
+sequence가 반드시 증가하고 boot가 일치해야 한다. 미래/만료/너무 긴 expiry/예약
+bit·byte/CRC 오류를 거부한다. uint32 ms wrap은 허용하지만 sequence wrap은 새 boot가
+필요하다. 첫 성공 이후 만료는 interlock/load 입력을 무효화하고 출력 준비 상태라면
+전체 stop을 요구한다. 0인 flags도 유효한 관측이며 안전 승인을 뜻하지 않는다.
+
+`RobotEvidenceClient`는 host→MCU clock 동기화 왕복 불확실성과 센서 나이를 보수적으로
+반영하고, 동일 원 관측을 재전송해 수명을 늘리지 않는다. AF는 수신 확인일 뿐 물리적
+정지/하중 유지 완료 신호가 아니다. 확인은 AQ/AT와 독립 후속 관측을 사용한다.

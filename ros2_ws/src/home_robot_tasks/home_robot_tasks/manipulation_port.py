@@ -22,6 +22,8 @@ class PlanningContext:
     anchor_rad: tuple
     base_stopped: bool
     lift_stopped: bool
+    # Target age is checked at admission/handoff, state age throughout execution.
+    target_observed_s: float | None = None
 
     def key(self):
         return (
@@ -60,7 +62,7 @@ class ManipulationPort:
     def ready(self):
         return self.owner is None and self.planner.ready() and self.executor.ready()
 
-    def _context(self):
+    def _context(self, *, check_target=True):
         c = self.context()
         now = number(self.clock(), "planning clock")
         if (
@@ -71,6 +73,10 @@ class ManipulationPort:
             raise InvalidTask("stale planning context")
         if c.base_stopped is not True or c.lift_stopped is not True:
             raise InvalidTask("moving planning platform")
+        if c.target_observed_s is not None:
+            stamp=number(c.target_observed_s,"target exposure")
+            if not 0<=stamp<=now or check_target and now-stamp>self.age:
+                raise InvalidTask("stale planning target")
         if len(c.anchor_rad) != 12 or any(
             not isinstance(v, (int, float)) for v in c.anchor_rad
         ):
@@ -128,8 +134,9 @@ class ManipulationPort:
                     e["state"] = e["destination"]
                     self.owner = None
                 return PortResult(e["state"], e["reason"])
-            current = self._context()
-            if current.key() != e["context"].key():
+            current = self._context(check_target=e['phase']=='plan')
+            if (current.key() != e["context"].key()
+                    or current.target_observed_s != e['context'].target_observed_s):
                 raise InvalidTask("planning context changed")
             result = e["port"].poll(g)
             if result.state in {"FAILED", "CANCELLED"}:

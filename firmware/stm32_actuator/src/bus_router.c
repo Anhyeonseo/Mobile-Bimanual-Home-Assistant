@@ -41,7 +41,11 @@ bool actuator_bus_router_next(actuator_bus_router_t *r,uint32_t now,uint32_t ava
     return false;
 }
 bool actuator_bus_router_complete(actuator_bus_router_t *r,uint32_t token,uint32_t now,bool ok) {
-    return r!=NULL && actuator_shared_bus_complete(&r->bus,token,now,ok);
+    if(r==NULL || !actuator_shared_bus_complete(&r->bus,token,now,ok))return false;
+    r->completed_token=token;r->completed_us=now;r->completed_kind=r->bus.owner;
+    r->completed_length=r->active_length;
+    memcpy(r->completed_bytes,r->active_bytes,r->active_length);
+    return true;
 }
 
 bool actuator_bus_router_resume(actuator_bus_router_t *r,bool confirmed) {

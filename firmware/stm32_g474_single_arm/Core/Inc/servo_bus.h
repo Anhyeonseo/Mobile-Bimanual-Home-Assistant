@@ -187,6 +187,8 @@ HAL_StatusTypeDef Servo_SyncWritePositions(
 );
 void Servo_InMotionTelemetryBegin(void);
 void Servo_InMotionTelemetryEnd(void);
+uint8_t Servo_InMotionTelemetryReleased(void);
+uint8_t Servo_InMotionTelemetryCanStart(void);
 uint8_t Servo_InMotionTelemetryPending(void);
 HAL_StatusTypeDef Servo_InMotionTelemetryStart(
     uint8_t joint_index,

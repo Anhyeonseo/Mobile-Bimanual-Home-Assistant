@@ -131,7 +131,8 @@ void actuator_mobile_output_completed(actuator_mobile_output_t *o,actuator_bus_w
         if(zero_lift||zero_all)actuator_lift_zero_sent(o->lift_control->lift,ms);
     }
     if(o->writes_completed!=UINT32_MAX)o->writes_completed++;
-    if(kind==ACTUATOR_BUS_WORK_STOP) {o->stop_written=true;o->stop_written_ms=ms;}
+    if(kind==ACTUATOR_BUS_WORK_STOP && o->router.active_length==20 &&
+       o->router.active_bytes[5]==46) {o->stop_written=true;o->stop_written_ms=ms;}
 }
 bool actuator_mobile_output_rearm(actuator_mobile_output_t *o,uint32_t session,uint32_t epoch,uint32_t ms,bool proof) {
     if(o==NULL || !o->configured || !proof || !o->stop_written || !o->stop_requested ||

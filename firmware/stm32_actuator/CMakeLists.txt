@@ -5,6 +5,7 @@ add_library(actuator_core STATIC
     src/shared_bus.c
     src/bus_schedule.c
     src/lift_endpoint.c
+    src/robot_evidence.c
     src/device_startup.c
     src/mobile_feedback.c
     src/sts3215_response.c
@@ -16,6 +17,7 @@ add_library(actuator_core STATIC
     src/lift_controller.c
     src/bus_router.c
     src/system_stop.c
+    src/arm_hold_monitor.c
     src/motor_groups.c
     src/bimanual_dispatch.c
     src/bimanual_goal_map.c
@@ -57,6 +59,10 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(actuator_system_stop_runtime_tests tests/test_system_stop_runtime.c)
+    target_link_libraries(actuator_system_stop_runtime_tests PRIVATE actuator_core)
+    target_compile_options(actuator_system_stop_runtime_tests PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic;-Werror>)
+    add_test(NAME actuator_system_stop_runtime_tests COMMAND actuator_system_stop_runtime_tests)
     add_executable(actuator_device_startup_tests tests/test_device_startup.c)
     target_link_libraries(actuator_device_startup_tests PRIVATE actuator_core)
     target_compile_options(actuator_device_startup_tests PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic;-Werror>)

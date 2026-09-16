@@ -11,6 +11,12 @@ typedef struct {
     uint32_t expired_jobs;
     bool inhibited;
     unsigned cursor;
+    /* Immutable last successful TX/quiet receipt. Claims, expiry and recovery
+     * never advance it; STOP proof must identify the exact transmitted bytes. */
+    uint32_t completed_token, completed_us;
+    actuator_bus_work_t completed_kind;
+    uint8_t completed_bytes[ACTUATOR_ROUTER_PACKET_MAX];
+    size_t completed_length;
 } actuator_bus_router_t;
 /* One router per UART, including left arm + wheels + lift. Single owner thread.
  * All jobs include TX + RX/quiet-time budget, and remain owned until completion.

@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "mode": "simulation",
+  "board": {
+    "devices": {
+      "model": [
+        777,
+        777,
+        777,
+        777
+      ],
+      "baud_code": 0,
+      "timeout_ms": 1000
+    },
+    "mobile": {
+      "max_velocity_raw": [
+        1000,
+        1000,
+        1000,
+        100
+      ],
+      "stopped_velocity_raw": 2,
+      "command_timeout_ms": 200,
+      "feedback_timeout_ms": 200,
+      "lift_min_um": 0,
+      "lift_max_um": 500000
+    },
+    "feedback": {
+      "axes": [
+        {
+          "velocity_direction": 1,
+          "minimum_voltage_raw": 90,
+          "maximum_voltage_raw": 150,
+          "maximum_temperature": 70,
+          "maximum_current_raw": 300
+        },
+        {
+          "velocity_direction": 1,
+          "minimum_voltage_raw": 90,
+          "maximum_voltage_raw": 150,
+          "maximum_temperature": 70,
+          "maximum_current_raw": 300
+        },
+        {
+          "velocity_direction": 1,
+          "minimum_voltage_raw": 90,
+          "maximum_voltage_raw": 150,
+          "maximum_temperature": 70,
+          "maximum_current_raw": 300
+        },
+        {
+          "velocity_direction": 1,
+          "minimum_voltage_raw": 90,
+          "maximum_voltage_raw": 150,
+          "maximum_temperature": 70,
+          "maximum_current_raw": 300
+        }
+      ],
+      "sample_timeout_ms": 200,
+      "mode_timeout_ms": 500,
+      "response_timeout_ms": 5,
+      "maximum_sample_skew_ms": 100
+    },
+    "output": {
+      "schedule": {
+        "arm_period_us": 5000,
+        "arm_reserved_us": 1000,
+        "guard_us": 200,
+        "wheels_period_us": 10000,
+        "lift_period_us": 20000,
+        "feedback_period_us": 5000,
+        "maximum_poll_gap_us": 500
+      },
+      "wheels_budget_us": 500,
+      "lift_budget_us": 400,
+      "stop_budget_us": 600,
+      "job_lifetime_us": 4000,
+      "velocity_direction": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "lift": {
+      "um_per_turn": 409600,
+      "maximum_height_um": 500000,
+      "tolerance_um": 100,
+      "maximum_speed_raw": 100,
+      "homing_speed_raw": 20,
+      "stopped_speed_raw": 2,
+      "slowdown_distance_um": 10000,
+      "home_current_ma": 500,
+      "maximum_current_ma": 1000,
+      "feedback_timeout_ms": 100,
+      "homing_timeout_ms": 1000,
+      "contact_dwell_ms": 20,
+      "maximum_encoder_step_raw": 200,
+      "encoder_up_direction": 1
+    },
+    "stop": {
+      "job_lifetime_us": 4000,
+      "zero_budget_us": 600,
+      "hold_budget_us": 600,
+      "timeout_ms": 200,
+      "feedback_max_age_ms": 100
+    },
+    "read_period_us": 5000,
+    "read_budget_us": 600,
+    "quiet_us": 50,
+    "current_microamps_per_raw": 1000,
+    "arm_hold_tolerance_raw": 5,
+    "arm_hold_dwell_ms": 20,
+    "arm_read_period_ms": 10,
+    "initialize_erased_boot_storage": false
+  },
+  "measurement_records": {}
+}

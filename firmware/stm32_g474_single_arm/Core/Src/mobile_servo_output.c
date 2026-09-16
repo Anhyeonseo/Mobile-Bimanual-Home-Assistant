@@ -124,3 +124,7 @@ bool MobileServoOutput_Rearm(uint32_t session,bool proof) {
 bool MobileServoOutput_BindLift(actuator_lift_endpoint_t *endpoint) {
     return actuator_mobile_output_bind_lift(&output,endpoint);
 }
+
+actuator_bus_router_t *MobileServoOutput_StopRouter(void) {
+    return output.configured && output.stop_requested ? &output.router : NULL;
+}

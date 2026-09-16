@@ -216,9 +216,11 @@ class SearchSkillPort:
             action = s.poll(self.motion(), now)
             if action is not None and action.kind == "STOP_SEARCH":
                 if not e["stop_sent"]:
-                    if e["port"] is not None:
-                        e["port"].cancel(e["action"])
-                    self.stop.request(action.action_id, True, now)
+                    try:
+                        if e["port"] is not None:
+                            e["port"].cancel(e["action"])
+                    finally:
+                        self.stop.request(action.action_id, True, now)
                     e["stop_sent"] = True
                 f = self.stop.poll(action.action_id, now)
                 idle = (
@@ -261,7 +263,8 @@ class SearchSkillPort:
                     else:
                         frame, kwargs = self.capture.result(action.action_id)
                         s.observation(
-                            action.action_id, frame, self.motion(), now, **kwargs
+                            action.action_id, frame, self.motion(), now,
+                            **{k:kwargs[k] for k in ('detections','visible_regions','occluded_regions')}
                         )
                     e.update(port=None, action=None)
                 elif result.state in {"FAILED", "CANCELLED"}:
