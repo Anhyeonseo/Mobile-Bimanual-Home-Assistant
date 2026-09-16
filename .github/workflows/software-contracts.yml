@@ -99,7 +99,7 @@ jobs:
       - name: Install model and action message dependencies
         run: |
           apt-get update
-          apt-get install --no-install-recommends -y ros-jazzy-nav2-msgs ros-jazzy-xacro ros-jazzy-urdf-parser-py ros-jazzy-moveit-msgs python3-numpy python3-serial python3-colcon-common-extensions
+          apt-get install --no-install-recommends -y ros-jazzy-nav2-msgs ros-jazzy-xacro ros-jazzy-urdfdom-py ros-jazzy-moveit-msgs python3-numpy python3-serial python3-colcon-common-extensions
       - name: Check assembly FK and synthetic ROS action transport
         shell: bash
         env:
