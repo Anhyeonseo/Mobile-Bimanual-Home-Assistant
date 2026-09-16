@@ -170,3 +170,29 @@ def test_capture_rejects_motion_and_invalid_image_evidence(fault):
         motion[0] = replace(motion[0], observed_s=2.0)
     c.poll("g")
     assert c.poll("g").state == "FAILED"
+
+
+def test_capture_requested_just_after_arrival_waits_for_settled_exposure():
+    c, source, pair, now, motion = capture_fixture()
+    motion[0] = replace(motion[0], stationary_since_s=1.)
+    source.publish(pair)
+    c.start('g', {'requested_s': 1.})
+    assert c.poll('g').state == 'RUNNING'  # Earlier image cannot reach detector.
+    assert not c.detector.started
+    now[0] = 1.3
+    motion[0] = replace(motion[0], observed_s=1.3)
+    source.publish(replace(pair, frame=replace(pair.frame, capture_id='settled',
+        observed_s=1.3, transform_observed_s=1.3), depth_observed_s=1.3))
+    c.poll('g')
+    assert c.poll('g').state == 'SUCCEEDED'
+    assert c.result('g')[0].capture_id == 'settled'
+
+
+def test_movement_while_waiting_for_settled_capture_is_not_silently_rebased():
+    c, source, pair, now, motion = capture_fixture()
+    motion[0] = replace(motion[0], stationary_since_s=1.)
+    c.start('g', {'requested_s': 1.})
+    now[0] = 1.1
+    motion[0] = replace(motion[0], observed_s=1.1, pose_revision='new-pose')
+    c.poll('g')
+    assert c.poll('g').state == 'FAILED' and not c.detector.started

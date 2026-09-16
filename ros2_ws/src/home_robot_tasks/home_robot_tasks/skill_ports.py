@@ -66,9 +66,12 @@ class RoutedSkillAdapter:
         )
 
     def request_stop(self, run_id, preserve_load, now_s):
-        if self.active is not None:
-            self.active[1].cancel(self.active[0])
-        self.stop_backend.request(run_id, preserve_load, now_s)
+        try:
+            if self.active is not None:
+                self.active[1].cancel(self.active[0])
+        finally:
+            # Even a lost child cancel ACK must request the physical stop.
+            self.stop_backend.request(run_id, preserve_load, now_s)
 
     def poll_stop(self, run_id, now_s):
         result = self.stop_backend.poll(run_id, now_s)

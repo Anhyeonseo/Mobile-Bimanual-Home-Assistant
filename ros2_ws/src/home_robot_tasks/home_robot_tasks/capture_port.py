@@ -78,7 +78,8 @@ class CapturePort:
         clock,
         *,
         timeout_s=5,
-        maximum_rgb_depth_skew_s=0.02
+        maximum_rgb_depth_skew_s=0.02,
+        surface_sampler=None
     ):
         self.source, self.detector, self.camera, self.motion, self.clock = (
             source,
@@ -95,6 +96,7 @@ class CapturePort:
         ):
             raise InvalidTask("invalid capture bounds")
         self.entries = {}
+        self.surface_sampler = surface_sampler
         self.owner = None
 
     def ready(self):
@@ -107,7 +109,8 @@ class CapturePort:
         requested = number(parameters["requested_s"], "requested time")
         if not 0 <= requested <= now:
             raise InvalidTask("invalid capture request time")
-        self.camera.stationary_since(self.motion(), now)
+        motion = self.motion()
+        since = self.camera.stationary_since(motion, now)
         self.entries[goal_id] = {
             "state": "RUNNING",
             "port": self.source,
@@ -116,10 +119,15 @@ class CapturePort:
             "reason": "",
             "cancel": False,
             "pair": None,
+            "pose_revision": motion.pose_revision,
+            "parameters": dict(parameters),
         }
         self.owner = goal_id
         try:
-            self.source.start(goal_id, parameters)
+            # A capture requested immediately after lift/base arrival waits for
+            # a settled exposure, rather than consuming an earlier cached frame.
+            self.source.start(goal_id, {**parameters, "requested_s": max(
+                requested, since + self.camera.policy.settle_s)})
         except Exception as error:
             self._stop(goal_id, str(error))
 
@@ -157,6 +165,10 @@ class CapturePort:
                     e["state"] = e["destination"]
                     self.owner = None
                 return PortResult(e["state"], e["reason"])
+            motion = self.motion()
+            self.camera.stationary_since(motion, now)
+            if motion.pose_revision != e["pose_revision"]:
+                raise InvalidTask("pose_changed_during_capture")
             result = e["port"].poll(goal_id)
             if result.state in {"FAILED", "CANCELLED"}:
                 self._stop(goal_id, result.reason or "capture_backend_failed")
@@ -215,6 +227,7 @@ class CapturePort:
                             ),
                             "visible_regions": pair.visible_regions,
                             "occluded_regions": pair.occluded_regions,
+                            "surface_samples_uv_depth": self.surface_sampler(pair,e['parameters']) if self.surface_sampler else (),
                         },
                     )
                     e["state"] = "SUCCEEDED"

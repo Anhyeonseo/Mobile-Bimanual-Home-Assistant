@@ -27,6 +27,7 @@ void BimanualFeedbackSnapshot_UpdatePair(
     int32_t right_position_urad,
     uint32_t sampled_at_ms
 );
+void BimanualFeedbackSnapshot_InvalidatePair(uint8_t arm_joint);
 void BimanualFeedbackSnapshot_Copy(
     uint32_t now_ms,
     BimanualFeedbackSnapshot *snapshot

@@ -1,8 +1,9 @@
 """Mobile-safe route assembly adapted from the frozen P&P application.
 
-Reuses twelve-axis routing/opposite-arm hold and finite interpolation. Pose
+Reuses twelve-axis routing/opposite-arm hold, with quintic rest-to-rest timing. Pose
 planning/collision checking stay upstream. All calibration and rate limits are
-caller supplied; no old workcell poses, camera split or grasp offset is copied.
+caller supplied except explicit acceleration/jerk simulation candidates; no old
+workcell poses, camera split or grasp offset is copied. No new external PID loop.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ def route_for_arm(
     maximum_rad,
     max_speed_rad_s,
     interval_ms=50,
+    max_acceleration_rad_s2=(1.0,) * 12,
+    max_jerk_rad_s3=(8.0,) * 12,
 ):
     if (
         arm not in {"left", "right"}
@@ -39,7 +42,9 @@ def route_for_arm(
     hold = vector(opposite_hold, 6)
     lo, hi = vector(minimum_rad, 12), vector(maximum_rad, 12)
     speeds = vector(max_speed_rad_s, 12)
-    if any(a >= b for a, b in zip(lo, hi)) or any(v <= 0 for v in speeds):
+    accelerations = vector(max_acceleration_rad_s2, 12)
+    jerks = vector(max_jerk_rad_s3, 12)
+    if any(a >= b for a, b in zip(lo, hi)) or any(v <= 0 for v in (*speeds, *accelerations, *jerks)):
         raise InvalidTask("invalid joint limits")
 
     def within(values):
@@ -70,19 +75,26 @@ def route_for_arm(
             raise InvalidTask("unsupported plan step")
         target[other : other + 6] = hold
         within(target)
-        count = max(
-            1,
-            math.ceil(
-                max(abs(b - a) / speed for a, b, speed in zip(start, target, speeds))
-                / (interval_ms / 1000)
-            ),
+        # A task waypoint is a deliberate stop (e.g. grip before retreat).
+        # Quintic s=10u^3-15u^4+6u^5 starts/ends with zero v and a.
+        # Exact normalized peaks: v=15/8, a=10/sqrt(3), jerk=60.
+        duration = max(
+            max(1.875 * abs(b-a) / v,
+                math.sqrt((10/math.sqrt(3)) * abs(b-a) / acc),
+                (60 * abs(b-a) / jerk) ** (1/3))
+            for a,b,v,acc,jerk in zip(start,target,speeds,accelerations,jerks)
         )
+        if not math.isfinite(duration) or duration > 20000 * interval_ms / 1000:
+            raise InvalidTask("trajectory too long")
+        count = max(1, math.ceil(duration / (interval_ms / 1000)))
         if count + len(points) > 20000:
             raise InvalidTask("trajectory too long")
         offset = points[-1]["offset_ms"]
         for n in range(1, count + 1):
+            u = n / count
+            blend = u*u*u*(10 + u*(-15 + 6*u))
             position = (
-                tuple(a + (b - a) * n / count for a, b in zip(start, target))
+                tuple(a + (b - a) * blend for a, b in zip(start, target))
                 if n < count
                 else tuple(target)
             )

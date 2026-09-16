@@ -52,6 +52,9 @@ def simulation_parameters(description_dir: Path, limits_path: Path):
             max_velocity=min(0.5, float(bound.attrib["velocity"])),
             has_acceleration_limits=True,
             max_acceleration=1.0,
+            # Explicit simulation candidate; no implicit Ruckig fallback.
+            has_jerk_limits=True,
+            max_jerk=8.0,
         )
     if set(planning_limits) != set(limits["joint_order"]):
         raise InvalidTask("incomplete arm planning limits")
@@ -82,6 +85,7 @@ def simulation_parameters(description_dir: Path, limits_path: Path):
             ],
             "response_adapters": [
                 "default_planning_response_adapters/AddTimeOptimalParameterization",
+                "default_planning_response_adapters/AddRuckigTrajectorySmoothing",
                 "default_planning_response_adapters/ValidateSolution",
             ],
             "planner_configs": {

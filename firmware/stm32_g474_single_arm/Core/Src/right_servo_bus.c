@@ -1,4 +1,5 @@
 #include "right_servo_bus.h"
+#include "single_arm_config.h"
 #include "servo_transport.h"
 #include "actuator_core/sts3215_packet.h"
 
@@ -64,6 +65,7 @@ static volatile uint32_t right_servo_rx_wrap_count = 0U;
 static volatile uint32_t right_servo_uart_async_errors = 0U;
 static volatile uint32_t right_servo_dma_async_error = 0U;
 static RightServoTelemetry right_servo_telemetry = {0};
+static bool right_reader_shared;
 static RightServoInMotionTelemetrySnapshot
     right_servo_telemetry_snapshot = {0};
 
@@ -615,6 +617,11 @@ RightServoConfigureSnapshot RightServoBus_ConfigureAtPresentPositionOnce(
         (uint8_t)(torque_limit & 0xFFU),
         (uint8_t)(torque_limit >> 8U)
     };
+    const uint8_t acceleration[1] = {SERVO_STREAM_ACCELERATION_RAW};
+    const uint8_t goal_time[2] = {
+        (uint8_t)(SERVO_STREAM_GOAL_TIME_RAW & 0xFFU),
+        (uint8_t)(SERVO_STREAM_GOAL_TIME_RAW >> 8U)
+    };
     uint8_t pid_readback[3] = {0U};
     uint8_t mode_readback[1] = {0U};
     uint8_t runtime_readback[10] = {0U};
@@ -652,6 +659,10 @@ RightServoConfigureSnapshot RightServoBus_ConfigureAtPresentPositionOnce(
                               sizeof(position_mode)) != HAL_OK) ||
         (RightServo_WriteData(servo_id, UINT8_C(21), pid_data,
                               sizeof(pid_data)) != HAL_OK) ||
+        (RightServo_WriteData(servo_id, UINT8_C(41), acceleration,
+                              sizeof(acceleration)) != HAL_OK) ||
+        (RightServo_WriteData(servo_id, UINT8_C(44), goal_time,
+                              sizeof(goal_time)) != HAL_OK) ||
         (RightServo_WriteData(servo_id, UINT8_C(46), speed_and_torque,
                               sizeof(speed_and_torque)) != HAL_OK))
     {
@@ -697,6 +708,8 @@ RightServoConfigureSnapshot RightServoBus_ConfigureAtPresentPositionOnce(
         (snapshot.d_gain != d_gain) ||
         (snapshot.i_gain != 0U) ||
         (snapshot.operating_mode != 0U) ||
+        (runtime_readback[1] != SERVO_STREAM_ACCELERATION_RAW) ||
+        (RightServo_ReadU16Le(&runtime_readback[4]) != SERVO_STREAM_GOAL_TIME_RAW) ||
         (snapshot.goal_speed != goal_speed) ||
         (snapshot.torque_limit != torque_limit))
     {
@@ -803,8 +816,30 @@ static HAL_StatusTypeDef RightServoBus_InMotionTelemetryBeginOwned(void)
     return HAL_OK;
 }
 
+HAL_StatusTypeDef RightServoBus_PreparePeriodicReader(void)
+{
+    HAL_StatusTypeDef status = RightServoBus_InMotionTelemetryBegin();
+    if (status == HAL_OK) { right_servo_telemetry.enabled = 0U; right_reader_shared = true; }
+    return status;
+}
+
 HAL_StatusTypeDef RightServoBus_InMotionTelemetryBegin(void)
 {
+    if (right_reader_shared || !ServoTransport_ServiceAllowed())
+    {
+        if (!ServoTransport_BeginReadOnly(right_servo_uart, &right_service_token)) return HAL_BUSY;
+        HAL_StatusTypeDef status = HAL_ERROR;
+        if (RightServo_TelemetryDmaActive() && !right_servo_telemetry.enabled &&
+            !right_servo_uart_async_errors && !right_servo_dma_async_error)
+        {
+            memset(&right_servo_telemetry, 0, sizeof(right_servo_telemetry));
+            memset(&right_servo_telemetry_snapshot, 0, sizeof(right_servo_telemetry_snapshot));
+            right_servo_telemetry.enabled = 1U; status = HAL_OK;
+        }
+        if (ServoTransport_End(right_servo_uart, right_service_token, false) != HAL_OK) return HAL_ERROR;
+        right_service_token = 0U;
+        return status;
+    }
     if (!ServoTransport_BeginService(right_servo_uart, ACTUATOR_BUS_WORK_FEEDBACK, &right_service_token))
         return HAL_BUSY;
     HAL_StatusTypeDef status = RightServoBus_InMotionTelemetryBeginOwned();
@@ -816,6 +851,20 @@ HAL_StatusTypeDef RightServoBus_InMotionTelemetryBegin(void)
 
 void RightServoBus_InMotionTelemetryEnd(void)
 {
+    /* Shared circular RX belongs to the periodic runtime. A finite arm action
+     * ends only its read lease; it must not dismantle the mobile receiver. */
+    if (right_reader_shared || !ServoTransport_ServiceAllowed())
+    {
+        if (right_feedback_token != 0U)
+        {
+            if (HAL_UART_AbortTransmit(right_servo_uart) != HAL_OK) return;
+            HAL_Delay(RIGHT_SERVO_WRITE_SETTLE_MS);
+            if (ServoTransport_End(right_servo_uart, right_feedback_token, false) != HAL_OK) return;
+            right_feedback_token = 0U;
+        }
+        memset(&right_servo_telemetry, 0, sizeof(right_servo_telemetry));
+        return;
+    }
     if (right_feedback_token == 0U && !ServoTransport_BeginCleanup(
             right_servo_uart, &right_feedback_token)) return;
     if (HAL_UART_AbortTransmit(right_servo_uart) != HAL_OK ||
@@ -827,6 +876,17 @@ void RightServoBus_InMotionTelemetryEnd(void)
         memset(&right_servo_telemetry, 0, sizeof(right_servo_telemetry));
         right_feedback_token = 0U;
     }
+}
+
+uint8_t RightServoBus_InMotionTelemetryReleased(void)
+{
+    return right_feedback_token == 0U;
+}
+
+uint8_t RightServoBus_InMotionTelemetryCanStart(void)
+{
+    return right_servo_telemetry.enabled && !RightServoBus_InMotionTelemetryPending() &&
+        ServoTransport_ReadReady(right_servo_uart);
 }
 
 uint8_t RightServoBus_InMotionTelemetryPending(void)
@@ -884,7 +944,7 @@ HAL_StatusTypeDef RightServoBus_InMotionTelemetryStart(
     uint8_t joint_index,
     uint32_t started_at_ms)
 {
-    if (!ServoTransport_Begin(right_servo_uart, ACTUATOR_BUS_WORK_FEEDBACK, &right_feedback_token))
+    if (!ServoTransport_BeginReadOnly(right_servo_uart, &right_feedback_token))
         return HAL_BUSY;
     HAL_StatusTypeDef status = RightServoBus_InMotionTelemetryStartOwned(joint_index, started_at_ms);
     if (status == HAL_OK) return status;

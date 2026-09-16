@@ -5,6 +5,8 @@
 
 #include <stdint.h>
 
+HAL_StatusTypeDef RightServoBus_PreparePeriodicReader(void);
+
 /*
  * R0 is observation-only.  R1 adds one tightly bounded migration primitive:
  * one already-torque-enabled servo may receive one Goal_Position (address 42)
@@ -199,6 +201,8 @@ HAL_StatusTypeDef RightServoBus_DisableTorqueAll(void);
 #if HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD
 HAL_StatusTypeDef RightServoBus_InMotionTelemetryBegin(void);
 void RightServoBus_InMotionTelemetryEnd(void);
+uint8_t RightServoBus_InMotionTelemetryReleased(void);
+uint8_t RightServoBus_InMotionTelemetryCanStart(void);
 uint8_t RightServoBus_InMotionTelemetryPending(void);
 HAL_StatusTypeDef RightServoBus_InMotionTelemetryStart(
     uint8_t joint_index, uint32_t started_at_ms);

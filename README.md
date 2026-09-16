@@ -24,17 +24,20 @@ Nav2 도착만으로 집기를 시작하지 않는다. 베이스·리프트·팔
 
 ## 현재 상태
 
-현재 저장소에는 STM32 팔 펌웨어, 모바일 명령/응답·리프트·공유 버스·정지 C 코어, 미실측 조립체 모델과 작업 실행기가 있다. 인증 HTTP 서버에서 지도 지점 이동·상태·취소를 PC로 시험하고, 별도로 Python→C 코어→모의 STS 버스 통신을 반복 검증한다. 기존 P&P의 경로·그리퍼 방향 계산과 RGB-D 좌표 검사를 이식했다. 팔·모바일 host framing과 공유 UART 소유권을 통합했으며, 실제 Nav2·AMCL→공통 브릿지→C 바퀴 모형과 MoveIt 계획을 PC에서 검사했다. 모바일 주기 DMA 송신·모드/상태 수신기를 보드 루프에 연결하고 fake HAL로 시험했다. 실측 설정/모드 변경·전체 hold와 인식/집기 연결은 남아 있어 [로드맵](docs/ROADMAP.md)에 명시했다.
+현재 저장소에는 STM32 팔 펌웨어, 모바일 명령/응답·리프트·공유 버스·정지 C 코어, 미실측 조립체 모델과 작업 실행기가 있다. 인증 HTTP 서버에서 지도 지점 이동·상태·취소를 PC로 시험하고, 별도로 Python→C 코어→모의 STS 버스 통신을 반복 검증한다. 기존 P&P의 경로·그리퍼 방향 계산과 RGB-D 좌표 검사를 이식했다. 팔·모바일 host framing과 공유 UART 소유권을 통합했으며, 실제 Nav2·AMCL→공통 브릿지→C 바퀴 모형과 MoveIt 계획을 PC에서 검사했다. 모바일 주기 DMA 송신·모드/상태 수신기를 보드 루프에 연결하고 fake HAL로 시험했다. 모드 provisioning/readback·전체 hold·관측 생산/소비·공유 그리퍼·집기/놓기 11단계·표면 관측의 PC 구현과 검증을 마감했다. 실제 driver/scene 연결·실측 보정·모델 평가·전체 실기 배포는 남아 있으며, [로드맵](docs/ROADMAP.md)의 H0–H6와 평가 기준을 따른다.
 
-플랫폼은 ALOHA Mini 1로 확정했고 부품 출력·배송에 약 2주가 남아 있다(2026-09-15 기준). **LDS-01 2대는 Nav2 주행**, 리프트에 장착할 **D415는 정지 후 집기용 RGB-D 관측**에 사용한다. 기존 D435에서 D415로 변경하는 방향이며 실제 센서 수령·보정은 미확인이다. 보유한 **Jetson Orin Nano Devkit / Raspberry Pi 5 중 한 대**를 사용하며 로컬 영상·VLM 추론을 고려해 Jetson을 우선 검토한다. IMU는 보유 목록에 없다. [도착 전 준비 계획](docs/ROADMAP.md)에 소프트웨어 구현 범위, 보드 선택, 센서 시험과 도착 후 순서를 정리했다.
+플랫폼은 ALOHA Mini 1로 확정했고 부품 출력·배송에 약 2주가 남아 있다(2026-09-15 기준). **LDS-01 2대는 Nav2 주행**, 리프트에 장착할 **D415는 정지 후 집기용 RGB-D 관측과 주행 중 상부 장애물 관측**을 맡는다. 전·후방 RGB 각 1대는 의미 탐색용이며 깊이 안전 센서를 대신하지 않는다. 기존 D435에서 D415 사용으로 변경했으며 실제 장착·보정은 미확인이다. 보유한 **Jetson Orin Nano Devkit / Raspberry Pi 5 중 한 대**를 사용하며 로컬 영상·VLM 추론을 고려해 Jetson을 우선 검토한다. IMU는 보유 목록에 없다. [개발 로드맵](docs/ROADMAP.md)에 완료한 PC 범위, 도착 후 검증 순서, VLM·휴대폰·VLA의 완료 기준을 정리했다.
 
 펌웨어의 통신 공통화, 왼쪽 10개·오른쪽 6개 모터 구성과 모바일 동작 범위 정책은
 [펌웨어 점검](docs/ARCHITECTURE.md)에 정리했다. 바퀴·리프트 패킷 구성까지
 구현했고 공유 버스 중재·명령/피드백 timeout·리프트·전체 정지 코어도 시험했다. 기존 팔 서비스/피드백/DMA를 공통 보드 전송 계층으로 옮기고 모바일 대기열과 연결했다. 모바일 주기 writer와 host parser handler는 구현했고 기본 설정은 미연결이다. 장치 READ→응답 검증→4축 feedback 경로도 연결했다. 실측 설정의 부팅 초기화·모드 변경·전체 정지/하중 유지 연결은 남아 있다.
 
+최신 PC 마감은 관측/정렬/운반 전환을 포함한다. 결과와 실물 후속 경계는 [현재 상태](docs/CURRENT_STATUS.md#최종-pc-마감-범위)에 정리했다.
+
 ## 하드웨어 없는 확인
 
 저장소 루트에서 실행한다. 센서·보드·모터 없이 PC에서만 실행한다.
+주행 안전 검사까지 연결한 전체 작업은 `python3 tools/run/run_fetch_stack.py --guarded-navigation`으로 확인한다. 영상·공간·바퀴 피드백은 합성이다.
 
 ```bash
 python3 -m venv .venv-host
@@ -135,9 +138,27 @@ ctest --test-dir build/stm32_actuator-host --output-on-failure
 
 이전 수건 접기 개발은 [SO101-Towel-Folding](https://github.com/Anhyeonseo/SO101-Towel-Folding/tree/5b16fff82e400e4cca8cdcff96a6d1548058ef80)에 보관한다.
 
+## 전체 작업 틀을 하드웨어 없이 실행
+
+```bash
+python3 tools/run/run_fetch_stack.py
+python3 tools/run/run_fetch_stack.py --cancel-step 7
+python3 tools/run/run_fetch_stack.py --fault sensor_loss
+```
+
+등록 장소→관측 위치/리프트→RGB-D 좌표→계획/작업 실행을 조립한 15단계 모의 실행이다.
+센서·모터·집기 결과는 합성이며 실제 성공을 뜻하지 않는다. 설정 생성·ROS 증거 입력·
+재시작 복구와 남은 실물 연결은 [현재 상태](docs/CURRENT_STATUS.md)를 따른다.
+
 ## 실제 ROS 계획·주행의 PC 검사
 
-ROS Jazzy와 MoveIt/Nav2 의존성을 불러온 환경에서:
+ROS Jazzy와 MoveIt/Nav2 의존성 및 새 증거 메시지를 빌드한 환경에서:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build --base-paths ros2_ws/src --packages-select so101_interfaces so101_arm_bridge home_robot_tasks so101_description
+source install/setup.bash
+```
 
 ```bash
 export PYTHONPATH=ros2_ws/src/home_robot_tasks:ros2_ws/src/so101_arm_bridge:$PYTHONPATH
@@ -164,3 +185,9 @@ PYTHONPATH=ros2_ws/src/home_robot_tasks:ros2_ws/src/so101_arm_bridge python3 -m 
 ```
 
 기본 주소는 `http://127.0.0.1:8765`이며 token 파일에는 32자 이상의 무작위 접속 키를 넣는다. 화면은 키를 저장하지 않는다. 휴대폰의 LAN 접근에는 `--bind`, `--cert`, `--key`, 정확한 `--public-origin https://호스트:포트`를 함께 지정한다. 현재 화면과 gateway는 시뮬레이션용이다.
+
+## 2026-09-16 주행 구조 재점검
+
+Mini 1의 공식 소스 리비전을 고정해 Mini 2 기본값과 분리했다. 원 시각을 보존하는 `TwistStamped → 바퀴 명령/실측 odometry` 재사용 브릿지, native depth의 3D 점유→2D 주행 격자, 관측되지 않은 정지 거리 차단, 비동기 정지 후 지도 교체와 카메라 3대의 후보 TF를 추가했다. 실제 DDS/C 모형 및 기존 회귀를 검증한다. 상세 연결·검증 한계는 [구조](docs/ARCHITECTURE.md#2026-09-16-주행센서지도-재점검), 남은 기구/실측 확인은 [로드맵](docs/ROADMAP.md)을 따른다.
+
+한 대의 D415로 전신·전방 근거리·옆/뒤의 모든 공간을 볼 수 있다고 가정하지 않는다. `python3 tools/run/check_camera_coverage.py`로 장착 후보의 기하학적 사각을 먼저 확인한다. 예시 치수나 합성 성공은 실물 주행 승인 근거가 아니다.

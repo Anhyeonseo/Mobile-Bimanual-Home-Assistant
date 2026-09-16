@@ -24,6 +24,8 @@ class RobotApplication:
         initial_xy=(1.5, 1.5),
         exact_goal_simulation=True,
         task_timeout_s=DEFAULT_TASK_TIMEOUT_S,
+        lease=None,
+        admission=None,
     ):
         if adapter.mode != "simulation":
             raise InvalidTask("physical application is not commissioned")
@@ -32,16 +34,22 @@ class RobotApplication:
         self.task_timeout_s = _seconds(task_timeout_s, "task_timeout_s")
         if not 0 < self.task_timeout_s <= 3600:
             raise InvalidTask("task timeout must be within (0, 3600] seconds")
+        if admission is not None and not callable(admission):
+            raise InvalidTask("admission callback required")
+        self.admission = admission
         self.exact_goal_simulation = exact_goal_simulation
         navigation_map._cell(*initial_xy)
         self.world, self.map, self.adapter = deepcopy(world), navigation_map, adapter
         self.xy = tuple(initial_xy)
-        self.lease = TaskLease()
+        if lease is not None and not isinstance(lease, TaskLease):
+            raise InvalidTask("application requires a task lease")
+        self.lease = lease if lease is not None else TaskLease()
         self.tasks: dict[str, TaskExecutor] = {}
         self.requests: dict[str, dict] = {}
         self.plans: dict[str, dict] = {}
         self.now = 0.0
         self.pose_known = True
+        self.pending_map = None
 
     def _clock(self, now_s):
         now = _seconds(now_s, "now_s")
@@ -58,6 +66,8 @@ class RobotApplication:
             if self.requests[rid] != request:
                 raise InvalidTask("request_id_conflict")
             return self.status(rid)
+        if self.admission is not None and not self.admission():
+            raise InvalidTask("runtime not ready; explicit recovery may be required")
         if len(self.tasks) >= 128:
             raise InvalidTask("session_history_full")
         if self.lease.owner is not None:
@@ -132,6 +142,7 @@ class RobotApplication:
         self._clock(now_s)
         owner = self.lease.owner
         if owner is None:
+            self._commit_pending_map()
             return None
         task = self.tasks[owner]
         task.tick(self.now)
@@ -149,6 +160,7 @@ class RobotApplication:
                 self.xy, self.pose_known = (goal["x"], goal["y"]), True
             else:
                 self.pose_known = False
+        self._commit_pending_map()
         return self.status(owner)
 
     def cancel(self, request_id: str, now_s: float) -> dict:
@@ -168,10 +180,23 @@ class RobotApplication:
             if new_map.descriptor() != self.map.descriptor():
                 raise InvalidTask("map_revision_reused")
             return
+        if self.pending_map is not None:
+            if new_map.descriptor() != self.pending_map.descriptor():
+                raise InvalidTask("map_update_pending")
+            return
+        self.pending_map = new_map
+        self.pose_known = False
         owner = self.lease.owner
         if owner is not None:
             self.tasks[owner].cancel(self.now, "map_changed")
-        self.map, self.pose_known = new_map, False
+        self._commit_pending_map()
+
+    def _commit_pending_map(self):
+        # Cancellation is asynchronous. Keep old revision until whole stop
+        # confirmation releases the task lease, then require relocalization.
+        if self.pending_map is not None and self.lease.owner is None:
+            self.map, self.pending_map = self.pending_map, None
+            self.pose_known = False
 
     def localize_simulated(self, xy: tuple[float, float], now_s: float):
         self._clock(now_s)

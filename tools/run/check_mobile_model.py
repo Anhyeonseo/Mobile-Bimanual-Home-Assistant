@@ -22,6 +22,15 @@ def main():
     assert len(links) == len(set(links)) and len(children) == len(set(children))
     assert set(links) - set(children) == {"base_footprint"}
     assert len(joints) == len(links) - 1
+    mounts={j.attrib['name']:j for j in joints}
+    assert mounts['camera_mount'].find('parent').attrib['link']=='lift_link'
+    assert mounts['depth_optical'].find('parent').attrib['link']=='camera_link'
+    for name in ('front','rear'):
+        assert mounts[name+'_rgb_mount'].find('parent').attrib['link']=='base_link'
+        assert name+'_rgb_optical_frame' in links
+    tilted=ET.fromstring(xacro.process_file(str(ROOT/'ros2_ws/src/so101_description/urdf/alohamini.simulation.urdf.xacro'),
+                                           mappings={'camera_rpy':'0 0.25 0'}).toxml())
+    assert tilted.find("joint[@name='camera_mount']/origin").attrib['rpy']=='0 0.25 0'
     assert all(node.find("parent").attrib["link"] in links for node in joints)
     with tempfile.TemporaryDirectory(prefix="alohamini-model-") as directory:
         model = Path(directory) / "robot.urdf"

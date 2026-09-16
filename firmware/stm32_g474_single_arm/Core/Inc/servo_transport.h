@@ -36,6 +36,8 @@ bool ServoTransport_BeginCleanup(UART_HandleTypeDef *uart, uint32_t *token);
 HAL_StatusTypeDef ServoTransport_End(UART_HandleTypeDef *uart,
     uint32_t token, bool abort_tx);
 bool ServoTransport_Idle(UART_HandleTypeDef *uart);
+/* Read-only admission, including an inhibited but unowned UART. */
+bool ServoTransport_ReadReady(UART_HandleTypeDef *uart);
 void ServoTransport_RequestStop(UART_HandleTypeDef *uart);
 HAL_StatusTypeDef ServoTransport_Transmit(UART_HandleTypeDef *uart,
     uint32_t token, const uint8_t *data, uint16_t length, uint32_t timeout_ms);

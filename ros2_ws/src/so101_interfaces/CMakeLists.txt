@@ -6,6 +6,9 @@ find_package(std_msgs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BimanualJointFeedback.msg"
+  "msg/RobotStateEvidence.msg"
+  "msg/GripperObservation.msg"
+  "msg/PayloadVisualObservation.msg"
   "srv/BimanualStreamCommand.srv"
   DEPENDENCIES std_msgs trajectory_msgs
 )

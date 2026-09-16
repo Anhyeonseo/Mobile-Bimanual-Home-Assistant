@@ -53,6 +53,7 @@ jobs:
           python tools/run/validate_protocol_manifest.py
           python tools/setup/firmware/generate_protocol_header.py --check
           python tools/setup/firmware/generate_joint_limits.py --check
+          python tools/setup/firmware/check_servo_profile.py --check
       - name: Build and test firmware core on host
         run: |
           cmake -S firmware/stm32_actuator -B build/stm32_actuator-host
@@ -62,6 +63,12 @@ jobs:
         env:
           PYTHONPATH: ros2_ws/src/so101_arm_bridge
         run: python tools/run/soak_mobile_core.py --library build/stm32_actuator-host/libactuator_mobile_simulator.so --duration-s 3600
+      - name: Execute assembled hardware-free stack and fault cases
+        run: |
+          python tools/run/run_fetch_stack.py
+          for fault in sensor_loss reboot load_loss; do
+            python tools/run/run_fetch_stack.py --fault "$fault"
+          done
       - name: Generate a non-executable fetch plan
         env:
           PYTHONPATH: ros2_ws/src/home_robot_tasks
@@ -92,7 +99,7 @@ jobs:
       - name: Install model and action message dependencies
         run: |
           apt-get update
-          apt-get install --no-install-recommends -y ros-jazzy-nav2-msgs ros-jazzy-xacro ros-jazzy-urdf-parser-py python3-numpy
+          apt-get install --no-install-recommends -y ros-jazzy-nav2-msgs ros-jazzy-xacro ros-jazzy-urdfdom-py ros-jazzy-moveit-msgs python3-numpy python3-serial python3-colcon-common-extensions
       - name: Check assembly FK and synthetic ROS action transport
         shell: bash
         env:
@@ -103,6 +110,9 @@ jobs:
           export PYTHONPATH="$PWD/ros2_ws/src/home_robot_tasks:$PYTHONPATH"
           python3 tools/run/check_mobile_model.py
           python3 tools/run/check_nav2_action_port.py
+          colcon build --base-paths ros2_ws/src --packages-select so101_interfaces so101_arm_bridge home_robot_tasks
+          source install/setup.bash
+          python3 tools/run/check_fetch_ros_ports.py
 
   ros-integration:
     runs-on: ubuntu-24.04

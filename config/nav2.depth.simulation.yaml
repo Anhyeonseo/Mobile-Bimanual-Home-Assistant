@@ -1,0 +1,23 @@
+# PC candidate overlay. Load AFTER nav2.simulation.yaml.
+# Requires the guarded ROS assembly, not the legacy closed-loop test script.
+# Plugin merge is checked by check_depth_costmap.py; full route performance
+# and physical deployment remain unqualified. TravelGuard is REQUIRED.
+# /depth_grid is in odom; only the rolling LOCAL costmap consumes this grid.
+/offline_nav2/controller_server:
+  ros__parameters:
+    enable_stamped_cmd_vel: true
+/offline_nav2/local_costmap/local_costmap:
+  ros__parameters:
+    # Unknown remains blocked by TravelGuard; rolling StaticLayer max merge
+    # must not let NO_INFORMATION (255) hide a lethal cost (254).
+    track_unknown_space: false
+    # Jazzy StaticLayer reads use_maximum from the COSTMAP namespace.
+    use_maximum: true
+    plugins: [obstacle_layer, depth_layer, inflation_layer]
+    depth_layer:
+      plugin: nav2_costmap_2d::StaticLayer
+      enabled: true
+      map_topic: /offline_nav2/depth_grid
+      map_subscribe_transient_local: true
+      subscribe_to_updates: false
+      footprint_clearing_enabled: false

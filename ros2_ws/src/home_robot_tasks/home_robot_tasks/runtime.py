@@ -10,11 +10,12 @@ from .fetch import InvalidTask
 
 
 class RobotRuntime:
-    def __init__(self, application, clock, maintenance=(), *, maximum_tick_gap_s=0.1):
+    def __init__(self, application, clock, maintenance=(), *, maximum_tick_gap_s=0.1, observations=(), fault_stop=None):
         self.app, self.clock, self.maintenance = application, clock, tuple(maintenance)
         self.maximum_gap = number(maximum_tick_gap_s, "maximum control tick gap")
         if not 0 < self.maximum_gap <= 1:
             raise InvalidTask("invalid tick budget")
+        self.observations, self.fault_stop = tuple(observations), fault_stop
         self.last = None
         self.fault = None
         self.maximum_observed_gap_s = 0.0
@@ -27,12 +28,23 @@ class RobotRuntime:
             if gap < 0 or gap > self.maximum_gap:
                 self.fault = "control_tick_deadline"
         self.last = now
+        # Observations must continue during STOPPING so confirmation can arrive.
+        try:
+            for observe in self.observations:
+                observe()
+        except Exception as error:
+            self.fault = self.fault or f"observation:{error}"
         if self.fault is None:
             try:
                 for maintain in self.maintenance:
                     maintain()
             except Exception as error:
                 self.fault = f"bridge_maintenance:{error}"
+        if self.fault is not None and self.fault_stop is not None:
+            try:
+                self.fault_stop()
+            except Exception:
+                pass  # Retry next tick, never release admission on an uncertain stop.
         if self.fault is not None and self.app.lease.owner is not None:
             # Keep a monotonic application clock even when caller clock regresses.
             self.app.cancel(self.app.lease.owner, max(now, self.app.now))

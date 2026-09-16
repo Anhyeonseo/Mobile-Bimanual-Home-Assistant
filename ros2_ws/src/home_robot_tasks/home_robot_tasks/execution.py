@@ -68,8 +68,12 @@ def invariants(skill: str) -> tuple[str, ...]:
     elif skill == "search":
         # Composite search checks movement/observation invariants in each child.
         required += ["search_phase_safe"]
+    elif skill in {"prepare_navigation", "prepare_transport"}:
+        # The composite alternates stationary-platform arm movement and
+        # stationary-base lift movement; its phase monitor checks each case.
+        required += ["base_stopped", "preparation_phase_safe"]
     elif skill.startswith("align_"):
-        required += ["lift_stopped", "arms_safe_for_alignment"]
+        required += ["alignment_phase_safe"]
     elif skill.startswith("adjust_lift_"):
         required += ["base_stopped", "arms_safe_for_lift", "lift_homed"]
     else:

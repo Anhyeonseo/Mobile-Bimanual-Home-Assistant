@@ -91,3 +91,20 @@ def test_success_releases_port_only_after_evidence_arrives():
     stopped[0] = True
     assert adapter.poll("g", step, 0.2).status == "SUCCEEDED"
     assert adapter.active is None
+
+
+def test_cancel_exception_still_dispatches_whole_stop_and_retains_active_child():
+    import pytest
+    port = Port()
+    def broken_cancel(g):
+        raise RuntimeError('lost cancel ACK')
+    port.cancel = broken_cancel
+    stop = Stop(); calls = []
+    stop.request = lambda *args: calls.append(args)
+    adapter = RoutedSkillAdapter({'pick': port}, lambda *a: None, stop, mode='simulation')
+    adapter.start('run/pick', {'skill': 'pick', 'parameters': {}}, 0)
+    with pytest.raises(RuntimeError): adapter.request_stop('run', True, .1)
+    assert len(calls) == 1 and adapter.active is not None
+    assert adapter.poll_stop('run', .2).status == 'RUNNING'
+    port.state = 'CANCELLED'
+    assert adapter.poll_stop('run', .3).status == 'STOPPED'

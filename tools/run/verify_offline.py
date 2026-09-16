@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--stm32", action="store_true")
     parser.add_argument("--ros", action="store_true")
     parser.add_argument("--bundle", action="store_true")
+    parser.add_argument("--nav2-costmap", action="store_true", help="Actual Nav2 depth/laser layer merge test")
     parser.add_argument(
         "--moveit",
         action="store_true",
@@ -132,6 +133,7 @@ def main():
             ("protocol", "tools/run/validate_protocol_manifest.py"),
             ("protocol_header", "tools/setup/firmware/generate_protocol_header.py"),
             ("joint_limits", "tools/setup/firmware/generate_joint_limits.py"),
+            ("servo_profile", "tools/setup/firmware/check_servo_profile.py"),
         ]:
             run(
                 name,
@@ -204,6 +206,13 @@ def main():
             assert (
                 not result["absence_proven"] and not result["physical_task_completed"]
             )
+        run("fetch_stack", [sys.executable, "tools/run/run_fetch_stack.py"])
+        run("fetch_stack_guarded", [sys.executable, "tools/run/run_fetch_stack.py", "--guarded-navigation"])
+        for fault in ("sensor_loss", "reboot", "load_loss"):
+            run("fetch_stack_" + fault, [sys.executable, "tools/run/run_fetch_stack.py", "--fault", fault])
+        run("board_profile", [sys.executable, "tools/setup/firmware/prepare_mobile_profile.py",
+            "--profile", "config/mobile_board.simulation.json", "--output", str(out / "board-profile")])
+        run("camera_coverage", [sys.executable, "tools/run/check_camera_coverage.py"])
         if args.stm32:
             for profile in ("legacy", "resident"):
                 build = ROOT / f"build/offline-{profile}"
@@ -226,11 +235,14 @@ def main():
                     ["cmake", "--build", str(build), "--parallel", "2"],
                 )
         if args.ros:
+            run("navigation_bridge", [sys.executable, "tools/run/check_navigation_bridge.py"])
             run("mobile_model", [sys.executable, "tools/run/check_mobile_model.py"])
             run(
                 "nav2_action_port",
                 [sys.executable, "tools/run/check_nav2_action_port.py"],
             )
+        if args.ros:
+            run("fetch_ros_ports", [sys.executable, "tools/run/check_fetch_ros_ports.py"])
         if args.moveit:
             run(
                 "moveit_planning",
@@ -242,6 +254,8 @@ def main():
                     "--retain-moveit-plugin",
                 ],
             )
+        if args.nav2_costmap:
+            run("depth_costmap", [sys.executable, "tools/run/check_depth_costmap.py", "--output", str(out / "depth-costmap")])
         if args.nav2:
             for fault in ("none", "scan_loss", "tf_loss"):
                 run(

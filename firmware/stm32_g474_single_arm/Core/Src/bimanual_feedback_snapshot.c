@@ -59,6 +59,12 @@ void BimanualFeedbackSnapshot_UpdatePair(
     feedback.completed_pairs++;
 }
 
+void BimanualFeedbackSnapshot_InvalidatePair(uint8_t arm_joint)
+{
+    if (arm_joint >= BIMANUAL_FEEDBACK_ARM_JOINT_COUNT) return;
+    feedback.present_mask &= (uint16_t)~((1u << arm_joint) | (1u << (arm_joint + 6u)));
+}
+
 void BimanualFeedbackSnapshot_Copy(
     uint32_t now_ms,
     BimanualFeedbackSnapshot *snapshot)

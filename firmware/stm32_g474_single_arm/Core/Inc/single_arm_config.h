@@ -275,6 +275,11 @@
  */
 #define SERVO_GOAL_SPEED_RAW UINT16_C(800)
 
+/* Both arms stream timed positions from STM32. Do not leave a previous
+ * standalone servo ramp/time active on only one bus. No extra EEPROM writes. */
+#define SERVO_STREAM_ACCELERATION_RAW UINT8_C(0)
+#define SERVO_STREAM_GOAL_TIME_RAW UINT16_C(0)
+
 #if SERVO_SHOULDER_TORQUE_LIMIT_RAW >= SERVO_MOTION_LOAD_LIMIT_RAW
 #error "Shoulder torque cap must remain below the load safety threshold"
 #endif

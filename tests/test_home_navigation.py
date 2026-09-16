@@ -77,10 +77,13 @@ def test_idempotency_conflict_and_busy_goal_do_not_replace_active():
 def test_map_change_cancels_inflight_and_requires_new_localization():
     service=app(); req=request(); service.submit(req,0); service.tick(0)
     data=read('navigation_map.simulation.json'); data['revision']='synthetic-2'
+    old_revision=service.map.revision
     service.replace_map(NavigationMap(data),.1)
+    assert service.map.revision==old_revision and service.pending_map is not None
     assert service.status(req['request_id'])['reason']=='map_changed'
     assert service.lease.owner is not None
     service.tick(.3)
+    assert service.map.revision=='synthetic-2' and service.pending_map is None
     assert not service.pose_known
     req['request_id']='new';req['map_revision']='synthetic-2'
     with pytest.raises(InvalidTask,match='localization_required'): service.submit(req,.4)

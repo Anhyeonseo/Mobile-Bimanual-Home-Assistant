@@ -1,4 +1,5 @@
 #include "mobile_board.h"
+#include "mobile_arm_observer.h"
 #include "mobile_servo_output.h"
 #include "binary_control.h"
 #include "actuator_core/mobile_framed.h"
@@ -2271,6 +2272,7 @@ static void Host_ServiceBufferedExecution(void)
 
 static uint8_t Host_BinaryClearStopIsSafe(void)
 {
+    if (MobileBoard_StopActive()) return 1U;
     uint16_t current_positions[6] = {0U};
 
     if (Servo_ReadAllPositions(current_positions) != HAL_OK)
@@ -2541,6 +2543,26 @@ static void Host_ValidateV2StreamOpen(const actuator_frame_t *request)
 #endif
 }
 
+#if HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD && HOST_BIMANUAL_DMA_DISPATCH_BUILD
+static bool Host_PrepareArmMotionReference(void)
+{
+    if (!MobileBoard_PrepareArmMotion(host_v2_shadow_executor_anchor_urad)) return false;
+    if (!MobileArmObserver_HasStarted()) return true;
+    uint16_t left[6], right[6]; uint8_t failed;
+    if (BimanualOperationalLimits_MapExecutorOutput(host_v2_shadow_executor_anchor_urad,
+            left, right, &failed) != ACTUATOR_BIMANUAL_GOAL_MAP_OK) return false;
+    for (uint8_t j=0; j<12; j++)
+    {
+        uint16_t raw=j<6?left[j]:right[j-6]; int32_t unwrapped;
+        if (!BimanualOperationalLimits_UnwrapModuloRaw(j<6?BIMANUAL_ARM_LEFT:BIMANUAL_ARM_RIGHT,
+                j%6, raw, &unwrapped) ||
+            actuator_joint_unwrapper_bind(&host_v2_shadow_unwrappers[j], raw, unwrapped, 0)
+                != ACTUATOR_UNWRAP_OK) return false;
+    }
+    return true;
+}
+#endif
+
 static void Host_ValidateV2Batch(
     const actuator_frame_t *request,
     actuator_v2_batch_kind_t kind
@@ -2582,8 +2604,10 @@ static void Host_ValidateV2Batch(
         {
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
 #if HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD
-            if (BimanualTrackingFeedback_Begin() != HAL_OK)
+            if (!Host_PrepareArmMotionReference() ||
+                BimanualTrackingFeedback_Begin() != HAL_OK)
             {
+                if (MobileBoard_IsConfigured()) BinaryControl_LatchStop();
                 executor_result = ACTUATOR_V2_EXECUTOR_BAD_STATE;
             }
             else
@@ -2716,12 +2740,20 @@ static uint8_t Host_PerformV2CoordinatedStop(uint8_t dispatch_fault)
         BimanualServoDispatch_Stop();
     }
 #if HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD
-    BimanualTrackingFeedback_End();
+    if (!MobileBoard_StopActive()) BimanualTrackingFeedback_End();
 #if HOST_BIMANUAL_TERMINAL_SETTLE_BUILD
     host_v2_terminal_settle_active = 0U;
     host_v2_terminal_settle_baseline_completed_pairs = 0U;
 #endif
 #endif
+    if (MobileBoard_IsConfigured())
+    {
+        MobileBoard_RequestStop();
+        /* Queued hold is not physical stop confirmation. */
+        status = MobileBoard_StopState()->state == SYSTEM_STOP_CONFIRMED ? 0U : 1U;
+    }
+    else
+    {
     if (Servo_DisableTorqueAll() != HAL_OK)
     {
         status = 1U;
@@ -2729,6 +2761,7 @@ static uint8_t Host_PerformV2CoordinatedStop(uint8_t dispatch_fault)
     if (RightServoBus_DisableTorqueAll() != HAL_OK)
     {
         status = 1U;
+    }
     }
     host_binary_servos_configured = 0U;
     host_right_arm_output_active = 0U;
@@ -2749,6 +2782,7 @@ static uint8_t Host_PerformV2CoordinatedStop(uint8_t dispatch_fault)
 
 static uint8_t Host_ConfigureBimanualForTrajectory(void)
 {
+    if (MobileBoard_StopActive()) return 0U;
     uint16_t left_positions[6] = {0U};
 
     if (Servo_ConfigureAllForTrajectory(left_positions) != HAL_OK)
@@ -2785,6 +2819,7 @@ static uint8_t Host_ConfigureBimanualForTrajectory(void)
             return 0U;
         }
     }
+    if (!MobileBoard_ArmsPrepared()) return 0U;
     host_bimanual_arm_watchdog_grace_started_ms = HAL_GetTick();
     host_right_arm_output_active = 1U;
     return 1U;
@@ -2830,6 +2865,7 @@ static uint32_t Host_V2TrackingCompletedPairs(void)
 
 static void Host_ServiceV2TrackingFeedback(void)
 {
+    if (MobileBoard_StopActive() || MobileArmObserver_OwnsFeedback()) return;
     BimanualTrackingFeedbackSample sample;
     BimanualTrackingFeedbackResult feedback_result;
     const actuator_bimanual_dispatch_snapshot_t *dispatch;
@@ -2869,7 +2905,7 @@ static void Host_ServiceV2TrackingFeedback(void)
             sample.joint_index,
             left_measured_urad,
             right_measured_urad,
-            HAL_GetTick()
+            sample.observed_ms
         );
 #endif
 #if HOST_BIMANUAL_TRACKING_FAULT_INJECTION_BUILD
@@ -2939,7 +2975,7 @@ static void Host_ServiceV2TrackingFeedback(void)
     }
 
     dispatch = BimanualServoDispatch_GetSnapshot();
-    if ((BimanualTrackingFeedback_Pending() == 0U) &&
+    if (BimanualTrackingFeedback_CanStart() &&
         (dispatch != NULL) && !dispatch->active && !dispatch->faulted &&
         host_v2_stream_executor.output_valid &&
 #if HOST_BIMANUAL_TERMINAL_SETTLE_BUILD
@@ -3015,6 +3051,7 @@ static void Host_ServiceV2TrackingFeedback(void)
             host_v2_shadow_anchor_ready = 1U;
             host_v2_terminal_settle_active = 0U;
             BimanualTrackingFeedback_End();
+            MobileArmObserver_Resume();
         }
     }
 #else
@@ -3039,6 +3076,7 @@ static void Host_ServiceV2TrackingFeedback(void)
             );
             host_v2_shadow_anchor_ready = 1U;
             BimanualTrackingFeedback_End();
+            MobileArmObserver_Resume();
         }
     }
 #endif
@@ -3721,6 +3759,24 @@ static void Host_HandleBinaryFrame(
         case ACTUATOR_V2_MSG_MOBILE_REQUEST:
         {
             actuator_frame_t response;
+            if(request->payload_length==36 && request->payload[0]=='A' && request->payload[1]=='E') {
+                memset(&response,0,sizeof(response));response.message_type=ACTUATOR_V2_MSG_MOBILE_RESPONSE;
+                response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();response.payload_length=1;
+                response.payload[0]=MobileBoard_IsConfigured()?2:1;
+                if(request->flags==0 && MobileBoard_Evidence(request->payload,response.payload+1)){
+                    response.payload[0]=0;response.payload_length=65;
+                }
+                (void)Host_SendBinaryFrame(&response);break;
+            }
+            if(request->payload_length==36 && request->payload[0]=='A' && request->payload[1]=='Q') {
+                memset(&response,0,sizeof(response));response.message_type=ACTUATOR_V2_MSG_MOBILE_RESPONSE;
+                response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();response.payload_length=1;
+                response.payload[0]=MobileBoard_IsConfigured()?2:1;
+                if(request->flags==0 && MobileBoard_StopQuery(request->payload,response.payload+1)){
+                    response.payload[0]=0;response.payload_length=65;
+                }
+                (void)Host_SendBinaryFrame(&response);break;
+            }
             if(request->payload_length==36 && request->payload[0]=='A' && request->payload[1]=='L') {
                 memset(&response,0,sizeof(response));response.message_type=ACTUATOR_V2_MSG_MOBILE_RESPONSE;
                 response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();response.payload_length=1;
@@ -4185,6 +4241,14 @@ static void Host_HandleBinaryFrame(
             break;
 
         case ACTUATOR_MSG_DISABLE:
+            if (MobileBoard_IsConfigured() && request->payload_length == 0U)
+            {
+                /* Generic teardown must not drop a carried load. Mobile
+                 * torque removal requires a separate secured maintenance path. */
+                BinaryControl_LatchStop();
+                Host_SendBinaryState(request->sequence, 1U);
+                break;
+            }
             if (request->payload_length == 0U)
             {
                 actuator_safety_result_t disable_result =
@@ -4541,6 +4605,7 @@ uint8_t BinaryControl_StopIsLatched(void)
 
 void BinaryControl_LatchStop(void)
 {
+    MobileBoard_RequestStop();
     MobileServoOutput_Stop();
     actuator_lift_endpoint_stop(MobileBoard_LiftEndpoint());
     host_stop_latched = 1U;
@@ -4552,6 +4617,7 @@ void BinaryControl_LatchStop(void)
 
 void BinaryControl_ClearStopLatch(void)
 {
+    if (MobileBoard_StopActive()) return;
     host_stop_latched = 0U;
     Host_ResetPositionReadFailure();
 }
