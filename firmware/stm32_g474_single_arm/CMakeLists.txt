@@ -83,8 +83,20 @@ option(
     OFF
 )
 
+option(MOBILE_BUS_INSPECTION_ONLY "Read-only mobile bus maintenance; no arm/mobile motion" OFF)
+
+option(MOBILE_WHEEL_SETUP_ONLY "Wheel mode setup only; no torque enable or motion" OFF)
+
+option(MOBILE_WHEEL_PULSE_ONLY "Raised-wheel single bounded pulse; no arm/lift or EEPROM writes" OFF)
+
+option(MOBILE_BASE_TELEOP_ONLY "Manual base keyboard teleop with watchdog; no arm/lift writes" OFF)
+
 set(VALIDATION_CANDIDATE_COUNT 0)
 foreach(CANDIDATE_OPTION
+    MOBILE_BASE_TELEOP_ONLY
+    MOBILE_WHEEL_PULSE_ONLY
+    MOBILE_WHEEL_SETUP_ONLY
+    MOBILE_BUS_INSPECTION_ONLY
     F25_HOST_LINK_CANDIDATE
     PROTOCOL_V2_VALIDATION_CANDIDATE
     PROTOCOL_V2_EXECUTOR_CANDIDATE
@@ -145,6 +157,24 @@ set(CORE_SOURCES
     "${CORE_DIR}/Src/timebase.c"
     "${CORE_DIR}/Startup/startup_stm32g474retx.s"
 )
+
+if(MOBILE_BUS_INSPECTION_ONLY OR MOBILE_WHEEL_SETUP_ONLY OR MOBILE_WHEEL_PULSE_ONLY)
+    list(REMOVE_ITEM CORE_SOURCES "${CORE_DIR}/Src/single_arm_app.c")
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/mobile_bus_inspection_app.c")
+endif()
+
+if(MOBILE_WHEEL_SETUP_ONLY)
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/mobile_wheel_setup.c")
+endif()
+
+if(MOBILE_WHEEL_PULSE_ONLY)
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/mobile_wheel_pulse.c")
+endif()
+
+if(MOBILE_BASE_TELEOP_ONLY)
+    list(REMOVE_ITEM CORE_SOURCES "${CORE_DIR}/Src/single_arm_app.c")
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/mobile_base_teleop_app.c")
+endif()
 
 set(HAL_SOURCES
     "${DRIVER_DIR}/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal.c"
@@ -220,6 +250,25 @@ target_compile_definitions(
         USE_HAL_DRIVER
         STM32G474xx
 )
+
+if(MOBILE_BASE_TELEOP_ONLY)
+    target_compile_definitions(${TARGET_NAME} PRIVATE HOST_MOBILE_BASE_TELEOP_ONLY=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
+
+if(MOBILE_WHEEL_PULSE_ONLY)
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        HOST_MOBILE_WHEEL_PULSE_ONLY=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
+
+if(MOBILE_BUS_INSPECTION_ONLY)
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        HOST_MOBILE_BUS_INSPECTION_ONLY=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
+
+if(MOBILE_WHEEL_SETUP_ONLY)
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        HOST_MOBILE_WHEEL_SETUP_ONLY=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
 
 if(BIMANUAL_OPERATIONAL_LIMITS_CANDIDATE)
     # The existing one-servo +/-20 raw service remains bounded, but target
@@ -615,6 +664,20 @@ add_custom_command(
 )
 
 set(MOBILE_BOARD_PROFILE_HEADER "" CACHE FILEPATH "Explicit commissioned mobile profile header; empty disables boot setup")
+if((MOBILE_BUS_INSPECTION_ONLY OR MOBILE_WHEEL_SETUP_ONLY OR MOBILE_WHEEL_PULSE_ONLY OR MOBILE_BASE_TELEOP_ONLY) AND MOBILE_BOARD_PROFILE_HEADER)
+    message(FATAL_ERROR "Maintenance images must not include a runtime motion profile")
+endif()
 if(MOBILE_BOARD_PROFILE_HEADER)
     target_compile_definitions(${TARGET_NAME} PRIVATE MOBILE_BOARD_PROFILE_HEADER="${MOBILE_BOARD_PROFILE_HEADER}")
+endif()
+
+# Same motor allocation in normal output, feedback, provisioning and STOP.
+set(ACTUATOR_MOBILE_FIRST_ID "8" CACHE STRING "First of four consecutive mobile servo IDs; assembled robot uses 7")
+if(NOT ACTUATOR_MOBILE_FIRST_ID MATCHES "^[0-9]+$" OR ACTUATOR_MOBILE_FIRST_ID LESS 7 OR ACTUATOR_MOBILE_FIRST_ID GREATER 250)
+    message(FATAL_ERROR "ACTUATOR_MOBILE_FIRST_ID must be an integer in 7..250")
+endif()
+target_compile_definitions(${TARGET_NAME} PRIVATE ACTUATOR_MOBILE_FIRST_ID=${ACTUATOR_MOBILE_FIRST_ID})
+
+if((MOBILE_WHEEL_PULSE_ONLY OR MOBILE_BASE_TELEOP_ONLY) AND NOT ACTUATOR_MOBILE_FIRST_ID STREQUAL "7")
+    message(FATAL_ERROR "Raised-wheel pulse tool requires the inspected wheel IDs 7/8/9")
 endif()

@@ -123,11 +123,13 @@ int main(void)
 
   /* USER CODE BEGIN 2 */
   SingleArmApp_Init(&hlpuart1, &huart1);
+  #if !HOST_MOBILE_BUS_INSPECTION_ONLY && !HOST_MOBILE_WHEEL_SETUP_ONLY && !HOST_MOBILE_WHEEL_PULSE_ONLY && !HOST_MOBILE_BASE_TELEOP_ONLY
   RightServoBus_Init(&huart4);
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
   BimanualServoDispatch_Init(&huart1, &huart4);
 #endif
   (void)MobileBoard_Boot(&huart1, &huart4);
+  #endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -142,10 +144,12 @@ int main(void)
     BimanualServoDispatch_Poll();
 #endif
     SingleArmApp_Process();
+    #if !HOST_MOBILE_BUS_INSPECTION_ONLY && !HOST_MOBILE_WHEEL_SETUP_ONLY && !HOST_MOBILE_WHEEL_PULSE_ONLY && !HOST_MOBILE_BASE_TELEOP_ONLY
     MobileBoard_Poll();
     MobileServoOutput_Poll();
     MobileHoldOutput_Poll();
     MobileServoFeedback_Poll();
+    #endif
     F0Metrics_LoopEnd();
     /* USER CODE END 3 */
   }

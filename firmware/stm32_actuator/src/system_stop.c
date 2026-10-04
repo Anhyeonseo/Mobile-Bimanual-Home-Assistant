@@ -1,9 +1,10 @@
+#include "actuator_core/mobile_ids.h"
 #include "actuator_core/system_stop.h"
 #include "actuator_core/motor_groups.h"
 #include <string.h>
 
 static bool zero_packet(uint8_t packet[26],size_t *length) {
-    const uint8_t ids[4]={8,9,10,11};const uint16_t zero[4]={0};
+    const uint8_t ids[4]=ACTUATOR_MOBILE_IDS;const uint16_t zero[4]={0};
     return actuator_sts3215_build_sync_write_words(46,ids,zero,4,packet,length)==ACTUATOR_STS3215_PACKET_OK;
 }
 static bool receipt(const actuator_bus_router_t *r,uint32_t after,

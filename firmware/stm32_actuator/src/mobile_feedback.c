@@ -1,3 +1,4 @@
+#include "actuator_core/mobile_ids.h"
 #include "actuator_core/mobile_feedback.h"
 #include <string.h>
 
@@ -67,11 +68,11 @@ bool actuator_mobile_feedback_begin(actuator_mobile_feedback_reader_t *r,
      * opportunity; do not keep returning to the same motor and starve peers. */
     bool mode = !r->axes[axis].mode_verified ||
         now - r->axes[axis].mode_ms >= r->config.mode_timeout_ms / 2u;
-    if (actuator_sts3215_build_read((uint8_t)(8u + axis), mode ? 33u : 56u,
+    if (actuator_sts3215_build_read(actuator_mobile_axis_id(axis), mode ? 33u : 56u,
             mode ? 1u : 15u, request) != ACTUATOR_STS3215_PACKET_OK) return false;
     r->axis = (uint8_t)axis; r->reading_mode = mode; r->started_ms = now;
     r->active = true; r->reply_ready = false; r->received_bytes = 0;
-    actuator_sts_response_init(&r->parser, (uint8_t)(8u + axis), mode ? 1u : 15u);
+    actuator_sts_response_init(&r->parser, actuator_mobile_axis_id(axis), mode ? 1u : 15u);
     *token = ++r->token; return true;
 }
 bool actuator_mobile_feedback_feed(actuator_mobile_feedback_reader_t *r,

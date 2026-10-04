@@ -174,3 +174,10 @@ if(BUILD_TESTING)
     add_test(NAME actuator_bimanual_dispatch_tests COMMAND actuator_bimanual_dispatch_tests)
     add_test(NAME actuator_bimanual_goal_map_tests COMMAND actuator_bimanual_goal_map_tests)
 endif()
+
+# Same motor allocation in normal output, feedback, provisioning and STOP.
+set(ACTUATOR_MOBILE_FIRST_ID "8" CACHE STRING "First of four consecutive mobile servo IDs; assembled robot uses 7")
+if(NOT ACTUATOR_MOBILE_FIRST_ID MATCHES "^[0-9]+$" OR ACTUATOR_MOBILE_FIRST_ID LESS 7 OR ACTUATOR_MOBILE_FIRST_ID GREATER 250)
+    message(FATAL_ERROR "ACTUATOR_MOBILE_FIRST_ID must be an integer in 7..250")
+endif()
+target_compile_definitions(actuator_core PUBLIC ACTUATOR_MOBILE_FIRST_ID=${ACTUATOR_MOBILE_FIRST_ID})
