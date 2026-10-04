@@ -1,3 +1,4 @@
+#include "actuator_core/mobile_ids.h"
 #include "actuator_core/motor_groups.h"
 
 #include <stddef.h>
@@ -5,8 +6,8 @@
 static const actuator_motor_group_t groups[ACTUATOR_MOTOR_GROUP_COUNT] = {
     {ACTUATOR_BUS_LEFT_SHARED, 0u, 6u, {1u, 2u, 3u, 4u, 5u, 6u}},
     {ACTUATOR_BUS_RIGHT_ARM,   0u, 6u, {1u, 2u, 3u, 4u, 5u, 6u}},
-    {ACTUATOR_BUS_LEFT_SHARED, 1u, 3u, {8u, 9u, 10u, 0u, 0u, 0u}},
-    {ACTUATOR_BUS_LEFT_SHARED, 1u, 1u, {11u, 0u, 0u, 0u, 0u, 0u}}
+    {ACTUATOR_BUS_LEFT_SHARED, 1u, 3u, {ACTUATOR_WHEEL_0_ID, ACTUATOR_WHEEL_1_ID, ACTUATOR_WHEEL_2_ID, 0u, 0u, 0u}},
+    {ACTUATOR_BUS_LEFT_SHARED, 1u, 1u, {ACTUATOR_LIFT_ID, 0u, 0u, 0u, 0u, 0u}}
 };
 
 const actuator_motor_group_t *actuator_motor_group_get(actuator_motor_group_id_t group) {

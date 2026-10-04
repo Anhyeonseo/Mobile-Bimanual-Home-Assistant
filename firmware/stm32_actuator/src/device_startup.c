@@ -1,3 +1,4 @@
+#include "actuator_core/mobile_ids.h"
 #include "actuator_core/device_startup.h"
 #include "actuator_core/crc32c.h"
 #include <string.h>
@@ -19,7 +20,7 @@ bool actuator_device_startup_next(actuator_device_startup_t *s,uint32_t now,actu
     if(s==NULL||op==NULL)return false;
     actuator_device_startup_poll(s,now);
     if(s->state!=DEVICE_STARTUP_CHECKING||s->active||s->token==UINT32_MAX)return false;
-    actuator_device_operation_t x={.id=(uint8_t)(8+s->axis),.token=++s->token};
+    actuator_device_operation_t x={.id=actuator_mobile_axis_id(s->axis),.token=++s->token};
     /* identity -> mode -> (torque-off, unlock, mode, lock) -> mode readback -> lock readback */
     switch(s->phase){
     case 0:x.address=3;x.length=4;break;
@@ -41,7 +42,7 @@ bool actuator_device_startup_reply(actuator_device_startup_t *s,uint32_t token,c
     if(!ok||length!=(s->pending.write?0:s->pending.length)||(length&&data==NULL)){fault(s);return false;}
     switch(s->phase){
     case 0:if((uint16_t)(data[0]|((uint16_t)data[1]<<8))!=s->profile.model[s->axis]||
-              data[2]!=8+s->axis||data[3]!=s->profile.baud_code){fault(s);return false;}s->phase=1;break;
+              data[2]!=actuator_mobile_axis_id(s->axis)||data[3]!=s->profile.baud_code){fault(s);return false;}s->phase=1;break;
     case 1:if(data[0]==1)s->phase=7;
            else if(s->allow_mode_change)s->phase=2;
            else {fault(s);return false;}break;

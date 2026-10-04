@@ -2,6 +2,8 @@
 #include <stddef.h>
 #include <limits.h>
 #include "timebase.h"
+#include "single_arm_config.h"
+#include "actuator_core/mobile_ids.h"
 
 typedef struct {
     UART_HandleTypeDef *uart;
@@ -133,7 +135,70 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
 {
     ServoTransportOwner *bus = find_bus(uart);
     if (!owns(bus, token) || !bus->transmit_allowed || data == NULL || !length) return false;
+#if HOST_MOBILE_WHEEL_PULSE_ONLY || HOST_MOBILE_BASE_TELEOP_ONLY
+    /* Bench-only fixed pulse: no EEPROM, arm, lift, broadcast, or arbitrary
+     * speed writes through ANY transmit API. One packet per bus lease. */
+    if (bus->read_sent || length < 8 || length > 9 || data[0] != 255 || data[1] != 255 ||
+        data[3] != length - 4) return false;
+    bool wheel = data[2] >= ACTUATOR_WHEEL_0_ID && data[2] <= ACTUATOR_WHEEL_2_ID;
+    bool mobile = wheel || data[2] == ACTUATOR_LIFT_ID;
+    bool read = length == 8 && data[4] == 2 &&
+        (((mobile || data[2] == 1) && data[5] == 3 && data[6] == 4) ||
+         (mobile && ((data[5] == 33 && data[6] == 1) ||
+                     (data[5] == 40 && data[6] == 1) ||
+                     (data[5] == 56 && data[6] == 2))) ||
+         (wheel && ((data[5] == 55 && data[6] == 1) ||
+                    ((data[5] == 46 || data[5] == 58) && data[6] == 2))));
+    bool write = wheel && data[4] == 3 &&
+        ((length == 8 && data[5] == 40 && data[6] <= 1) ||
+         (length == 9 && data[5] == 46 &&
+          ((data[6] == 0 && data[7] == 0) ||
+           ((data[6] == 100 || data[6] == 200) && (data[7] == 0 || data[7] == 128)))));
+    unsigned pulse_sum = 0;
+    for (unsigned i = 2; i < length; ++i) pulse_sum += data[i];
+    if ((!read && !write) || (pulse_sum & 255u) != 255u) return false;
+    bus->read_sent = true;
+    return true;
+#elif HOST_MOBILE_WHEEL_SETUP_ONLY
+    /* Setup cannot enable torque or command a nonzero speed. A single UART
+     * transaction is allowed per lease, with checksum/ID/register/value gates. */
+    if (bus->read_sent || length < 8 || length > 9 || data[0] != 255 || data[1] != 255 ||
+        data[3] != length - 4) return false;
+    bool wheel = data[2] >= ACTUATOR_WHEEL_0_ID && data[2] <= ACTUATOR_WHEEL_2_ID;
+    bool mobile = wheel || data[2] == ACTUATOR_LIFT_ID;
+    bool identity = data[5] == 3 && data[6] == 4;
+    bool read = length == 8 && data[4] == 2 &&
+        (((mobile || data[2] == 1) && identity) ||
+         (mobile && ((data[5] == 33 && data[6] == 1) ||
+                     (data[5] == 40 && data[6] == 1) ||
+                     (data[5] == 56 && data[6] == 2))) ||
+         (wheel && ((data[5] == 55 && data[6] == 1) ||
+                    (data[5] == 46 && data[6] == 2))));
+    bool write = wheel && data[4] == 3 &&
+        ((length == 8 && ((data[5] == 55 && data[6] <= 1) ||
+                         (data[5] == 33 && data[6] == 1) ||
+                         (data[5] == 40 && data[6] == 0))) ||
+         (length == 9 && data[5] == 46 && data[6] == 0 && data[7] == 0));
+    unsigned setup_sum = 0;
+    for (unsigned i = 2; i < length; ++i) setup_sum += data[i];
+    if ((!read && !write) || (setup_sum & 255u) != 255u) return false;
+    bus->read_sent = true;
+    return true;
+#elif HOST_MOBILE_BUS_INSPECTION_ONLY
+    /* Maintenance image: every HAL transmit path is READ-only, even if a
+     * caller accidentally obtains a normal service lease. No broadcasts,
+     * arm writes, torque changes, or arbitrary register access.
+     * ID 1 identity alone is allowed as a known left-arm reference. */
+    if (length != 8 ||
+        !((data[2] >= ACTUATOR_WHEEL_0_ID && data[2] <= ACTUATOR_LIFT_ID) ||
+          (data[2] == 1 && data[5] == 3 && data[6] == 4)) ||
+        !((data[5] == 3 && data[6] == 4) ||
+          (data[5] == 33 && data[6] == 1) ||
+          (data[5] == 40 && data[6] == 1) ||
+          (data[5] == 56 && data[6] == 2))) return false;
+#else
     if (!bus->read_only) return true;
+#endif
     /* Inverted sum, ID through last parameter. Limit responses to our parser. */
     if (bus->read_sent || length != 8 || data[0] != 255 || data[1] != 255 ||
         !data[2] || data[2] >= 254 || data[3] != 4 || data[4] != 2 ||

@@ -33,10 +33,10 @@ typedef enum {
     ACTUATOR_GROUP_PACKET_ERROR
 } actuator_motor_group_result_t;
 
-/* Fixed AlohaMini 1 allocation; this is configuration, not device discovery. */
+/* Compile-time mobile_ids.h allocation; not device discovery. */
 const actuator_motor_group_t *actuator_motor_group_get(actuator_motor_group_id_t group);
 
-/* Exact whole-group frames: an arm position frame never includes IDs 8..11.
+/* Exact whole-group frames: an arm position frame never includes mobile IDs.
  * These functions only build bytes. They do not set/verify operating mode,
  * transmit, arbitrate the shared bus, or bypass existing safety limits. */
 actuator_motor_group_result_t actuator_motor_group_positions(

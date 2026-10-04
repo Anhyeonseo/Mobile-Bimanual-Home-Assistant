@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 15
     strategy:
       matrix:
-        profile: [legacy, resident]
+        profile: [legacy, resident, mobile-inspection, mobile-setup, mobile-pulse, mobile-teleop]
     steps:
       - uses: actions/checkout@v4
       - name: Install ARM toolchain
@@ -24,12 +24,19 @@ jobs:
         env:
           PROFILE: ${{ matrix.profile }}
         run: |
-          resident=OFF
-          if [ "$PROFILE" = resident ]; then resident=ON; fi
+          options=()
+          case "$PROFILE" in
+            legacy) ;;
+            resident) options+=(-DBIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE=ON) ;;
+            mobile-inspection) options+=(-DMOBILE_BUS_INSPECTION_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
+            mobile-setup) options+=(-DMOBILE_WHEEL_SETUP_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
+            mobile-pulse) options+=(-DMOBILE_WHEEL_PULSE_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
+            mobile-teleop) options+=(-DMOBILE_BASE_TELEOP_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
+            *) exit 1 ;;
+          esac
           cmake -S firmware/stm32_g474_single_arm -B build/stm32 \
             -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE="$resident"
+            -DCMAKE_BUILD_TYPE=Release "${options[@]}"
           cmake --build build/stm32 --parallel 2
   hardware-free:
     runs-on: ubuntu-24.04

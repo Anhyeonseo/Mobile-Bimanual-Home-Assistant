@@ -1,3 +1,4 @@
+#include "actuator_core/mobile_ids.h"
 #include "actuator_core/mobile_output.h"
 #include "actuator_core/motor_groups.h"
 #include <string.h>
@@ -31,7 +32,7 @@ void actuator_mobile_output_stop(actuator_mobile_output_t *o,actuator_mobile_out
 }
 static void queue_stop(actuator_mobile_output_t *o,uint32_t now) {
     uint8_t packet[ACTUATOR_STS3215_SYNC_WRITE_POSITION_PACKET_SIZE];size_t length;
-    const uint8_t ids[4]={8,9,10,11};const uint16_t zero[4]={0,0,0,0};
+    const uint8_t ids[4]=ACTUATOR_MOBILE_IDS;const uint16_t zero[4]={0,0,0,0};
     if(o->stop_written || o->router.jobs[0].pending ||
        (o->router.bus.active && o->router.bus.owner==ACTUATOR_BUS_WORK_STOP))return;
     if(actuator_sts3215_build_sync_write_words(46,ids,zero,4,packet,&length)!=ACTUATOR_STS3215_PACKET_OK ||
@@ -126,8 +127,8 @@ void actuator_mobile_output_completed(actuator_mobile_output_t *o,actuator_bus_w
     if(o==NULL || !o->configured || o->router.bus.active || o->router.bus.faulted || kind!=o->router.bus.owner)return;
     if(o->lift_control!=NULL) {
         const uint8_t *p=o->router.active_bytes;
-        bool zero_lift=kind==ACTUATOR_BUS_WORK_LIFT && o->router.active_length==11 && p[5]==46 && p[7]==11 && !p[8] && !p[9];
-        bool zero_all=kind==ACTUATOR_BUS_WORK_STOP && o->router.active_length==20 && p[5]==46 && p[16]==11 && !p[17] && !p[18];
+        bool zero_lift=kind==ACTUATOR_BUS_WORK_LIFT && o->router.active_length==11 && p[5]==46 && p[7]==ACTUATOR_LIFT_ID && !p[8] && !p[9];
+        bool zero_all=kind==ACTUATOR_BUS_WORK_STOP && o->router.active_length==20 && p[5]==46 && p[16]==ACTUATOR_LIFT_ID && !p[17] && !p[18];
         if(zero_lift||zero_all)actuator_lift_zero_sent(o->lift_control->lift,ms);
     }
     if(o->writes_completed!=UINT32_MAX)o->writes_completed++;
