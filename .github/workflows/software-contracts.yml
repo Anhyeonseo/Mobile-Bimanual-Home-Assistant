@@ -8,6 +8,22 @@ permissions:
   contents: read
 
 jobs:
+  rgbd-geometry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install RGB-D geometry test dependencies (no model weights)
+        run: >-
+          python -m pip install pytest==8.4.2 numpy==1.26.4
+          opencv-python-headless==4.10.0.84 pyrealsense2==2.58.4.10922
+      - name: Verify raw depth, SAM mask geometry and frozen web snapshots
+        run: >-
+          python -m pytest -c config/pytest.ini --rootdir=. -q
+          tests/test_grounding_rgbd.py tests/test_realsense_web.py
   stm32-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

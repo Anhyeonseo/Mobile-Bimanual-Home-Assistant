@@ -1,0 +1,4 @@
+# Standalone desktop viewer; keep separate from host.txt's headless OpenCV.
+pyrealsense2==2.58.4.10922
+numpy>=1.26,<3
+opencv-python==4.10.0.84

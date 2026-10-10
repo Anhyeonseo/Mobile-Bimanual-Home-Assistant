@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jetson · RGB-D</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#10151b;color:#edf2f7}
+body{max-width:1280px;margin:0 auto;padding:24px}header{display:flex;justify-content:space-between;align-items:center;gap:16px}h1{font-size:24px;margin:0}p{color:#aebccb;line-height:1.6}.badge{border:1px solid #526374;border-radius:20px;padding:6px 14px;font-size:14px}.online{color:#82e5b3;border-color:#337652}
+.labels{display:grid;grid-template-columns:1fr 1fr;margin-top:22px;background:#202b37;padding:10px 16px;border-radius:10px 10px 0 0}.labels span:last-child{text-align:right}img{display:block;width:100%;background:#080d12}#live{min-height:180px;border-radius:0 0 10px 10px}form{display:flex;gap:10px;margin-top:24px}input,button{font:inherit;border-radius:8px;padding:12px 16px;border:1px solid #526374}input{flex:1;min-width:0;background:#1c2631;color:white}button{background:#88d9c3;color:#09281f;font-weight:650;cursor:pointer}button:disabled{opacity:.5;cursor:wait}#status{min-height:26px}#result{margin-top:24px;border-top:1px solid #334354;padding-top:12px}#result img{max-width:800px;border-radius:10px}table{border-collapse:collapse;width:100%;margin:16px 0;font-variant-numeric:tabular-nums}td,th{text-align:left;padding:10px;border-bottom:1px solid #334354;font-size:14px}small{color:#aebccb}.error{color:#ffb0a8}h2{font-size:19px}a{color:#88d9c3}@media(max-width:600px){body{padding:12px}header{align-items:start}form{flex-wrap:wrap}button{width:100%}td,th{padding:6px;font-size:12px}}
+</style>
+<header><div><h1>Jetson · RGB-D</h1><p>D415 실시간 영상 · Grounding DINO + SAM</p></div><span class="badge" id="connection">연결 중</span></header>
+<div class="labels"><span>RGB</span><span>깊이 · 파랑: 가까움 / 빨강: 멂</span></div>
+<img id="live" alt="젯슨 카메라의 실시간 RGB와 깊이 영상">
+<p id="metrics">카메라 프레임을 기다리는 중입니다.</p>
+<form id="search"><input id="prompt" aria-label="찾을 물체" maxlength="200" value="black marker pen" placeholder="black marker pen, blue screwdriver…" required><button id="submit" disabled>찾고 마스킹</button></form>
+<p id="status" role="status" aria-live="polite">영어로 찾을 물체를 입력하세요. 첫 검색은 모델을 준비합니다.</p>
+<small>깊이 영상의 검정은 측정값이 없는 부분입니다. 버튼을 누른 시점의 촬영본을 분석하며, 아래 결과는 촬영 당시 화면입니다.</small>
+<section id="result" hidden><h2>촬영본 분석 결과</h2><p id="result-meta"></p><img id="result-image" alt="촬영본의 탐지 박스와 카메라 좌표"><table><thead><tr><th>후보</th><th>물체</th><th>탐지 점수</th><th>SAM 품질</th><th>카메라 XYZ (m)</th></tr></thead><tbody id="rows"></tbody></table><p>색으로 표시한 영역은 SAM 물체 마스크입니다. XYZ는 마스크 내부의 실제 깊이로 계산한 표면점 추정치입니다. 여러 후보에 오탐이 포함될 수 있습니다. X 오른쪽 · Y 아래 · Z 전방.</p></section>
+<script>
+const $=id=>document.getElementById(id);let rendered=-1,submitting=false;
+const live=$('live');function refreshImage(){live.src='/frame.jpg?t='+Date.now()}live.onload=()=>setTimeout(refreshImage,125);live.onerror=()=>setTimeout(refreshImage,1000);refreshImage();
+async function poll(){try{const response=await fetch('/api/status');if(!response.ok)throw Error('연결 응답 오류');const s=await response.json();$('connection').textContent=s.camera_ready?'실시간 연결됨':'영상 대기 / 연결 확인';$('connection').className='badge'+(s.camera_ready?' online':'');$('submit').disabled=!s.camera_ready||s.busy||submitting;$('metrics').textContent=s.camera_error|| (s.fps==null?'프레임 대기 중':`카메라 수신 ${s.fps.toFixed(1)} fps · 깊이 유효 픽셀 ${s.valid_depth_percent.toFixed(1)}% · 프레임 ${s.sequence}${s.camera_ready?'':' · 영상 갱신 지연'}`);$('status').textContent=s.error||s.phase+(s.query?' · '+s.query:'');$('status').className=s.error?'error':'';
+if(!s.report){$('result').hidden=true;rendered=-1}else if(rendered!==s.result_id){rendered=s.result_id;const r=s.report;$('result').hidden=false;$('result-image').src='/result.jpg?v='+s.result_id;$('result-meta').textContent=`${r.prompt} · ${r.status} · 추론 ${r.inference_seconds.toFixed(2)}초${r.segmentation?' (DINO '+r.detection_seconds.toFixed(2)+' + SAM '+r.segmentation_seconds.toFixed(2)+')':''} · 촬영 ${new Date(r.captured_at_utc).toLocaleString()}`;$('rows').replaceChildren();for(const d of r.detections){const tr=document.createElement('tr'),p=d.surface_point;for(const value of ['#'+d.id,d.label,d.score.toFixed(2),d.segmentation?d.segmentation.predicted_iou.toFixed(2):'—',p.valid?p.xyz_m.map(v=>v.toFixed(3)).join(', '):'깊이 없음: '+p.reason]){const td=document.createElement('td');td.textContent=value;tr.append(td)}$('rows').append(tr)}}
+}catch(e){$('connection').textContent='연결 끊김';$('connection').className='badge';$('submit').disabled=true;$('metrics').textContent='마지막 영상입니다. SSH 연결과 젯슨 서버를 확인하세요.'}finally{setTimeout(poll,500)}}poll();
+$('search').addEventListener('submit',async event=>{event.preventDefault();submitting=true;$('submit').disabled=true;try{const r=await fetch('/api/detect',{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'rgbd-viewer'},body:JSON.stringify({prompt:$('prompt').value})});const data=await r.json();if(!r.ok)throw Error(data.error);$('result').hidden=true;rendered=-1}catch(e){$('status').textContent=e.message;$('status').className='error'}finally{submitting=false}});
+</script>
+</html>
