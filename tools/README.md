@@ -27,3 +27,9 @@
 평가 기록은 요청/모델·프롬프트 revision, 영상/시각/TF/지도 revision, 수동 정답, 후보/선택·보류 이유,
 실행 결과·개입·구간 시간을 연결한다. 같은 입력과 시간 예산에서 한 요소씩 바꿔 재생·실물 비교하고,
 모의 성공·실영상 인식 성공·물리적 배달 성공을 별도 집계한다. 상세 기준은 별도 메인 문서 없이 로드맵에 둔다.
+
+## D415 실물 RGB-D 실험
+
+[RealSense 안내](../docs/REALSENSE.md): 독립 뷰어, Grounding DINO 키워드 검색, SAM 마스킹과 카메라 좌표를 확인한다.
+`bash tools/run/realsense_remote_viewer.sh near`로 Jetson의 RGB·깊이·검색 결과를 PC 브라우저에서 본다.
+이 도구의 좌표는 RGB 카메라 기준 표면점이며 로봇/작업대 TF, 파지 자세, ROS 실행기와 아직 연결하지 않는다.

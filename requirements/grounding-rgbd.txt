@@ -1,0 +1,6 @@
+-r realsense.txt
+# Install CUDA PyTorch first as documented in docs/REALSENSE.md.
+torch==2.10.0
+torchvision==0.25.0
+transformers==4.57.6
+Pillow>=10,<13
