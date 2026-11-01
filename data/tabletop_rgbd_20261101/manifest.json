@@ -1,0 +1,179 @@
+{
+  "capture_count": 10,
+  "category_counts": {
+    "mixed_objects": 2,
+    "similar_objects": 2,
+    "remote_only": 2,
+    "same_objects": 2,
+    "misc_objects": 2
+  },
+  "captures": [
+    {
+      "index": 1,
+      "category": "mixed_objects",
+      "objects": [
+        "cup",
+        "remote control",
+        "calculator"
+      ],
+      "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T105957_680371Z",
+      "captured_at_utc": "2026-11-01T10:59:57.538976+00:00",
+      "visual_check": "Three objects fully visible; raw depth contains missing pixels on the dark cup.",
+      "status": "captured",
+      "folder": "01_mixed_objects",
+      "valid_aligned_depth_pixels": 276964,
+      "total_aligned_depth_pixels": 307200,
+      "valid_aligned_depth_percent": 90.15755208333334
+    },
+    {
+      "index": 2,
+      "category": "mixed_objects",
+      "objects": [
+        "cup",
+        "remote control",
+        "calculator"
+      ],
+      "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T110405_181337Z",
+      "captured_at_utc": "2026-11-01T11:04:05.088383+00:00",
+      "visual_check": "Cup left, remote center, calculator right; raw depth has missing pixels on dark cup.",
+      "status": "captured",
+      "folder": "02_mixed_objects",
+      "valid_aligned_depth_pixels": 272284,
+      "total_aligned_depth_pixels": 307200,
+      "valid_aligned_depth_percent": 88.63411458333333
+    },
+    {
+      "index": 3,
+      "category": "similar_objects",
+      "objects": [
+        "remote control",
+        "marker pen",
+        "utility knife"
+      ],
+      "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T110600_431147Z",
+      "captured_at_utc": "2026-11-01T11:06:00.394906+00:00",
+      "visual_check": "Utility knife left, remote center, marker pen right; all within frame and separated.",
+      "status": "captured",
+      "folder": "03_similar_objects",
+      "valid_aligned_depth_pixels": 289136,
+      "total_aligned_depth_pixels": 307200,
+      "valid_aligned_depth_percent": 94.11979166666666
+    },
+    {
+      "index": 4,
+      "category": "similar_objects",
+      "objects": [
+        "remote control",
+        "marker pen",
+        "utility knife"
+      ],
+      "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T110730_260784Z",
+      "captured_at_utc": "2026-11-01T11:07:30.199733+00:00",
+      "visual_check": "Marker pen left, utility knife center, remote right; separated and within frame.",
+      "status": "captured",
+      "folder": "04_similar_objects",
+      "valid_aligned_depth_pixels": 289612,
+      "total_aligned_depth_pixels": 307200,
+      "valid_aligned_depth_percent": 94.27473958333333
+    },
+    {
+      "index": 5,
+      "category": "remote_only",
+      "objects": [
+        "remote control"
+      ],
+      "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T111244_707329Z",
+      "captured_at_utc": "2026-11-01T11:12:44.639640+00:00",
+      "visual_check": "Single remote near table center, oriented vertically, fully within frame.",
+      "status": "captured",
+      "folder": "05_remote_only",
+      "valid_aligned_depth_pixels": 288914,
+      "total_aligned_depth_pixels": 307200,
+      "valid_aligned_depth_percent": 94.04752604166666
+    },
+    {
+      "index": 6,
+      "category": "remote_only",
+      "objects": [
+        "remote control"
+      ],
+      "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T111626_477759Z",
+      "captured_at_utc": "2026-11-01T11:16:26.416803+00:00",
+      "visual_check": "Single remote left of center, nearly horizontal at a diagonal, fully within frame.",
+      "status": "captured",
+      "folder": "06_remote_only",
+      "valid_aligned_depth_pixels": 289206,
+      "total_aligned_depth_pixels": 307200,
+      "valid_aligned_depth_percent": 94.142578125
+    },
+    {
+      "index": 7,
+      "category": "same_objects",
+      "objects": [
+        "cup",
+        "cup"
+      ],
+      "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T111929_719268Z",
+      "captured_at_utc": "2026-11-01T11:19:29.692986+00:00",
+      "visual_check": "Two black cups separated left and right, fully within RGB frame; raw depth has missing pixels on cups.",
+      "status": "captured",
+      "folder": "07_same_objects",
+      "valid_aligned_depth_pixels": 269212,
+      "total_aligned_depth_pixels": 307200,
+      "valid_aligned_depth_percent": 87.63411458333333
+    },
+    {
+      "index": 8,
+      "category": "same_objects",
+      "objects": [
+        "cup",
+        "cup"
+      ],
+      "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T112023_641007Z",
+      "captured_at_utc": "2026-11-01T11:20:23.547638+00:00",
+      "visual_check": "Two black cups at different distances, within RGB frame. Front cup partially occludes the lower rear cup. Raw depth has missing pixels on cups.",
+      "status": "captured",
+      "folder": "08_same_objects",
+      "valid_aligned_depth_pixels": 256820,
+      "total_aligned_depth_pixels": 307200,
+      "valid_aligned_depth_percent": 83.60026041666667
+    },
+    {
+      "index": 9,
+      "category": "misc_objects",
+      "objects": [
+        "cup",
+        "remote control",
+        "marker pen",
+        "utility knife"
+      ],
+      "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T112140_342653Z",
+      "captured_at_utc": "2026-11-01T11:21:40.284742+00:00",
+      "visual_check": "Four objects separated within RGB frame: cup center-left, remote center-right, marker right, utility knife foreground. Calculator not present. Raw depth has missing pixels on dark objects.",
+      "status": "captured",
+      "folder": "09_misc_objects",
+      "valid_aligned_depth_pixels": 278126,
+      "total_aligned_depth_pixels": 307200,
+      "valid_aligned_depth_percent": 90.53580729166667
+    },
+    {
+      "index": 10,
+      "category": "misc_objects",
+      "objects": [
+        "cup",
+        "remote control",
+        "calculator",
+        "marker pen",
+        "utility knife"
+      ],
+      "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T112304_911099Z",
+      "captured_at_utc": "2026-11-01T11:23:04.849761+00:00",
+      "visual_check": "Five objects within RGB frame; marker pen slightly overlaps calculator lower edge. Raw depth has missing pixels on dark objects.",
+      "status": "captured",
+      "folder": "10_misc_objects",
+      "valid_aligned_depth_pixels": 281372,
+      "total_aligned_depth_pixels": 307200,
+      "valid_aligned_depth_percent": 91.59244791666666
+    }
+  ]
+}

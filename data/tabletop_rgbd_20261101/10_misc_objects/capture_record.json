@@ -1,0 +1,15 @@
+{
+  "index": 10,
+  "category": "misc_objects",
+  "objects": [
+    "cup",
+    "remote control",
+    "calculator",
+    "marker pen",
+    "utility knife"
+  ],
+  "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T112304_911099Z",
+  "captured_at_utc": "2026-11-01T11:23:04.849761+00:00",
+  "visual_check": "Five objects within RGB frame; marker pen slightly overlaps calculator lower edge. Raw depth has missing pixels on dark objects.",
+  "status": "captured"
+}

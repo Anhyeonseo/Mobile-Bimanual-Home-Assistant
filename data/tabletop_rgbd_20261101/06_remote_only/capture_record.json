@@ -1,0 +1,11 @@
+{
+  "index": 6,
+  "category": "remote_only",
+  "objects": [
+    "remote control"
+  ],
+  "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T111626_477759Z",
+  "captured_at_utc": "2026-11-01T11:16:26.416803+00:00",
+  "visual_check": "Single remote left of center, nearly horizontal at a diagonal, fully within frame.",
+  "status": "captured"
+}
