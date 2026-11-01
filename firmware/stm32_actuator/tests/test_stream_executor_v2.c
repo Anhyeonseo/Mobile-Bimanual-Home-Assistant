@@ -398,7 +398,7 @@ static void test_non_aligned_sample_has_zero_apply_lateness(void) {
     CHECK(executor.diagnostics.maximum_apply_lateness_ms == 0u);
 }
 
-static void test_hardware_tick_phase_must_define_control_epoch(void) {
+static void test_hardware_tick_phase_controls_effective_lateness(void) {
     actuator_v2_stream_executor_t unaligned;
     actuator_v2_stream_executor_t aligned;
     uint8_t open_payload[ACTUATOR_V2_STREAM_OPEN_WIRE_SIZE];
@@ -426,10 +426,17 @@ static void test_hardware_tick_phase_must_define_control_epoch(void) {
         CHECK(actuator_v2_stream_executor_step(&unaligned, tick, output) ==
               ACTUATOR_V2_EXECUTOR_OUTPUT_READY);
     }
+    /* Interpolation now consistently uses the effective deadline (22756),
+     * so 22755 is still before the sample. A wrong epoch adds four ms of
+     * actual apply lateness on the next hardware tick; it is not an invalid
+     * interpolation span. The configured five-ms lateness cap still applies. */
     CHECK(actuator_v2_stream_executor_step(&unaligned, 22755u, output) ==
+          ACTUATOR_V2_EXECUTOR_OUTPUT_READY);
+    CHECK(output[0] < 10000);
+    CHECK(actuator_v2_stream_executor_step(&unaligned, 22760u, output) ==
           ACTUATOR_V2_EXECUTOR_TERMINAL);
-    CHECK(unaligned.diagnostics.terminal_reason ==
-          ACTUATOR_V2_TERMINAL_INVALID_TIMELINE);
+    CHECK(unaligned.diagnostics.state == ACTUATOR_V2_EXECUTOR_SUCCEEDED);
+    CHECK(unaligned.diagnostics.maximum_apply_lateness_ms == 4u);
 
     /* Starting on the first real TIM6 event aligns both 5 ms grids. */
     setup_executor(&aligned);
@@ -450,6 +457,39 @@ static void test_hardware_tick_phase_must_define_control_epoch(void) {
     CHECK(aligned.diagnostics.state == ACTUATOR_V2_EXECUTOR_SUCCEEDED);
     CHECK(aligned.diagnostics.terminal_reason ==
           ACTUATOR_V2_TERMINAL_PLANNED_HORIZON);
+}
+
+
+static void test_effective_tick_interpolation_bounds_every_step(void) {
+    for (uint32_t wrap = 0; wrap < 2; wrap++) {
+        for (uint32_t phase = 0; phase < 5; phase++) {
+            actuator_v2_stream_executor_t executor;
+            uint8_t policy[ACTUATOR_V2_STREAM_OPEN_WIRE_SIZE];
+            uint8_t batch[ACTUATOR_V2_MAX_BATCH_PAYLOAD_SIZE];
+            int32_t anchor[12] = {0}, output[12] = {0}, previous[12] = {0};
+            uint32_t epoch = wrap ? UINT32_MAX - 40u : 100u;
+            uint32_t first = epoch + 25u + phase;
+            uint32_t horizon = first + 40u;
+            uint32_t end = ((65u + phase + 4u) / 5u) * 5u;
+            setup_executor(&executor);
+            make_open(policy, 2u, horizon, 100u);
+            CHECK(actuator_v2_stream_executor_open(&executor, policy, sizeof(policy), epoch) == ACTUATOR_V2_EXECUTOR_OK);
+            size_t length = make_batch(batch, first, horizon, 7u, 0u, 3u, 2000, 2000);
+            CHECK(actuator_v2_stream_executor_admit(&executor, batch, length, ACTUATOR_V2_BATCH_APPEND, epoch) == ACTUATOR_V2_EXECUTOR_OK);
+            CHECK(actuator_v2_stream_executor_start(&executor, epoch, anchor) == ACTUATOR_V2_EXECUTOR_OK);
+            for (uint32_t offset = 5; offset <= end; offset += 5) {
+                CHECK(actuator_v2_stream_executor_step(&executor, epoch + offset, output) ==
+                    (offset == end ? ACTUATOR_V2_EXECUTOR_TERMINAL : ACTUATOR_V2_EXECUTOR_OUTPUT_READY));
+                for (unsigned j = 0; j < 12; j++) {
+                    CHECK(output[j] >= previous[j]);
+                    CHECK(output[j] - previous[j] <= 501);
+                    previous[j] = output[j];
+                }
+            }
+            for (unsigned j = 0; j < 12; j++) CHECK(output[j] == 6000 + (int32_t)j);
+            CHECK(executor.diagnostics.maximum_apply_lateness_ms == 0);
+        }
+    }
 }
 
 static void test_joint_specific_tracking_error_fails_closed(void) {
@@ -571,7 +611,9 @@ int main(void) {
     run_test("non_aligned_sample_has_zero_apply_lateness",
              test_non_aligned_sample_has_zero_apply_lateness);
     run_test("hardware_tick_phase_must_define_control_epoch",
-             test_hardware_tick_phase_must_define_control_epoch);
+             test_hardware_tick_phase_controls_effective_lateness);
+    run_test("effective_tick_interpolation_bounds_every_step",
+             test_effective_tick_interpolation_bounds_every_step);
     run_test("joint_specific_tracking_error_fails_closed",
              test_joint_specific_tracking_error_fails_closed);
     run_test("async_joint_feedback_uses_captured_command",

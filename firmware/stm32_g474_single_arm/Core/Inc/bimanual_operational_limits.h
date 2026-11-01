@@ -56,6 +56,11 @@ bool BimanualOperationalLimits_StepModuloRaw(
     uint16_t *target_modulo_raw
 );
 
+/* Check one continuous executor step before either bus is launched. */
+bool BimanualOperationalLimits_CheckTransition(
+    const int32_t previous_urad[12], const int32_t target_urad[12],
+    uint16_t maximum_step_raw, bool allow_seam, uint8_t *failed_joint);
+
 /* Historical no-output J1-L candidate; never used by runtime output. */
 void BimanualOperationalLimits_LoadJ1LShadow(
     actuator_v2_joint_limit_t

@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "mode": "development",
+  "hardware_enabled": false,
+  "physical_task_verified": false,
+  "implemented_domains": [
+    "persistent_semantic_memory",
+    "bounded_korean_text_requests",
+    "ambiguity_resolution",
+    "scan_replay_and_review",
+    "joint_base_lift_candidate_selection",
+    "shared_task_execution_and_cancel",
+    "grounding_report_transform_contract",
+    "installed_device_registry",
+    "external_meaning_validation_boundary",
+    "furniture_rgbd_replay_memory",
+    "full_body_lidar_depth_planning_projection",
+    "scan_time_full_body_map_generation",
+    "persistent_lidar_and_body_map_bundle",
+    "validated_body_map_reload"
+  ],
+  "requires_user_or_measurement": [
+    {
+      "id": "installation",
+      "layer": "L0-L2",
+      "needed": "16개 모터 응답 및 양팔 Home 2048 보정·전원 재인가 유지 확인 완료. 왼팔 범위 측정·오른팔 동일 범위 적용 결정 완료. 양팔·베이스 및 통합 제어의 실제 동작 시험은 사용자 요청으로 보류; 소프트웨어 모의 검증으로 개발 진행"
+    },
+    {
+      "id": "lidar",
+      "layer": "L0-L3A",
+      "needed": "LDS-01로 확인됨. 케이블 미준비로 연결 검사는 보류; 장착·드라이버·수신 및 바퀴 odometry 확인 필요"
+    },
+    {
+      "id": "lift",
+      "layer": "L0-L2",
+      "needed": "最高 약 90cm→최저 26cm, 30717 counts/640mm, 약 85.34mm/회전 단일 하강 측정 확보. 소음과 온도 단발 이상값은 사용자 결정으로 최종 실물 점검 이슈로 이관; S2 개발을 막지 않음. 반복성·재부팅 후 원점 및 공통 실행 검증은 별도 미완료."
+    },
+    {
+      "id": "calibration",
+      "layer": "L3A-L3D",
+      "needed": "현재 조립 기준 URDF 영점·TCP·카메라/LiDAR 외부 보정과 오차 검증"
+    },
+    {
+      "id": "payload",
+      "layer": "L3D",
+      "needed": "첫 물체군 크기·무게·그리퍼 범위와 실제 파지/해제 확인 신호"
+    },
+    {
+      "id": "home",
+      "layer": "L3A-L5",
+      "needed": "실험 공간·문턱·낙차·통로와 기본 놓는 자리 확인"
+    },
+    {
+      "id": "speech_privacy",
+      "layer": "L5",
+      "needed": "텍스트 의미 추출 API 업체·모델·키 선택(외부 API 사용 방향 확정), 음성 및 집 영상의 별도 전송·보관 정책"
+    },
+    {
+      "id": "travel_envelope",
+      "layer": "L0-L3D",
+      "needed": "ALOHA Mini 1의 실측 운반 높이·몸체/접은 팔/적재물 폭과 D415 상하·측후방 관측 범위"
+    }
+  ],
+  "physical_adapters_pending": [
+    "commissioned_shared_firmware",
+    "live_slam_and_scan_ingestion",
+    "calibrated_whole_motion_ik_and_collision",
+    "grasp_and_release_sensor_evidence",
+    "voice_model",
+    "live_furniture_keyframes_and_loop_reprojection",
+    "full_height_global_nav2_costmap_publisher",
+    "external_text_api_client"
+  ],
+  "notes": [
+    "합성 센서·기능 결과로 검증한 성공은 실물 성공이 아닙니다.",
+    "촬영용 저장 자세와 프로필은 기존 변경 그대로 보존합니다.",
+    "인식·지도 엔진은 기존 선택에 고정하지 않고 새 집 기록과 실제 Jetson 동시 부하로 평가합니다. 모델 교체는 아직 없습니다."
+  ],
+  "development_decisions": {
+    "arm_range_measurement": "left_capture_complete_right_reuses_left_by_user_request",
+    "reassembled_joints": "unknown",
+    "software_work_blocked_by_arm_ranges": false,
+    "current_arm_hardware_mode": "disabled_in_lift_only_teleop",
+    "unrestricted_physical_arm_motion_enabled": false,
+    "next_motion_contract": [
+      "continuous_unwrapped_coordinates",
+      "reject_unrequested_long_turn",
+      "reject_ambiguous_half_turn",
+      "verify_servo_wrap_behavior_before_crossing",
+      "bounded_speed_and_step",
+      "fresh_feedback",
+      "communication_loss_stop"
+    ],
+    "note": "Informational readiness, not a runtime permission or firmware configuration. Software task/map/perception development proceeds in simulation/replay; physical arm motion is not enabled by this file.",
+    "arm_range_profile": "config/home_assistant/arm_ranges.development.json",
+    "right_arm_ranges_measured": false,
+    "arm_range_software_integration": "shared_profile_and_output_disabled_firmware_verified",
+    "arm_range_validation_evidence": "output/home-assistant/s1/range-software-validation.json",
+    "physical_servo_wrap_verified": false,
+    "s1_current_physical_scope": "operator_controlled_lift_descent_commissioning",
+    "s1_deferred_physical_checks": [
+      "arm_motion_and_servo_seam",
+      "right_arm_copied_range_clearance",
+      "mobile_base_motion",
+      "combined_stop_cancel_disconnect_reconnect"
+    ],
+    "s1_other_checks": "software_simulation_only_until_operator_resumes_hardware",
+    "lift_manual_adjustment_confirmed": true,
+    "s1_completion_policy": "software_and_measured_geometry_progress_separately_from_hardware_commissioning",
+    "current_controller_firmware": "lift-teleop-v4",
+    "lift_reader_deployed": false,
+    "lift_teleop_software": "v4_single_full_descent_and_stop_verified_noise_recurred",
+    "lift_teleop_hardware_verified": false,
+    "lift_motor_mode": 1,
+    "lift_teleop_direction_verified": true,
+    "lift_teleop_direction_evidence": "output/home-assistant/s1/lift-direction-confirmed-review.json",
+    "active_development_stage": "S2_coordinates_and_observation",
+    "s1_acceptance": "partial_physical_checks_deferred_by_operator",
+    "lift_noise_disposition": "deferred_to_final_hardware_review_by_operator",
+    "lift_noise_blocks_s2": false,
+    "d415_mount_motion": "fixed_to_base_or_fixed_column",
+    "d415_moves_with_lift": false,
+    "s2_fixed_camera_registration": "offline_correspondence_fit_and_holdout_checks_implemented",
+    "s2_installation_audit": "available_without_device_access",
+    "s2_physical_calibration": "pending_base_reference_mount_survey_and_measured_correspondences"
+  },
+  "deferred_hardware_issues": [
+    {
+      "id": "S1-LIFT-NOISE",
+      "status": "deferred_by_operator",
+      "observation": "Powered descent rattles intermittently; full recorded descent and stop completed.",
+      "root_cause_confirmed": false,
+      "review_before": "final_hardware_acceptance",
+      "blocks_s2_software_development": false,
+      "related_observation": "Single temperature sample 31 -> 60 -> 31 C; interpretation unresolved."
+    }
+  ]
+}

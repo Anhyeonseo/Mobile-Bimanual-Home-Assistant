@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-29",
+  "mobile_base_commit": "b1fc7cdc36786d956284f09903aa5fba32c23cd1",
+  "branch": "codex/home-assistant-v02",
+  "source_checkout": "tmp/fixed-pick-demo",
+  "preserved_changes": [
+    "firmware/stm32_actuator/src/stream_executor_v2.c",
+    "firmware/stm32_actuator/tests/test_stream_executor_v2.c",
+    "firmware/stm32_g474_single_arm/CMakeLists.txt",
+    "firmware/stm32_g474_single_arm/Core/Inc/single_arm_config.h",
+    "firmware/stm32_g474_single_arm/Core/Src/bimanual_feedback_snapshot.c",
+    "firmware/stm32_g474_single_arm/Core/Src/bimanual_operational_limits.c",
+    "firmware/stm32_g474_single_arm/Core/Src/binary_control.c",
+    "firmware/stm32_g474_single_arm/Core/Src/main.c",
+    "firmware/stm32_g474_single_arm/Core/Src/servo_joint_config.c",
+    "firmware/stm32_g474_single_arm/Core/Src/servo_transport.c",
+    "firmware/stm32_g474_single_arm/Core/Src/single_arm_app.c",
+    "ros2_ws/src/so101_arm_bridge/so101_arm_bridge/bimanual_stream_adapter.py",
+    "ros2_ws/src/so101_arm_bridge/so101_arm_bridge/stream_protocol_v2.py",
+    "ros2_ws/src/so101_arm_bridge/so101_arm_bridge/stream_transport_v2.py",
+    "tests/test_bimanual_operational_limits_runtime.py",
+    "tests/test_bimanual_stream_adapter.py",
+    "tests/test_mobile_base_teleop.py",
+    "tools/README.md",
+    "tools/run/teleop_mobile_base.py",
+    "docs/FIXED_PICK_DEMO.md",
+    "docs/LEFT_FIVE_POSE_TEACHING.md",
+    "docs/LEFT_ONLY_PICK_DEMO.md",
+    "docs/LEFT_TAUGHT_REPLAY.md",
+    "firmware/stm32_g474_single_arm/Core/Inc/taught_pose_guard.h",
+    "firmware/stm32_g474_single_arm/Core/Src/left_calibration_app.c",
+    "firmware/stm32_g474_single_arm/Core/Src/left_servo_dispatch.c",
+    "firmware/stm32_g474_single_arm/Core/Src/left_tracking_feedback.c",
+    "firmware/stm32_g474_single_arm/Core/Src/taught_pose_guard.c",
+    "ros2_ws/src/so101_arm_bridge/so101_arm_bridge/fixed_pick_demo.py",
+    "ros2_ws/src/so101_arm_bridge/so101_arm_bridge/left_only_adapter.py",
+    "tests/fixtures/servo_hal/left_calibration_gate.c",
+    "tests/fixtures/servo_hal/left_calibration_harness.c",
+    "tests/fixtures/servo_hal/left_control_prefix.c",
+    "tests/fixtures/servo_hal/left_dispatch_harness.c",
+    "tests/fixtures/servo_hal/left_tracking_harness.c",
+    "tests/fixtures/taught_capture.json",
+    "tests/fixtures/taught_guard_failure.json",
+    "tests/test_arm_motion_reference.py",
+    "tests/test_filming_workflows.py",
+    "tests/test_fixed_pick_demo.py",
+    "tests/test_left_calibration.py",
+    "tests/test_left_only_firmware.py",
+    "tests/test_left_only_pick.py",
+    "tests/test_left_only_wire.py",
+    "tests/test_pose_locked_profile.py",
+    "tests/test_taught_executor_runtime.py",
+    "tests/test_taught_replay.py",
+    "tools/run/calibrate_left_home.py",
+    "tools/run/fixed_pick_demo.py",
+    "tools/run/fixed_pick_left.py",
+    "tools/run/play_left_demo.py",
+    "tools/run/pose_locked_profile.py",
+    "tools/run/teach_left_demo.py",
+    "tools/setup/firmware/generate_taught_profile.py"
+  ],
+  "imports_from_parent_checkout": [
+    {
+      "path": "docs/MOBILE_MANIPULATION_DESIGN.md",
+      "sha256": "1831da7d7560ed10386f4f61f748d95712f0f24f0a39c2c0bc51057a837445db"
+    },
+    {
+      "path": "docs/REALSENSE.md",
+      "sha256": "724258dcb4face5dcf3150c11a085eaf93145e59e01e31d8d1791357272031b6"
+    },
+    {
+      "path": "tools/lib/grounding_rgbd.py",
+      "sha256": "7a16e74b90deb20ec19feadb7998053b33442877f88a1f388cbe0ecd2462709a"
+    },
+    {
+      "path": "tools/lib/sam_rgbd.py",
+      "sha256": "898d284212ae0031cc9fa767298bd8f48e2e09a88b6841ad6b7145e67e148d27"
+    },
+    {
+      "path": "tests/test_grounding_rgbd.py",
+      "sha256": "201ff1608bce22aa07d11d8b4388e2bf7c95e8d4c3f56f0639c1b99e43339d6f"
+    },
+    {
+      "path": "tests/test_realsense_web.py",
+      "sha256": "959195abf63e8153ab1a33ee03ba803ea83383f59162e985334297534f28cbfb"
+    },
+    {
+      "path": "tools/diagnostics/realsense_web.py",
+      "sha256": "e5385366f32dbe12223d95e3645944670b458ca75d5ce8fad5ba067e4369e306"
+    },
+    {
+      "path": "tools/diagnostics/realsense_depth_preview.py",
+      "sha256": "a15b6fca51f38bf732d92006e963775ec93ad605aaae16fea80e3c8a5418895b"
+    },
+    {
+      "path": "tools/diagnostics/realsense_viewer.py",
+      "sha256": "ac5dac7ef928028a48c7c7fe138034707a81126b248b66f94cbbd27fbb4aa2ab"
+    },
+    {
+      "path": "tools/diagnostics/realsense_environment.py",
+      "sha256": "17105104d34483aa6161876605f7d332314de1861bf41f7d929fb9e36f707699"
+    },
+    {
+      "path": "tools/diagnostics/realsense_web.html",
+      "sha256": "180cf88564340b5a71f4aed53ec454fb1c86f6c3835efe95638783dee4454535"
+    },
+    {
+      "path": "tools/diagnostics/grounding_rgbd_snapshot.py",
+      "sha256": "365645dfb3c0a53659ca73394bd34505619a909990eacdd2c56ffa3de66de946"
+    },
+    {
+      "path": "tools/run/realsense_jetson.sh",
+      "sha256": "f1d360d01d53e45be8c378274a5c79d3b26e3331ab46353c2cdf70c34cbe2533"
+    },
+    {
+      "path": "tools/run/realsense_remote_viewer.sh",
+      "sha256": "f320e786e91c141d9f0863ae8f6cda02108793ae24347e7275ce7a57824de3bb"
+    },
+    {
+      "path": "requirements/grounding-rgbd-jetson.txt",
+      "sha256": "11c25e440bfd7d55a1e4a1220472cb1ad1d8d746d9e0b1d9ac8a52243fa20f55"
+    },
+    {
+      "path": "requirements/grounding-rgbd.txt",
+      "sha256": "f9b6043d57f7d0adee0404b3a6df11b295a573369d1650f2c79f825999940a62"
+    },
+    {
+      "path": "requirements/realsense.txt",
+      "sha256": "1c26bec5649d1cdfc82785cf4d7b998545b2d74bbd8c7d3b3541b0ed7d77254f"
+    }
+  ],
+  "hardware_inspected": false,
+  "firmware_deployed": false,
+  "hash_semantics": "Hashes record imports at the time of collection; later intentional edits are described in docs/HOME_ASSISTANT_IMPLEMENTATION.md.",
+  "preserved_files_intentionally_extended": [
+    "firmware/stm32_g474_single_arm/Core/Src/binary_control.c",
+    "tests/test_taught_replay.py"
+  ],
+  "current_checkout": "workspaces/home-assistant",
+  "relocated_on": "2026-10-29",
+  "source_checkout_note": "Historical import location; current_checkout is the local workspace location, not a clone prerequisite."
+}

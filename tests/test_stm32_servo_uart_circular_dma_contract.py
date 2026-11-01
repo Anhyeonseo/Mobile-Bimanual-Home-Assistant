@@ -218,7 +218,9 @@ def test_servo_reads_are_refused_while_buffered_execution_is_active() -> None:
     assert diagnostics.index(
         "Host_BufferedExecutionIsActive() != 0U"
     ) < diagnostics.index("Servo_ReadData(")
-    # Host_SendBinaryDiagnostics is the sole owner of the servo read path.
-    assert BINARY_CONTROL.count("Servo_ReadData(") == diagnostics.count(
-        "Servo_ReadData("
-    )
+    # Taught-pose setup also checks EEPROM offsets before enabling torque.
+    # Enumerate every read owner so a new unguarded call cannot slip through.
+    configure = function_body(BINARY_CONTROL, "static uint8_t Host_ConfigureBimanualForTrajectory(void)")
+    assert configure.index("Host_BufferedExecutionIsActive() != 0U") < configure.index("Servo_ReadData(")
+    assert BINARY_CONTROL.count("Servo_ReadData(") == sum(
+        owner.count("Servo_ReadData(") for owner in (diagnostics, configure))

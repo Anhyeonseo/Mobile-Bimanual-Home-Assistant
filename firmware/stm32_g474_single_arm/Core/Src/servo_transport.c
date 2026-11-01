@@ -33,6 +33,11 @@ static bool owns(ServoTransportOwner *bus, uint32_t token)
 
 bool ServoTransport_Register(UART_HandleTypeDef *uart)
 {
+#if HOST_LEFT_ONLY_BUILD
+    extern UART_HandleTypeDef huart1;
+    /* A second client cannot opt the absent/right bus back into this build. */
+    if (uart != &huart1) return false;
+#endif
     if (uart == NULL) return false;
     if (find_bus(uart) != NULL) return true;
     for (unsigned i = 0; i < 2; ++i) {
@@ -135,7 +140,50 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
 {
     ServoTransportOwner *bus = find_bus(uart);
     if (!owns(bus, token) || !bus->transmit_allowed || data == NULL || !length) return false;
-#if HOST_MOBILE_WHEEL_PULSE_ONLY || HOST_MOBILE_BASE_TELEOP_ONLY
+#if HOST_LIFT_TELEOP_ONLY
+    /* Isolated physical lift, left UART only (Register gate). No arm/wheel,
+     * broadcast, negative speed, position goal, or arbitrary EEPROM writes. */
+    if (bus->read_sent || length < 8 || length > 9 || data[0] != 255 || data[1] != 255 ||
+        data[2] != 10 || data[3] != length - 4) return false;
+    bool read = length == 8 && data[4] == 2 &&
+        ((data[5] == 0 && data[6] == 16) || (data[5] == 16 && data[6] == 16) ||
+         (data[5] == 32 && data[6] == 8) || (data[5] == 3 && data[6] == 4) ||
+         ((data[5] == 33 || data[5] == 40 || data[5] == 55) && data[6] == 1) ||
+         (data[5] == 46 && data[6] == 2) || (data[5] == 56 && (data[6] == 4 || data[6] == 15)));
+    bool write = !bus->read_only && data[4] == 3 &&
+        ((length == 8 && ((data[5] == 33 && data[6] == 1) ||
+                         ((data[5] == 40 || data[5] == 55) && data[6] <= 1))) ||
+         (length == 9 && data[5] == 46 && (data[6] == 0 || data[6] == 100) && data[7] == 0));
+    unsigned lift_sum = 0;
+    for (unsigned i = 2; i < length; ++i) lift_sum += data[i];
+    if ((!read && !write) || (lift_sum & 255u) != 255u) return false;
+    bus->read_sent = true;
+    return true;
+#elif HOST_S1_RANGE_VERIFY_ONLY
+    /* Verification profile cannot emit motor writes via any transmit API. */
+    if (bus->read_sent || length != 8 || data[0] != 255 || data[1] != 255 ||
+        data[2] < 1 || data[2] > 6 || data[3] != 4 || data[4] != 2 ||
+        data[6] < 1 || data[6] > 16 || (unsigned)data[5] + data[6] > 66) return false;
+    unsigned s1_sum = 0;
+    for (unsigned i = 2; i < length; ++i) s1_sum += data[i];
+    if ((s1_sum & 255U) != 255U) return false;
+    bus->read_sent = true;
+    return true;
+#elif HOST_LEFT_ONLY_CALIBRATION_ONLY || HOST_BIMANUAL_CALIBRATION_ONLY
+    /* Independent transport gate: centering/torque-off only, no goals,
+     * torque-enable, EEPROM configuration writes, broadcast, or other IDs. */
+    if (bus->read_sent || length != 8 || data[0] != 255 || data[1] != 255 ||
+        data[2] < 1 || data[2] > 6 || data[3] != 4) return false;
+    bool read = data[4] == 2 && data[6] >= 1 && data[6] <= 16 &&
+        (unsigned)data[5] + data[6] <= 66;
+    bool write = !bus->read_only && data[4] == 3 && data[5] == 40 &&
+        (data[6] == 0 || data[6] == 128);
+    unsigned calibration_sum = 0;
+    for (unsigned i = 2; i < length; ++i) calibration_sum += data[i];
+    if ((!read && !write) || (calibration_sum & 255u) != 255u) return false;
+    bus->read_sent = true;
+    return true;
+#elif HOST_MOBILE_WHEEL_PULSE_ONLY || HOST_MOBILE_BASE_TELEOP_ONLY
     /* Bench-only fixed pulse: no EEPROM, arm, lift, broadcast, or arbitrary
      * speed writes through ANY transmit API. One packet per bus lease. */
     if (bus->read_sent || length < 8 || length > 9 || data[0] != 255 || data[1] != 255 ||

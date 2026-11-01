@@ -1,0 +1,22 @@
+{
+  "time_monotonic": 8056.429699359,
+  "motor": {
+    "id": 10,
+    "read_sequence": 10106,
+    "identity_ok": false,
+    "model_raw": -1,
+    "reported_id": -1,
+    "baud_code": -1,
+    "mode_raw": -1,
+    "torque_raw": -1,
+    "position_raw": -1,
+    "identity_hal_status": 3,
+    "identity_transaction_started": true,
+    "identity_failure": "RX_TIMEOUT",
+    "identity_rx_bytes": 0,
+    "identity_uart_error": 0,
+    "identity_uart_isr": 6426816,
+    "identity_dma_error": 0,
+    "identity_servo_status": 0
+  }
+}

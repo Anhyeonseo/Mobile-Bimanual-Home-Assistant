@@ -56,8 +56,8 @@ def test_manifest_is_canonical_and_contains_all_reviewed_ranges() -> None:
 def test_manifest_matches_all_twelve_compiled_limits() -> None:
     document = json.loads(MANIFEST.read_text(encoding="utf-8"))
     source = LIMIT_SOURCE.read_text(encoding="utf-8")
-    table = source.split("operational_limits", 1)[1].split(
-        r"/\* Archived table", 1
+    table = source.split("/* BEGIN GENERATED OPERATIONAL LIMITS */", 1)[1].split(
+        "/* END GENERATED OPERATIONAL LIMITS */", 1
     )[0]
     compiled = [
         (int(direction), int(lower), int(upper), int(minimum), int(maximum))

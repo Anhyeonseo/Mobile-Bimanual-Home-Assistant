@@ -6,6 +6,9 @@
 .idea/
 .metadata/
 *.local.yaml
+*.local.json
+*.local.toml
+/config/home_assistant/installation.audit.json
 .env
 .env.*
 !.env.example
@@ -41,6 +44,7 @@ compile_commands.json
 *.launch
 
 # Captures, models, maps and local archives
+archive/
 output/
 tmp/
 artifacts/
@@ -50,6 +54,9 @@ datasets/
 *.mcap
 *.onnx
 *.pt
+*.pth
+*.safetensors
+*.ckpt
 .verification/
 
 # Editor and OS temporary files

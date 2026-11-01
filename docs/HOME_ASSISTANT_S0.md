@@ -1,0 +1,52 @@
+# S0 — 설치 조사와 다음 단계
+
+2026-10-29 기준. **환경·센서 연결과 현재 펌웨어를 확인했으며, 제어 통신과 실측 보정은 남아 있다.**
+이 문서는 공유용 요약이다. IP·장치 고유 번호·전체 로그는 Git에서 제외한
+`output/home-assistant/s0/`에 보관한다. 조사 결과를 실행용 보정 프로필로 사용하지 않는다.
+
+## 확인 결과
+
+| 항목 | 확인한 내용 | 남은 확인 |
+|---|---|---|
+| Jetson | Orin Nano Super, Ubuntu 24.04.4, JetPack 7.2.1 / L4T 39.2.1, Python 3.12.3 | ROS 표준 경로·명령·패키지는 확인되지 않음. 비표준 설치와 컨테이너는 별도 확인 |
+| 양팔 | 사용자 확인상 양팔 연결, 팔 모터 전원 꺼짐 | 현재 조립의 모터 응답·영점·동작 범위 |
+| D415 | 640×480 RGB·깊이 12개 프레임 세트 수신 후 종료 | 깊이 유효 비율 약 1.89%로 작업 시야에서 재검사. 최초 USB 3 수신 이후 재연결에서는 USB 2로 인식 |
+| STM32 | ST-LINK 인식, CPU 실행 상태, CPU fault 상태 레지스터 0 | 이전 INFO 무응답·UART 프레이밍 오류의 원인 미확정. 이후 수정 없이 INFO 재연결 5회 성공 |
+| 현재 펌웨어 | S0 당시 텔레옵 v3.1 HEX 33,148바이트 일치. 이후 S1 기준 `0x00024908`로 전환·통신 검증 완료 | 펌웨어 일치가 통신·모터 기능 검증을 의미하지 않음 |
+| LDS-01 | 모델은 사용자 확인, 케이블 부재로 미연결 | S4a 실제 지도·주행 전에 연결 및 수신 검사 |
+| 베이스·리프트 | 과거 텔레옵 기록 보존 | 현재 모터 ID·전원 상태·환산·리프트 원점·유지 거동 |
+
+이번 S0 조사에서는 모터 명령·보드 리셋·펌웨어 변경을 하지 않았다.
+D415 프레임은 저장하지 않았다. flash 원본은 젯슨에 보관하고, 승인받은 비교 메타데이터만 PC에 저장했다.
+
+## 로컬 조사 기록
+
+`tools/diagnostics/home_robot_inventory.py`는 표준 Python으로 OS·패키지·USB 목록을 수집한다.
+장치 포트나 카메라를 열지 않고 드라이버·모델을 불러오지 않는다. 정보가 없으면 미확인으로 기록한다.
+환경변수는 ROS 관련 허용 항목만 수집한다. 이 도구 자체는 INFO·SWD·카메라 검사를 하지 않는다.
+
+```bash
+mkdir -p output/home-assistant/s0
+python3 tools/diagnostics/home_robot_inventory.py > output/home-assistant/s0/host-inventory.json
+python3 -m json.tool output/home-assistant/s0/host-inventory.json > /dev/null
+```
+
+검사한 장비에서 실행한다. PC에서 얻은 결과를 Jetson 측정값으로 사용하지 않는다.
+원격 실행 시 승인된 SSH 연결을 사용하고, 실패한 명령의 빈 파일을 유효 결과로 취급하지 않는다.
+상세 설치 기록은 `output/home-assistant/s0/installation.audit.json`, 근거 해시는
+`output/home-assistant/s0/evidence-manifest.json`에 보관한다. 새 clone에는 이 자료가 없다.
+
+## S1로 이어갈 항목
+
+1. 통신은 수정 없이 복구됐으며 이전 무응답 원인은 미확정으로 남긴다. 재발 시 수신 기록으로 분리 진단한다.
+2. 과거 베이스·리프트 텔레옵과 왼팔 촬영용 펌웨어를 공통 제어 런타임으로 연결한다.
+   촬영 전용 빌드의 제약을 제거해 합치지 않는다.
+3. 과거 바퀴 7/8/9·리프트 10 기록과 기본 설정의 시작 ID 8 차이를 실물로 확인한다.
+4. 양팔·바퀴·리프트 설치 목록, 실제 보정·환산·정지 거동을 검증한다.
+   `config/mobile_board.simulation.json`을 이름만 바꿔 실측 설정으로 사용하지 않는다.
+5. LDS-01 검사는 케이블 준비 후 진행한다. 현재 STM32 원인 분석과 분리한다.
+
+개발 순서와 계층 책임은 [시스템 설계](MOBILE_MANIPULATION_DESIGN.md),
+파일 분류와 GitHub 기준은 [저장소 관리](REPOSITORY_MANAGEMENT.md)를 따른다.
+
+후속 기준 빌드와 조회 도구는 [S1 공통 제어 연결](HOME_ASSISTANT_S1.md)에 기록한다.

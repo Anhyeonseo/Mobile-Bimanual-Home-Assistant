@@ -20,6 +20,7 @@
 static UART_HandleTypeDef *host;
 static char command[16];
 static unsigned used;
+static uint32_t read_sequence;
 static int discard;
 
 static void send_line(const char *line) {
@@ -36,11 +37,18 @@ static void info(void) {
         (unsigned)ACTUATOR_WHEEL_0_ID,(unsigned)ACTUATOR_WHEEL_1_ID,
         (unsigned)ACTUATOR_WHEEL_2_ID,(unsigned)ACTUATOR_LIFT_ID);
 #else
-    char line[256];
+    char line[320];
     (void)snprintf(line, sizeof(line),
         "{\"firmware\":\"%s\",\"host_baud\":921600,"
-        "\"servo_baud\":1000000,\"reference_id\":1,\"motion_enabled\":false,\"ids\":[%u,%u,%u,%u]}\r\n",
-        INSPECTION_NAME, (unsigned)ACTUATOR_WHEEL_0_ID, (unsigned)ACTUATOR_WHEEL_1_ID,
+        "\"servo_baud\":1000000,\"reference_id\":1,\"motion_enabled\":false,"
+        "\"lift_read_supported\":%s,\"ids\":[%u,%u,%u,%u]}\r\n",
+        INSPECTION_NAME,
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+        "true",
+#else
+        "false",
+#endif
+        (unsigned)ACTUATOR_WHEEL_0_ID, (unsigned)ACTUATOR_WHEEL_1_ID,
         (unsigned)ACTUATOR_WHEEL_2_ID, (unsigned)ACTUATOR_LIFT_ID);
 #endif
     send_line(line);
@@ -84,13 +92,13 @@ static void report_motor(uint8_t id, int identity_only) {
     }
     char line[640];
     (void)snprintf(line, sizeof(line),
-        "{\"id\":%u,\"identity_ok\":%s,\"model_raw\":%d,\"reported_id\":%d,"
+        "{\"id\":%u,\"read_sequence\":%lu,\"identity_ok\":%s,\"model_raw\":%d,\"reported_id\":%d,"
         "\"baud_code\":%d,\"mode_raw\":%d,\"torque_raw\":%d,\"position_raw\":%d,"
         "\"identity_hal_status\":%u,\"identity_transaction_started\":%s,"
         "\"identity_failure\":\"%s\",\"identity_rx_bytes\":%u,"
         "\"identity_uart_error\":%lu,\"identity_uart_isr\":%lu,"
         "\"identity_dma_error\":%lu,\"identity_servo_status\":%u}\r\n",
-        (unsigned)id, ok ? "true" : "false",
+        (unsigned)id, (unsigned long)++read_sequence, ok ? "true" : "false",
         ok ? identity[0] | (identity[1] << 8) : -1,
         ok ? identity[2] : -1, ok ? identity[3] : -1, mode, torque, raw,
         (unsigned)status, started ? "true" : "false",
@@ -171,6 +179,7 @@ static void pulse_wheel(uint8_t id, int direction) {
 void SingleArmApp_Init(UART_HandleTypeDef *host_uart, UART_HandleTypeDef *servo_uart) {
     host = host_uart;
     used = 0; discard = 0;
+    read_sequence = 0;
     ServoBus_Init(servo_uart, NULL, NULL);
     /* Boot only initializes UART/DMA bookkeeping. No servo transactions. */
     info();
@@ -185,6 +194,9 @@ void SingleArmApp_Process(void) {
         command[used] = 0;
         if (!discard && !strcmp(command, "INFO")) info();
         else if (!discard && !strcmp(command, "SCAN")) scan();
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+        else if (!discard && !strcmp(command, "LIFT")) report_motor(ACTUATOR_LIFT_ID, 0);
+#endif
 #if HOST_MOBILE_WHEEL_SETUP_ONLY
         else if (!discard && !strcmp(command, "PREPARE_WHEELS")) prepare_wheels();
 #endif

@@ -1,4 +1,8 @@
-"""Explicit Cartesian MoveIt request and checked 12-axis resident trajectory map."""
+"""Explicit Cartesian requests and trajectories for named installed joints.
+
+Six-axis output still requires a matching commissioned single-arm transport;
+it must never be padded with invented feedback for an absent arm.
+"""
 import math
 from .fetch import InvalidTask
 from .navigation import number
@@ -6,25 +10,44 @@ from .navigation import number
 
 class MoveItBridge:
     def __init__(self, joint_names, minimum_rad, maximum_rad, lift_height_m, *, maximum_speed_rad_s=.5):
-        if len(joint_names)!=12 or len(set(joint_names))!=12 or len(minimum_rad)!=12 or len(maximum_rad)!=12:
-            raise InvalidTask('twelve named joint limits required')
+        count = len(joint_names)
+        if count not in (6, 12) or any(not isinstance(n, str) for n in joint_names) or len(set(joint_names))!=count or len(minimum_rad)!=count or len(maximum_rad)!=count:
+            raise InvalidTask('six or twelve named installed joint limits required')
         self.names,self.low,self.high = tuple(joint_names),tuple(minimum_rad),tuple(maximum_rad)
+        self.arms = {n.split('_')[0] for n in self.names}
+        if not self.arms <= {'left', 'right'} or any(
+                len([n for n in self.names if n.startswith(arm+'_')]) != 6 or
+                arm+'_gripper_joint' not in self.names for arm in self.arms):
+            raise InvalidTask('complete installed arm names required')
         for a,b in zip(self.low,self.high):
             if number(a,'minimum')>=number(b,'maximum'):raise InvalidTask('invalid joint range')
         self.lift=lift_height_m;self.speed=number(maximum_speed_rad_s,'planning speed')
         if not 0<self.speed<=1:raise InvalidTask('bounded planning speed required')
 
+    def _anchor(self, context):
+        if len(context.anchor_rad) != len(self.names):
+            raise InvalidTask('installed joint anchor length mismatch')
+        names = getattr(context, 'joint_names', ())
+        if names and tuple(names) != self.names:
+            raise InvalidTask('installed joint anchor names mismatch')
+        if len(self.names) == 6 and not names:
+            raise InvalidTask('single-arm anchor requires explicit joint names')
+        for v,a,b in zip(context.anchor_rad,self.low,self.high):
+            if not a <= number(v,'measured anchor') <= b:
+                raise InvalidTask('measured anchor outside joint limits')
+
     def request(self, parameters):
-        from moveit_msgs.msg import MotionPlanRequest, Constraints, PositionConstraint, OrientationConstraint
-        from shape_msgs.msg import SolidPrimitive
-        from geometry_msgs.msg import Pose
         task,context=parameters['task'],parameters['context']
+        self._anchor(context)
         arm=task['arm']
-        if arm not in ('left','right') or task['target']['frame_id']!=context.frame_id:
+        if arm not in self.arms or task['target']['frame_id']!=context.frame_id:
             raise InvalidTask('planning arm/frame mismatch')
         q=task['quaternion_xyzw'];xyz=task['position_m']
         if len(q)!=4 or len(xyz)!=3 or abs(sum(number(v,'rotation')**2 for v in q)-1)>1e-6:
             raise InvalidTask('explicit finite Cartesian pose required')
+        from moveit_msgs.msg import MotionPlanRequest, Constraints, PositionConstraint, OrientationConstraint
+        from shape_msgs.msg import SolidPrimitive
+        from geometry_msgs.msg import Pose
         request=MotionPlanRequest();request.group_name=arm+'_arm';request.planner_id='RRTConnect'
         request.allowed_planning_time=1.;request.num_planning_attempts=1
         request.max_velocity_scaling_factor=.2;request.max_acceleration_scaling_factor=.2
@@ -51,6 +74,7 @@ class MoveItBridge:
 
     def map(self, trajectory, context):
         from so101_arm_bridge.bimanual_stream_adapter import TimedJointPoint
+        self._anchor(context)
         jt=trajectory.joint_trajectory;names=tuple(jt.joint_names)
         if not names or len(names)!=len(set(names)) or not set(names)<=set(self.names):
             raise InvalidTask('unknown/duplicate trajectory joints')

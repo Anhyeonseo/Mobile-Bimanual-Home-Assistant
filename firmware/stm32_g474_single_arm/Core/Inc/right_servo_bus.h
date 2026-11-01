@@ -6,6 +6,10 @@
 #include <stdint.h>
 
 HAL_StatusTypeDef RightServoBus_PreparePeriodicReader(void);
+/* Only linked in the isolated centering image; no goal/enable/config primitive. */
+HAL_StatusTypeDef RightServoBus_CalibrationRead(uint8_t id, uint8_t address,
+                                               uint8_t length, uint8_t *data);
+HAL_StatusTypeDef RightServoBus_CalibrationWrite(uint8_t id, uint8_t value);
 
 /*
  * R0 is observation-only.  R1 adds one tightly bounded migration primitive:
@@ -181,6 +185,8 @@ typedef struct
 
 void RightServoBus_Init(UART_HandleTypeDef *uart);
 const RightServoDiscoverySnapshot *RightServoBus_Discover(void);
+/* Fixed register blocks only; no arbitrary read or write access. */
+RightServoReadStatus RightServoBus_ReadInventoryBlock(uint8_t servo_id, unsigned block, uint8_t *data);
 RightServoJogSnapshot RightServoBus_JogOnce(uint8_t servo_id, int8_t delta_raw);
 RightServoTorqueEnableSnapshot RightServoBus_EnableTorqueAtPresentPositionOnce(
     uint8_t servo_id

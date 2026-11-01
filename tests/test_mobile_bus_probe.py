@@ -58,7 +58,7 @@ def test_firmware_parser_never_reads_on_boot_or_invalid_commands(tmp_path):
     declaration.write_text('#include "stm32g4xx_hal.h"\nHAL_StatusTypeDef HAL_UART_Receive(UART_HandleTypeDef *,uint8_t *,uint16_t,uint32_t);\n')
     binary = tmp_path / "app"
     subprocess.run(["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror",
-        "-DACTUATOR_MOBILE_FIRST_ID=7", "-include", str(declaration),
+        "-DACTUATOR_MOBILE_FIRST_ID=7", "-DHOST_MOBILE_BUS_INSPECTION_ONLY=1", "-include", str(declaration),
         "-I", str(ROOT / "tests/fixtures/servo_hal"), "-I", str(board / "Inc"),
         "-I", str(ROOT / "firmware/stm32_actuator/include"),
         str(ROOT / "tests/fixtures/mobile_inspection_app.c"),

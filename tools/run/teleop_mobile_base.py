@@ -6,11 +6,13 @@ Terminal key repeat supplies a 300 ms input lease. Firmware link lease is 400 ms
 """
 import argparse
 import binascii
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import secrets
 import select
+import signal
 import sys
 import termios
 import time
@@ -79,10 +81,12 @@ def stop(port):
 def command_for(keys, now, current, last_key):
     """Drain terminal events once per tick; never retain commands after release timeout."""
     if len(keys) > 64: raise RuntimeError("input burst rejected")
-    for key in keys.lower():
-        if key in ("x", "\x1b", "\x03"): return "Z", now, True
-        if key == " ": current, last_key = "Z", now
-        elif key in KEYS: current, last_key = KEYS[key], now
+    keys = keys.lower()
+    if any(key in keys for key in ("x", "\x1b", "\x03")): return "Z", now, True
+    # A key-repeat event buffered after Space must not undo this stop request.
+    if " " in keys: return "Z", now, False
+    for key in keys:
+        if key in KEYS: current, last_key = KEYS[key], now
     if now - last_key >= INPUT_LEASE: current = "Z"
     return current, last_key, False
 
@@ -133,6 +137,27 @@ def run(port, input_fd):
     return stopped
 
 
+@contextmanager
+def stopping_signals():
+    """Route SSH hangup and process termination through the normal STOP cleanup."""
+    previous = {}
+    interrupted = False
+
+    def stop_requested(_signal, _frame):
+        nonlocal interrupted
+        # A second hangup/TERM must not interrupt the bounded STOP transaction.
+        if not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt()
+
+    try:
+        for sig in (signal.SIGHUP, signal.SIGTERM):
+            previous[sig] = signal.signal(sig, stop_requested)
+        yield
+    finally:
+        for sig, handler in previous.items(): signal.signal(sig, handler)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", required=True)
@@ -144,7 +169,7 @@ def main():
     if args.web and args.run: parser.error("choose --web or --run")
     try:
         import serial
-        with acquire_backend_lease("stm32", 0):
+        with stopping_signals(), acquire_backend_lease("stm32", 0):
             with open_exclusive_serial(serial, args.port, 921600, .01) as port:
                 if args.web:
                     from base_teleop_web import run_web

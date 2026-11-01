@@ -31,6 +31,8 @@ class ImageDetection:
     confidence: float
     # Four oriented rectangle corners in rectified colour pixels.
     corners_uv: tuple
+    # Optional source-pixel SAM mask. Absent for existing OBB detectors.
+    mask: object = None
 
 
 def detection_samples(item, pair):
@@ -56,6 +58,24 @@ def detection_samples(item, pair):
     ]
     if not (all(v > 0 for v in signs) or all(v < 0 for v in signs)):
         raise InvalidTask("convex ordered corners required")
+    if item.mask is not None:
+        mask = item.mask
+        if not isinstance(mask, np.ndarray) or mask.dtype != np.bool_ or mask.shape != (h, w):
+            raise InvalidTask("aligned boolean detection mask required")
+        # One-pixel erosion avoids depth at foreground/background boundaries.
+        interior = np.zeros_like(mask)
+        interior[1:-1, 1:-1] = (mask[1:-1, 1:-1] & mask[:-2, 1:-1] &
+            mask[2:, 1:-1] & mask[1:-1, :-2] & mask[1:-1, 2:])
+        ys, xs = np.nonzero(interior)
+        if not len(xs):
+            return Detection(item.object_id, item.confidence, ())
+        indices = np.linspace(0, len(xs)-1, min(81, len(xs)), dtype=int)
+        samples = []
+        for i in indices:
+            x, y = int(xs[i]), int(ys[i]); z = float(pair.depth_m[y, x])
+            if math.isfinite(z) and z > 0:
+                samples.append((x, y, z))
+        return Detection(item.object_id, item.confidence, tuple(samples))
     # Interior bilinear grid avoids background at the bounding rectangle edges.
     samples = []
     for v in np.linspace(0.2, 0.8, 9):

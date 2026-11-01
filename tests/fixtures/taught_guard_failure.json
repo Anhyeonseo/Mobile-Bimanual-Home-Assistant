@@ -1,0 +1,55 @@
+{
+  "firmware": "0x00024a05",
+  "firmware_elf_sha256": "f58a3b473a93665b5dbf4b50c8b0f31faca77b34fac31b6939c1a69fd677ac22",
+  "sram_sha256": "76369a46f7dbdf88008ea575f1aa59bc5325242339493204bbc8e4101532a1d6",
+  "initial_anchor_urad": [
+    4602,
+    0,
+    -111981,
+    -9204,
+    0,
+    -9204,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "last_accepted_urad": [
+    3547,
+    0,
+    -86312,
+    -7094,
+    0,
+    -7094
+  ],
+  "rejected_output_urad": [
+    3502,
+    0,
+    -85202,
+    -7003,
+    0,
+    -7003,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "guard_flags": {
+    "aligned": 0,
+    "failed": 1,
+    "has_previous": 1
+  },
+  "maximum_step_urad": 1100,
+  "step_delta_urad": [
+    45,
+    0,
+    1110,
+    91,
+    0,
+    91
+  ]
+}

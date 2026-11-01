@@ -1,4 +1,5 @@
 #include "right_servo_bus.h"
+#include "actuator_core/device_inventory.h"
 #include "single_arm_config.h"
 #include "servo_transport.h"
 #include "actuator_core/sts3215_packet.h"
@@ -223,6 +224,13 @@ static RightServoReadStatus RightServo_ReadData(
     return status;
 }
 
+RightServoReadStatus RightServoBus_ReadInventoryBlock(uint8_t id, unsigned block, uint8_t *data)
+{
+    if (id < 1 || id > RIGHT_SERVO_BUS_JOINT_COUNT || block >= DEVICE_INVENTORY_BLOCKS || data == NULL)
+        return RIGHT_SERVO_READ_UNAVAILABLE;
+    return RightServo_ReadData(id, device_inventory_address(block), device_inventory_length(block), data);
+}
+
 static RightServoReadStatus RightServo_ReadPosition(
     uint8_t servo_id, uint16_t *position)
 {
@@ -284,6 +292,21 @@ static HAL_StatusTypeDef RightServo_WriteData(
     if (status == HAL_OK && ended != HAL_OK) return HAL_BUSY;
     return status;
 }
+
+#if HOST_BIMANUAL_CALIBRATION_ONLY
+HAL_StatusTypeDef RightServoBus_CalibrationRead(uint8_t id, uint8_t address,
+                                               uint8_t length, uint8_t *data)
+{
+    if (id < 1 || id > 6 || !length || length > 16 || (unsigned)address + length > 66 || data == NULL)
+        return HAL_ERROR;
+    return RightServo_ReadData(id, address, length, data) == RIGHT_SERVO_READ_OK ? HAL_OK : HAL_ERROR;
+}
+HAL_StatusTypeDef RightServoBus_CalibrationWrite(uint8_t id, uint8_t value)
+{
+    if (id < 1 || id > 6 || (value != 0 && value != 128)) return HAL_ERROR;
+    return RightServo_WriteData(id, 40, &value, 1);
+}
+#endif
 
 void RightServoBus_Init(UART_HandleTypeDef *uart)
 {

@@ -5,7 +5,11 @@ uint32 sequence
 uint32 boot_id
 float64[3] xy_yaw
 float64[3] base_velocity
-float64[12] joints_rad
+# Named installed joints: six for a single arm, twelve for both arms.
+# Empty names are retained only for the legacy twelve-joint profile. Receivers
+# enforce the configured exact count/order; missing joints are never zero-filled.
+string[<=12] joint_names
+float64[<=12] joints_rad
 int32 lift_um
 float64 lift_velocity
 bool healthy
