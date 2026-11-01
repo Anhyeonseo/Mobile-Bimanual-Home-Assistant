@@ -24,6 +24,7 @@ class PlanningContext:
     lift_stopped: bool
     # Target age is checked at admission/handoff, state age throughout execution.
     target_observed_s: float | None = None
+    joint_names: tuple = ()
 
     def key(self):
         return (
@@ -77,10 +78,14 @@ class ManipulationPort:
             stamp=number(c.target_observed_s,"target exposure")
             if not 0<=stamp<=now or check_target and now-stamp>self.age:
                 raise InvalidTask("stale planning target")
-        if len(c.anchor_rad) != 12 or any(
+        count = len(c.joint_names) if c.joint_names else 12
+        if c.joint_names and (count not in (6, 12) or len(set(c.joint_names)) != count
+                or any(not isinstance(n, str) or not n for n in c.joint_names)):
+            raise InvalidTask("installed joint names required")
+        if len(c.anchor_rad) != count or any(
             not isinstance(v, (int, float)) for v in c.anchor_rad
         ):
-            raise InvalidTask("twelve joint anchor required")
+            raise InvalidTask("installed joint anchor required")
         for v in c.anchor_rad:
             number(v, "anchor")
         if any(not isinstance(v, str) or not v for v in c.key()):
@@ -136,6 +141,7 @@ class ManipulationPort:
                 return PortResult(e["state"], e["reason"])
             current = self._context(check_target=e['phase']=='plan')
             if (current.key() != e["context"].key()
+                    or current.joint_names != e['context'].joint_names
                     or current.target_observed_s != e['context'].target_observed_s):
                 raise InvalidTask("planning context changed")
             result = e["port"].poll(g)

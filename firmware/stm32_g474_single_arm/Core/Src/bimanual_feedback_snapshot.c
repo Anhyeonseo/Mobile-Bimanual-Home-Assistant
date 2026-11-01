@@ -1,4 +1,5 @@
 #include "bimanual_feedback_snapshot.h"
+#include "single_arm_config.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -30,12 +31,12 @@ void BimanualFeedbackSnapshot_Seed(
     memcpy(feedback.positions_urad, positions_urad,
            sizeof(feedback.positions_urad));
     for (uint8_t joint = 0U;
-         joint < BIMANUAL_FEEDBACK_JOINT_COUNT;
+         joint < HOST_PHYSICAL_JOINT_COUNT;
          joint++)
     {
         feedback.sampled_at_ms[joint] = sampled_at_ms;
     }
-    feedback.present_mask = BIMANUAL_FEEDBACK_COMPLETE_MASK;
+    feedback.present_mask = HOST_FEEDBACK_PRESENT_MASK;
 }
 
 void BimanualFeedbackSnapshot_UpdatePair(
@@ -51,11 +52,19 @@ void BimanualFeedbackSnapshot_UpdatePair(
         return;
     }
     feedback.positions_urad[arm_joint] = left_position_urad;
+#if !HOST_LEFT_ONLY_BUILD
     feedback.positions_urad[right_joint] = right_position_urad;
+#else
+    (void)right_position_urad; (void)right_joint;
+#endif
     feedback.sampled_at_ms[arm_joint] = sampled_at_ms;
+#if !HOST_LEFT_ONLY_BUILD
     feedback.sampled_at_ms[right_joint] = sampled_at_ms;
+#endif
     feedback.present_mask |= (uint16_t)(UINT16_C(1) << arm_joint);
+#if !HOST_LEFT_ONLY_BUILD
     feedback.present_mask |= (uint16_t)(UINT16_C(1) << right_joint);
+#endif
     feedback.completed_pairs++;
 }
 

@@ -48,14 +48,14 @@ class SceneUpdatePort:
         self.client, self.clock = client, clock
         self.world = identifier(world_frame, "scene world frame")
         self.age = number(maximum_age_s, "scene age")
-        if not 0 < self.age <= 2 or set(gripper_links) != {"left", "right"}:
-            raise InvalidTask("explicit two-arm gripper links and pose age required")
+        if not 0 < self.age <= 2 or not isinstance(gripper_links, dict) or not gripper_links or set(gripper_links) - {"left", "right"}:
+            raise InvalidTask("explicit installed-arm gripper links and pose age required")
         self.links = {}
         for arm, links in gripper_links.items():
             if not isinstance(links, (list, tuple)) or not 1 <= len(links) <= 8:
                 raise InvalidTask("bounded gripper links required")
             self.links[arm] = tuple(identifier(v, "gripper link") for v in links)
-        if set(self.links["left"]) & set(self.links["right"]):
+        if set(self.links.get("left", ())) & set(self.links.get("right", ())):
             raise InvalidTask("gripper links must belong to separate arms")
         self.entries = {}
         self.owner = None

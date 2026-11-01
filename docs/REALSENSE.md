@@ -164,7 +164,7 @@ IR 영상의 노출을 먼저 확인하고 실측 오차는 별도로 검증한�
 
 ## Jetson 배포 및 터미널 키워드 검색
 
-배포 위치는 `hyper@192.168.35.236:/home/hyper/realsense-grounding`이다.
+아래 접속 주소 `robot@jetson.local`과 `~/realsense-grounding`은 공개 실행 예시다. 실제 주소는 로컬 SSH 설정에 둔다.
 Jetson Orin Nano Super, JetPack 7.2.1 / L4T 39.2.1, Ubuntu 24.04,
 Python 3.12, CUDA 13.2에서 설치했다. 다른 JetPack 버전에 이 PyTorch 조합을
 그대로 적용하지 않는다.
@@ -172,7 +172,7 @@ Python 3.12, CUDA 13.2에서 설치했다. 다른 JetPack 버전에 이 PyTorch 
 현재 배포본 실행:
 
 ```bash
-ssh hyper@192.168.35.236
+ssh robot@jetson.local
 cd ~/realsense-grounding
 bash tools/run/realsense_jetson.sh near
 ```
@@ -271,8 +271,9 @@ systemctl --user stop realsense-jetson-viewer.service
 
 다음 사용 때 위 스크립트로 다시 연결한다. `far`를 주면 원거리 프로필로 실행한다.
 기존 서버나 터미널 뷰어가 카메라를 사용 중이면 먼저 종료해야 한다.
-기본 연결 대상은 `hyper@192.168.35.236`, 원격 배포 디렉터리는
-`~/realsense-grounding`이며 필요하면 `JETSON_TARGET`으로 SSH 대상을 지정한다.
+연결 대상을 하드코딩하지 않는다. `JETSON_TARGET`으로 로컬 SSH 대상을 지정해야 하며,
+예시는 `JETSON_TARGET=robot@jetson.local bash tools/run/realsense_remote_viewer.sh near`다.
+원격 배포 디렉터리는 `~/realsense-grounding`이다.
 
 Jetson HTTP 서버는 `127.0.0.1:8765`, PC 터널은 `127.0.0.1:18765`에만 바인딩한다.
 외부 호스팅 없이 기존 SSH 연결로 영상이 전달된다. 추가 웹 패키지는 필요 없다.

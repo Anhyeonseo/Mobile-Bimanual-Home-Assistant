@@ -13,8 +13,15 @@ from .navigation import number
 from .ros_rgbd_source import image_array, quaternion_transform, RosRGBDSource
 
 
-def projected_grid(volume, *, origin_xy, width, height, now):
-    """Three-valued full-height projection: any occupied wins; unknown stays -1."""
+def projected_grid(volume, *, origin_xy, width, height, now, historical_free=False):
+    """Full-height projection: occupied wins; unknown stays -1.
+
+Historical free cells may guide a global route proposal after a scan. They are
+never current collision-clearance evidence; the local publisher keeps the
+default fresh-only mode and TravelGuard independently checks live depth.
+"""
+    if type(historical_free) is not bool:
+        raise InvalidTask('typed projection freshness policy required')
     if (type(width) is not int or type(height) is not int or min(width,height)<1
             or width*height>250000):
         raise InvalidTask('bounded projection required')
@@ -25,8 +32,13 @@ def projected_grid(volume, *, origin_xy, width, height, now):
     ox,oy=(round(v/r) for v in origin)
     lo,hi=math.floor(volume.p.minimum_height_m/r),math.ceil(volume.p.maximum_height_m/r)
     occupied=volume.projected_obstacles()
+    def free(cell):
+        if not historical_free:
+            return volume.free(cell,now)
+        value=volume.cells.get(cell)
+        return value is not None and not value[0] and 0 <= value[1] <= now
     return [100 if (x,y) in occupied else
-            (0 if all(volume.free((x,y,z),now) for z in range(lo,hi)) else -1)
+            (0 if all(free((x,y,z)) for z in range(lo,hi)) else -1)
             for y in range(oy,oy+height) for x in range(ox,ox+width)]
 
 

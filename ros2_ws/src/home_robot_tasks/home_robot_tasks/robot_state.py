@@ -33,6 +33,7 @@ class RobotObservation:
     collision_checked: bool = False
     checked_capture_id: str = ""
     checked_scene_revision: str = ""
+    joint_names: tuple = ()
 
 
 class RobotStateStore:
@@ -40,15 +41,23 @@ class RobotStateStore:
         fields = {'maximum_age_s','base_stopped_speed','lift_stopped_speed','joint_tolerance_rad',
                   'transport_joints_rad','lift_transport_um','lift_tolerance_um','hold_dwell_s',
                   'safe_minimum_rad','safe_maximum_rad','arrival_tolerance_m'}
-        if not isinstance(profile, dict) or set(profile) != fields:
+        if not isinstance(profile, dict) or set(profile) not in (fields, fields | {'joint_names'}):
             raise InvalidTask('complete observation profile required')
         self.p = dict(profile); self.clock = clock
+        if 'joint_names' in profile and not isinstance(profile['joint_names'], (list, tuple)):
+            raise InvalidTask('installed joint names must be a list')
+        self.joint_names = tuple(profile.get('joint_names', ()))
+        if 'joint_names' in profile and (len(self.joint_names) not in (6, 12) or
+                len(set(self.joint_names)) != len(self.joint_names) or
+                any(not isinstance(v, str) or not v for v in self.joint_names)):
+            raise InvalidTask('explicit unique installed joint names required')
+        self.joint_count = len(self.joint_names) if self.joint_names else 12
         for k in fields-{'transport_joints_rad','safe_minimum_rad','safe_maximum_rad'}:
             if number(profile[k], k) < 0: raise InvalidTask('negative observation bound')
         if not 0 < profile['maximum_age_s'] <= 2 or not 0 < profile['hold_dwell_s'] <= 2:
             raise InvalidTask('bounded observation age/dwell required')
         for k in ('transport_joints_rad','safe_minimum_rad','safe_maximum_rad'):
-            if len(profile[k]) != 12: raise InvalidTask('twelve joint limits required')
+            if len(profile[k]) != self.joint_count: raise InvalidTask('installed joint limits required')
             for v in profile[k]: number(v, k)
         if any(a >= b for a,b in zip(profile['safe_minimum_rad'],profile['safe_maximum_rad'])):
             raise InvalidTask('invalid safe joint envelope')
@@ -71,9 +80,11 @@ class RobotStateStore:
                 raise InvalidTask('stale robot observation')
             if self.latest and (value.sequence <= self.latest.sequence or value.observed_s <= self.latest.observed_s):
                 raise InvalidTask('repeated robot observation')
-            for k,n in (('xy_yaw',3),('base_velocity',3),('joints_rad',12)):
+            for k,n in (('xy_yaw',3),('base_velocity',3),('joints_rad',self.joint_count)):
                 if len(getattr(value,k)) != n: raise InvalidTask('invalid robot vector')
                 for v in getattr(value,k): number(v,k)
+            if self.joint_names and tuple(value.joint_names) != self.joint_names:
+                raise InvalidTask('installed joint feedback names mismatch')
             if type(value.lift_um) is not int or not 0 <= value.lift_um <= 1000000:
                 raise InvalidTask('invalid lift height')
             number(value.lift_velocity,'lift speed')

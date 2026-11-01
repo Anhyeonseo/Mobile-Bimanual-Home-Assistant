@@ -1,8 +1,19 @@
+#if HOST_DEVICE_INVENTORY_BUILD
+#include "device_inventory.h"
+#endif
+#ifdef TAUGHT_POSE_PROFILE_HEADER
+#include TAUGHT_POSE_PROFILE_HEADER
+#include "taught_pose_guard.h"
+#endif
 #include "mobile_board.h"
 #include "mobile_arm_observer.h"
 #include "mobile_servo_output.h"
 #include "binary_control.h"
 #include "actuator_core/mobile_framed.h"
+#ifdef S1_ARM_RANGE_PROFILE_HEADER
+#include S1_ARM_RANGE_PROFILE_HEADER
+static int32_t s1_previous_output_urad[12];
+#endif
 
 #include "f0_metrics.h"
 #include "control_tick.h"
@@ -227,6 +238,11 @@ static actuator_joint_calibration_t Host_JointCalibration(
 
 static uint32_t Host_CalibrationHash(void)
 {
+#ifdef S1_ARM_RANGE_PROFILE_HEADER
+    return S1_ARM_CALIBRATION_HASH;
+#elif defined(TAUGHT_POSE_PROFILE_HEADER)
+    return TAUGHT_CALIBRATION_HASH;
+#else
     uint8_t calibration_bytes[60] = {0U};
     uint16_t offset = 0U;
 
@@ -253,6 +269,7 @@ static uint32_t Host_CalibrationHash(void)
     }
 
     return actuator_crc32c(calibration_bytes, offset);
+#endif
 }
 
 static uint8_t Host_InitBufferedRoute(
@@ -2362,6 +2379,11 @@ static void Host_V2JointLimits(
 {
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
     BimanualOperationalLimits_LoadExecutorLimits(limits);
+#if HOST_LEFT_ONLY_BUILD
+    /* Reserved wire slots are not joints and cannot carry a target. */
+    for (uint8_t j = 6U; j < ACTUATOR_V2_JOINT_COUNT; j++)
+        limits[j].minimum_urad = limits[j].maximum_urad = 0;
+#endif
 #elif HOST_PROTOCOL_V2_J1_LIMITS_VALIDATION_BUILD
     BimanualOperationalLimits_LoadJ1LShadow(limits);
 #else
@@ -2490,6 +2512,16 @@ static void Host_ValidateV2StreamOpen(const actuator_frame_t *request)
         Host_SendV2StreamStatus(request, result);
         return;
     }
+#if HOST_LEFT_ONLY_BUILD
+    if (request->payload_length < 3U || request->payload[2] != ACTUATOR_V2_ARM_MASK_LEFT)
+    {
+        result = Host_V2ExecutorSessionResult(ACTUATOR_V2_STREAM_STATUS_CONTRACT_REJECTED,
+            ACTUATOR_V2_CONTRACT_INVALID_ARM_MASK);
+        host_binary_rejected_frame_count++;
+        Host_SendV2StreamStatus(request, result);
+        return;
+    }
+#endif
     executor_result = actuator_v2_stream_executor_open(
         &host_v2_stream_executor,
         request->payload,
@@ -2556,7 +2588,9 @@ static bool Host_PrepareArmMotionReference(void)
         uint16_t raw=j<6?left[j]:right[j-6]; int32_t unwrapped;
         if (!BimanualOperationalLimits_UnwrapModuloRaw(j<6?BIMANUAL_ARM_LEFT:BIMANUAL_ARM_RIGHT,
                 j%6, raw, &unwrapped) ||
-            actuator_joint_unwrapper_bind(&host_v2_shadow_unwrappers[j], raw, unwrapped, 0)
+            /* Binding requires a positive window, including an exact mapped
+             * reference. Match the torque-off automatic binding's 1-count window. */
+            actuator_joint_unwrapper_bind(&host_v2_shadow_unwrappers[j], raw, unwrapped, 1U)
                 != ACTUATOR_UNWRAP_OK) return false;
     }
     return true;
@@ -2582,7 +2616,7 @@ static void Host_ValidateV2Batch(
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
     if ((executor_result == ACTUATOR_V2_EXECUTOR_OK) &&
         ((host_binary_servos_configured == 0U) ||
-         (host_right_arm_output_active == 0U) ||
+         (!HOST_LEFT_ONLY_BUILD && host_right_arm_output_active == 0U) ||
          !actuator_safety_accepts_setpoint(&host_binary_safety)))
     {
         executor_result = ACTUATOR_V2_EXECUTOR_BAD_STATE;
@@ -2758,10 +2792,12 @@ static uint8_t Host_PerformV2CoordinatedStop(uint8_t dispatch_fault)
     {
         status = 1U;
     }
+#if !HOST_LEFT_ONLY_BUILD
     if (RightServoBus_DisableTorqueAll() != HAL_OK)
     {
         status = 1U;
     }
+#endif
     }
     host_binary_servos_configured = 0U;
     host_right_arm_output_active = 0U;
@@ -2782,15 +2818,42 @@ static uint8_t Host_PerformV2CoordinatedStop(uint8_t dispatch_fault)
 
 static uint8_t Host_ConfigureBimanualForTrajectory(void)
 {
+    /* Never configure/enable motors if the trajectory engine failed to initialize. */
+    if (host_v2_executor_ready == 0U) return 0U;
+    /* Configuration reads may recover the UART. They must not interrupt an
+     * active motion/stream or a pending whole-system stop. Keep this check
+     * before taught-profile EEPROM reads as well as torque configuration. */
+    if ((host_binary_motion.active != 0U) ||
+        (Host_BufferedExecutionIsActive() != 0U) ||
+        (host_v2_executor_clock_active != 0U) ||
+        (host_v2_stream_executor.diagnostics.state == ACTUATOR_V2_EXECUTOR_PRIMING) ||
+        (host_v2_stream_executor.diagnostics.state == ACTUATOR_V2_EXECUTOR_RUNNING) ||
+        (host_v2_stream_executor.diagnostics.state == ACTUATOR_V2_EXECUTOR_HOLD) ||
+        MobileBoard_StopActive()) return 0U;
+#ifdef TAUGHT_POSE_PROFILE_HEADER
+    /* Compare the actual EEPROM offsets before any torque enable. */
+    uint16_t actual[6];
+    if (Servo_ReadAllPositions(actual) != HAL_OK) return 0U;
+    for (uint8_t j=0;j<6;j++) {
+        uint8_t offset[2];
+        if (actual[j] < taught_minimum_raw[j] || actual[j] > taught_maximum_raw[j] ||
+            Servo_ReadData(j+1,31,2,offset)!=HAL_OK ||
+            (uint16_t)(offset[0] | (uint16_t)offset[1]<<8) != taught_offsets[j]) return 0U;
+    }
+    TaughtPoseGuard_Reset();
+#endif
     if (MobileBoard_StopActive()) return 0U;
     uint16_t left_positions[6] = {0U};
 
     if (Servo_ConfigureAllForTrajectory(left_positions) != HAL_OK)
     {
         (void)Servo_DisableTorqueAll();
+#if !HOST_LEFT_ONLY_BUILD
         (void)RightServoBus_DisableTorqueAll();
+#endif
         return 0U;
     }
+#if !HOST_LEFT_ONLY_BUILD
     for (uint8_t joint = 0U; joint < servo_joint_count; joint++)
     {
         const RightServoConfigureSnapshot configured =
@@ -2819,9 +2882,10 @@ static uint8_t Host_ConfigureBimanualForTrajectory(void)
             return 0U;
         }
     }
+#endif
     if (!MobileBoard_ArmsPrepared()) return 0U;
     host_bimanual_arm_watchdog_grace_started_ms = HAL_GetTick();
-    host_right_arm_output_active = 1U;
+    host_right_arm_output_active = HOST_LEFT_ONLY_BUILD ? 0U : 1U;
     return 1U;
 }
 #endif
@@ -2892,7 +2956,7 @@ static void Host_ServiceV2TrackingFeedback(void)
                  sample.joint_index,
                  sample.left_position_raw,
                  &left_measured_urad) == 0U) ||
-            (Host_V2TrackingRawToUrad(
+            (!HOST_LEFT_ONLY_BUILD && Host_V2TrackingRawToUrad(
                  right_joint,
                  sample.right_position_raw,
                  &right_measured_urad) == 0U))
@@ -2932,6 +2996,7 @@ static void Host_ServiceV2TrackingFeedback(void)
             Host_RequestV2CoordinatedStop();
             return;
         }
+#if !HOST_LEFT_ONLY_BUILD
         result = actuator_v2_stream_executor_check_joint_feedback(
             &host_v2_stream_executor,
             HAL_GetTick(),
@@ -2943,6 +3008,7 @@ static void Host_ServiceV2TrackingFeedback(void)
             Host_RequestV2CoordinatedStop();
             return;
         }
+#endif
 #if HOST_BIMANUAL_TERMINAL_SETTLE_BUILD
         if (host_v2_terminal_settle_active != 0U)
         {
@@ -2965,7 +3031,7 @@ static void Host_ServiceV2TrackingFeedback(void)
                 right_error = -right_error;
             }
             if ((left_error > terminal_tolerance) ||
-                (right_error > terminal_tolerance))
+                (!HOST_LEFT_ONLY_BUILD && right_error > terminal_tolerance))
             {
                 host_v2_terminal_settle_baseline_completed_pairs =
                     Host_V2TrackingCompletedPairs();
@@ -3038,14 +3104,21 @@ static void Host_ServiceV2TrackingFeedback(void)
         {
             BimanualFeedbackSnapshot snapshot;
             BimanualFeedbackSnapshot_Copy(HAL_GetTick(), &snapshot);
-            if (snapshot.present_mask != BIMANUAL_FEEDBACK_COMPLETE_MASK)
+            if (snapshot.present_mask != HOST_FEEDBACK_PRESENT_MASK)
             {
                 Host_RequestV2CoordinatedStop();
                 return;
             }
             memcpy(
                 host_v2_shadow_executor_anchor_urad,
+#ifdef TAUGHT_POSE_PROFILE_HEADER
+                /* The servo keeps holding this goal between taught segments.
+                 * Feedback above verifies settling; its residual must not
+                 * become a discontinuity in the commanded path on reopen. */
+                host_v2_output_urad,
+#else
                 snapshot.positions_urad,
+#endif
                 sizeof(host_v2_shadow_executor_anchor_urad)
             );
             host_v2_shadow_anchor_ready = 1U;
@@ -3110,6 +3183,10 @@ static void Host_ServiceV2Executor(void)
     }
     if (host_v2_executor_start_pending != 0U)
     {
+#ifdef S1_ARM_RANGE_PROFILE_HEADER
+        memcpy(s1_previous_output_urad, host_v2_shadow_executor_anchor_urad,
+               sizeof(s1_previous_output_urad));
+#endif
         result = actuator_v2_stream_executor_start(
             &host_v2_stream_executor,
             event.tick_ms,
@@ -3132,6 +3209,23 @@ static void Host_ServiceV2Executor(void)
         Host_RequestV2CoordinatedStop();
         return;
     }
+#ifdef TAUGHT_POSE_PROFILE_HEADER
+    if (!TaughtPoseGuard_Check(host_v2_output_urad,
+            result == ACTUATOR_V2_EXECUTOR_TERMINAL)) {
+        Host_RequestV2CoordinatedStop();
+        return;
+    }
+#endif
+#ifdef S1_ARM_RANGE_PROFILE_HEADER
+    if (!BimanualOperationalLimits_CheckTransition(s1_previous_output_urad,
+            host_v2_output_urad, S1_ARM_MAXIMUM_STEP_RAW,
+            S1_ARM_SERVO_SEAM_VERIFIED != 0U, &failed_joint)) {
+        host_v2_stream_executor.diagnostics.tracking_error_joint = failed_joint;
+        Host_RequestV2CoordinatedStop();
+        return;
+    }
+    memcpy(s1_previous_output_urad, host_v2_output_urad, sizeof(s1_previous_output_urad));
+#endif
     if (BimanualOperationalLimits_MapExecutorOutput(
             host_v2_output_urad, left_raw, right_raw, &failed_joint) !=
         ACTUATOR_BIMANUAL_GOAL_MAP_OK)
@@ -3359,8 +3453,8 @@ static void Host_SendV2FeedbackSnapshot(const actuator_frame_t *request)
     response.sender_time_ms = HAL_GetTick();
     response.payload_length = ACTUATOR_V2_FEEDBACK_SNAPSHOT_WIRE_SIZE;
     response.payload[0] =
-        (snapshot.present_mask == BIMANUAL_FEEDBACK_COMPLETE_MASK) ? 0U : 1U;
-    response.payload[1] = ACTUATOR_V2_JOINT_COUNT;
+        (snapshot.present_mask == HOST_FEEDBACK_PRESENT_MASK) ? 0U : 1U;
+    response.payload[1] = HOST_PHYSICAL_JOINT_COUNT;
     Host_WriteU16Le(&response.payload[2], snapshot.present_mask);
     Host_WriteU32Le(&response.payload[4], request->sequence);
     Host_WriteU32Le(&response.payload[8], request->sender_time_ms);
@@ -3421,8 +3515,10 @@ static actuator_calibration_result_t Host_ShadowFeedbackRawToUrad(
 static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
 {
     actuator_frame_t response;
+#if !HOST_LEFT_ONLY_BUILD
     RightServoDisableSnapshot right_disable;
     const RightServoDiscoverySnapshot *right_snapshot = NULL;
+#endif
     uint16_t left_raw[SINGLE_ARM_JOINT_COUNT] = {0U};
     uint8_t status = 0U;
     uint8_t left_mask = 0U;
@@ -3453,7 +3549,7 @@ static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
 #else
     response.payload_length = ACTUATOR_V2_SHADOW_SNAPSHOT_WIRE_SIZE;
 #endif
-    response.payload[1] = ACTUATOR_V2_JOINT_COUNT;
+    response.payload[1] = HOST_PHYSICAL_JOINT_COUNT;
 #if HOST_PROTOCOL_V2_UNWRAP_SHADOW_VALIDATION_BUILD
     if (bind_request != 0U)
     {
@@ -3546,11 +3642,13 @@ static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
     {
         status = 2U;
     }
+#if !HOST_LEFT_ONLY_BUILD
     right_disable = RightServoBus_DisableTorqueAllVerified();
     if ((right_disable.status != RIGHT_SERVO_DISABLE_OK) && (status == 0U))
     {
         status = 3U;
     }
+#endif
     host_binary_servos_configured = 0U;
     host_right_arm_output_active = 0U;
 
@@ -3561,6 +3659,7 @@ static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
     if (status == 0U)
     {
         left_mask = UINT8_C(0x3F);
+#if !HOST_LEFT_ONLY_BUILD
         right_snapshot = RightServoBus_Discover();
         if ((right_snapshot == NULL) ||
             (right_snapshot->present_mask != UINT8_C(0x3F)) ||
@@ -3572,19 +3671,24 @@ static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
         {
             right_mask = right_snapshot->present_mask;
         }
+#endif
     }
 
     if (status == 0U)
     {
-        for (uint8_t joint = 0U; joint < ACTUATOR_V2_JOINT_COUNT; joint++)
+        for (uint8_t joint = 0U; joint < HOST_PHYSICAL_JOINT_COUNT; joint++)
         {
             const uint8_t arm_joint =
                 (uint8_t)(joint % SINGLE_ARM_JOINT_COUNT);
             const actuator_joint_calibration_t calibration =
                 Host_JointCalibration(arm_joint);
+#if HOST_LEFT_ONLY_BUILD
+            const uint16_t raw = left_raw[joint];
+#else
             const uint16_t raw = (joint < SINGLE_ARM_JOINT_COUNT) ?
                 left_raw[joint] :
                 right_snapshot->positions[arm_joint];
+#endif
             host_v2_shadow_raw[joint] = raw;
 #if HOST_PROTOCOL_V2_UNWRAP_SHADOW_VALIDATION_BUILD
             actuator_unwrap_result_t unwrap_result;
@@ -3734,6 +3838,18 @@ static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
 #endif
 #endif
 
+#if HOST_DEVICE_INVENTORY_BUILD
+static bool Host_InventoryPermitted(void)
+{
+    return host_stop_latched == 0U && host_binary_servos_configured == 0U &&
+        host_right_arm_output_active == 0U && host_binary_motion.active == 0U &&
+        Host_BufferedExecutionIsActive() == 0U && host_v2_executor_ready != 0U &&
+        host_v2_executor_clock_active == 0U &&
+        host_v2_stream_executor.diagnostics.state == ACTUATOR_V2_EXECUTOR_CLOSED &&
+        !MobileBoard_IsConfigured() && !MobileBoard_StopActive();
+}
+#endif
+
 static void Host_HandleBinaryFrame(
     const actuator_frame_t *request,
     uint32_t received_at_ms
@@ -3753,9 +3869,63 @@ static void Host_HandleBinaryFrame(
     }
 #endif
 
+#if HOST_S1_RANGE_VERIFY_ONLY
+    switch (request->message_type) {
+    case ACTUATOR_MSG_HELLO_REQUEST: case ACTUATOR_MSG_HEARTBEAT:
+    case ACTUATOR_MSG_GET_STATE:
+    case ACTUATOR_V2_MSG_GET_EXECUTOR_DIAGNOSTICS:
+    case ACTUATOR_V2_MSG_GET_DISPATCH_DIAGNOSTICS:
+    case ACTUATOR_V2_MSG_GET_TRACKING_DIAGNOSTICS:
+    case ACTUATOR_V2_MSG_GET_FEEDBACK_SNAPSHOT: break;
+    default: host_binary_rejected_frame_count++;
+        Host_SendBinaryState(request->sequence,8U); return;
+    }
+#endif
+
+#if HOST_LEFT_ONLY_BUILD
+    if (request->message_type == ACTUATOR_V2_MSG_MOBILE_REQUEST ||
+        (request->message_type >= ACTUATOR_MSG_RIGHT_ARM_JOG_ONCE_REQUEST &&
+         request->message_type <= ACTUATOR_MSG_RIGHT_ARM_CONFIGURE_ONCE_RESPONSE) ||
+        (request->message_type >= ACTUATOR_MSG_RIGHT_ARM_DISCOVERY_REQUEST &&
+         request->message_type <= ACTUATOR_MSG_RIGHT_ARM_DISABLE_RESPONSE))
+    {
+        host_binary_rejected_frame_count++;
+        Host_SendBinaryState(request->sequence, 8U);
+        return;
+    }
+#endif
+#ifdef TAUGHT_POSE_PROFILE_HEADER
+    switch (request->message_type) {
+    case ACTUATOR_MSG_HELLO_REQUEST: case ACTUATOR_MSG_HEARTBEAT:
+    case ACTUATOR_MSG_GET_STATE: case ACTUATOR_MSG_ARM_REQUEST:
+    case ACTUATOR_MSG_ENABLE: case ACTUATOR_MSG_SAFE_STOP:
+    case ACTUATOR_MSG_SETPOINT_BATCH: case ACTUATOR_V2_MSG_STREAM_OPEN:
+    case ACTUATOR_V2_MSG_GET_EXECUTOR_DIAGNOSTICS:
+    case ACTUATOR_V2_MSG_GET_DISPATCH_DIAGNOSTICS:
+    case ACTUATOR_V2_MSG_GET_TRACKING_DIAGNOSTICS:
+    case ACTUATOR_V2_MSG_GET_FEEDBACK_SNAPSHOT:
+    case ACTUATOR_V2_MSG_PREPARE_SHADOW: break;
+    default: host_binary_rejected_frame_count++;
+        Host_SendBinaryState(request->sequence,8U);return;
+    }
+#endif
     switch (request->message_type)
     {
 #if ACTUATOR_PROTOCOL_VERSION == 2
+#if HOST_DEVICE_INVENTORY_BUILD
+        case ACTUATOR_V2_MSG_DEVICE_INVENTORY_REQUEST:
+        {
+            actuator_frame_t response = {0};
+            response.message_type = ACTUATOR_V2_MSG_DEVICE_INVENTORY_RESPONSE;
+            response.sequence = request->sequence;
+            response.sender_time_ms = HAL_GetTick();
+            response.payload_length = DEVICE_INVENTORY_REPLY_SIZE;
+            DeviceInventory_Read(request->payload, request->payload_length,
+                request->flags == 0U && Host_InventoryPermitted(), response.payload);
+            (void)Host_SendBinaryFrame(&response);
+            break;
+        }
+#endif
         case ACTUATOR_V2_MSG_MOBILE_REQUEST:
         {
             actuator_frame_t response;
@@ -4505,7 +4675,8 @@ void BinaryControl_Service(void)
     }
 
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
-    if ((host_right_arm_output_active != 0U) &&
+    if ((host_right_arm_output_active != 0U ||
+         (HOST_LEFT_ONLY_BUILD && host_binary_servos_configured != 0U)) &&
         ((host_binary_heartbeat_count == 0U) ||
          (((uint32_t)(now_ms -
               host_bimanual_arm_watchdog_grace_started_ms) >
@@ -4513,7 +4684,8 @@ void BinaryControl_Service(void)
           ((uint32_t)(now_ms - host_binary_last_heartbeat_ms) >
             HOST_BINARY_HEARTBEAT_TIMEOUT_MS))))
 #else
-    if ((host_right_arm_output_active != 0U) &&
+    if ((host_right_arm_output_active != 0U ||
+         (HOST_LEFT_ONLY_BUILD && host_binary_servos_configured != 0U)) &&
         ((host_binary_heartbeat_count == 0U) ||
          ((uint32_t)(now_ms - host_binary_last_heartbeat_ms) >
              HOST_BINARY_HEARTBEAT_TIMEOUT_MS)))
@@ -4539,7 +4711,8 @@ void BinaryControl_Service(void)
     }
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
     if ((host_stop_latched != 0U) &&
-        (host_right_arm_output_active != 0U))
+        (host_right_arm_output_active != 0U ||
+         (HOST_LEFT_ONLY_BUILD && host_binary_servos_configured != 0U)))
     {
         (void)Host_PerformV2CoordinatedStop(1U);
     }

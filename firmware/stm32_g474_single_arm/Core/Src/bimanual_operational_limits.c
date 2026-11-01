@@ -11,6 +11,20 @@
  * workspace. Shoulder entries use unwrapped raw coordinates so 4095 -> 0 is
  * continuous. Gripper limits are servo-command bounds, not jaw-gap geometry.
  */
+#ifdef S1_ARM_RANGE_PROFILE_HEADER
+#include S1_ARM_RANGE_PROFILE_HEADER
+static const BimanualOperationalLimit operational_limits[2][6] = {
+    S1_ARM_LEFT_LIMITS, S1_ARM_RIGHT_LIMITS
+};
+#elif defined(TAUGHT_POSE_PROFILE_HEADER)
+#include TAUGHT_POSE_PROFILE_HEADER
+static const BimanualOperationalLimit operational_limits[2][6] = {
+ TAUGHT_LEFT_LIMITS,
+ {{2048U,1,{2048,2048},{0,0}},{2048U,1,{2048,2048},{0,0}},
+  {2048U,-1,{2048,2048},{0,0}},{2048U,-1,{2048,2048},{0,0}},
+  {2048U,1,{2048,2048},{0,0}},{2048U,-1,{2048,2048},{0,0}}}
+};
+#else
 /* BEGIN GENERATED OPERATIONAL LIMITS */
 /* config/bimanual_operational_limits.json SHA256: 436a5cfdc80aeaacfc4fd55812ec7ce102c7ecfe7443071484a942cad0946263 */
 static const BimanualOperationalLimit operational_limits
@@ -33,6 +47,7 @@ static const BimanualOperationalLimit operational_limits
     },
 };
 /* END GENERATED OPERATIONAL LIMITS */
+#endif
 
 /* Archived table for reproducible 0x00024100 no-output validation only. */
 static const actuator_v2_joint_limit_t j1l_shadow_limits[
@@ -143,6 +158,33 @@ bool BimanualOperationalLimits_StepModuloRaw(
     *target_modulo_raw = (uint16_t)target_modulo;
     return true;
 }
+
+#ifdef S1_ARM_RANGE_PROFILE_HEADER
+bool BimanualOperationalLimits_CheckTransition(
+    const int32_t previous_urad[12], const int32_t target_urad[12],
+    uint16_t maximum_step_raw, bool allow_seam, uint8_t *failed_joint)
+{
+    if (previous_urad == NULL || target_urad == NULL ||
+        maximum_step_raw == 0U || maximum_step_raw >= 2048U) return false;
+    for (uint8_t i = 0; i < 12U; ++i) {
+        const BimanualOperationalLimit *limit = &operational_limits[i / 6U][i % 6U];
+        int32_t a = 0, b = 0;
+        uint16_t am = 0, bm = 0;
+        if (failed_joint != NULL) *failed_joint = i;
+        if (actuator_unwrapped_urad_to_raw(limit->zero_raw, limit->positive_raw_direction,
+                previous_urad[i], &limit->raw, &a, &am) != ACTUATOR_UNWRAP_OK ||
+            actuator_unwrapped_urad_to_raw(limit->zero_raw, limit->positive_raw_direction,
+                target_urad[i], &limit->raw, &b, &bm) != ACTUATOR_UNWRAP_OK) return false;
+        const int64_t delta = (int64_t)b - a;
+        if (delta > maximum_step_raw || delta < -(int64_t)maximum_step_raw) return false;
+        /* Compare continuous turn indices; modulo differences alone can hide
+         * an accidental full turn. Never substitute the opposite branch. */
+        if (!allow_seam && (a - am) / 4096 != (b - bm) / 4096) return false;
+    }
+    if (failed_joint != NULL) *failed_joint = UINT8_MAX;
+    return true;
+}
+#endif
 
 void BimanualOperationalLimits_LoadExecutorLimits(
     actuator_v2_joint_limit_t

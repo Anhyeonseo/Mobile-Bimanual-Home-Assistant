@@ -57,6 +57,11 @@ def test_space_exit_and_paste_burst():
     with pytest.raises(RuntimeError): module.command_for("w" * 100, 2, "F", 1)
 
 
+@pytest.mark.parametrize("keys", [" w", "w w", "w d", " q"])
+def test_stop_wins_over_movement_in_the_same_terminal_batch(keys):
+    assert module.command_for(keys, 2, "F", 1) == ("Z", 2, False)
+
+
 class Port:
     def __init__(self, replies): self.data = bytearray(b"".join(json.dumps(x).encode() + b"\n" for x in replies)); self.writes = []
     def reset_input_buffer(self): pass
@@ -125,6 +130,68 @@ def test_noninteractive_run_never_arms(monkeypatch):
     port = Port([])
     with pytest.raises(RuntimeError): module.run(port, 1)
     assert not port.writes
+
+
+@pytest.mark.parametrize("signal_name", ["SIGHUP", "SIGTERM"])
+@pytest.mark.parametrize("mode", ["--run", "--web"])
+def test_process_exit_signals_send_stop_before_releasing_port(tmp_path, signal_name, mode):
+    import sys
+    log = tmp_path / "writes.txt"
+    # Run the actual CLI entry point in a child. Serial, TTY and HTTP surfaces
+    # are fake; the termination signal is real and delivered after a D command.
+    child = r'''
+from contextlib import nullcontext
+import json, os, pathlib, runpy, signal, sys, threading, types
+root, log, sig, mode = sys.argv[1:]
+sys.path[:0] = [str(pathlib.Path(root)/"tools/run"), str(pathlib.Path(root)/"ros2_ws/src/so101_arm_bridge")]
+from so101_arm_bridge import backend_lease
+backend_lease.acquire_backend_lease = lambda *a: nullcontext()
+import termios, tty
+os.isatty = lambda fd: True
+termios.tcgetattr = lambda fd: []
+termios.tcsetattr = lambda *a: None
+tty.setcbreak = lambda *a: None
+class Port:
+    data = bytearray()
+    def __init__(self, *a, **k): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): pass
+    def reset_input_buffer(self): pass
+    def read(self, n):
+        result = bytes(self.data[:n]); del self.data[:n]; return result
+    def write(self, data):
+        parts = data.decode().split()
+        with open(log, "a") as f: f.write(parts[0]+"\n")
+        if parts[0] == "INFO":
+            reply = dict(firmware="mobile-base-teleop-v4",host_baud=921600,servo_baud=1000000,
+                         ids=[7,8,9,10],max_raw=200,watchdog_ms=400)
+        elif parts[0] == "ARM":
+            reply = dict(type="armed",session=int(parts[1],16),sequence=0,armed=True,fault=False)
+        elif parts[0] == "D":
+            os.kill(os.getpid(), getattr(signal, sig))
+            raise AssertionError("signal must interrupt movement")
+        else:
+            assert parts[0] == "STOP"
+            reply = dict(type="stopped",armed=False,stop_confirmed=True)
+        self.data.extend(json.dumps(reply).encode()+b"\n"); return len(data)
+sys.modules["serial"] = types.SimpleNamespace(Serial=Port)
+import select
+select.select = lambda *a: ([],[],[])
+import base_teleop_web
+class Server:
+    server_port = 8765
+    def __init__(self, *a): self.ended = threading.Event()
+    def serve_forever(self): self.ended.wait(5)
+    def shutdown(self): self.ended.set()
+    def server_close(self): pass
+base_teleop_web.ThreadingHTTPServer = Server
+sys.argv = ["teleop_mobile_base.py", "--port", "fake", mode]
+runpy.run_path(str(pathlib.Path(root)/"tools/run/teleop_mobile_base.py"), run_name="__main__")
+'''
+    result = subprocess.run([sys.executable, "-c", child, str(ROOT), str(log), signal_name, mode],
+                            capture_output=True, text=True, timeout=10)
+    assert log.read_text().splitlines() == ["INFO", "ARM", "D", "STOP"], result.stderr
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize("scenario,register", [(21,46),(22,40),(23,58),(24,56),(26,58)])

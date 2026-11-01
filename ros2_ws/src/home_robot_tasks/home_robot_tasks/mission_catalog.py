@@ -10,7 +10,7 @@ from .search import SearchSession, Viewpoint
 
 
 class MissionCatalog:
-    def __init__(self, document, world, navigation_map, current_xy, motion, scene_revision, clock):
+    def __init__(self, document, world, navigation_map, current_xy, motion, scene_revision, clock, *, placement_policy=None):
         expected = {'schema_version', 'mode', 'map_id', 'map_revision', 'transport', 'places', 'grasp'}
         if not isinstance(document, dict) or set(document) != expected or type(document['schema_version']) is not int or document['schema_version'] != 1:
             raise InvalidTask('invalid mission catalog')
@@ -19,6 +19,7 @@ class MissionCatalog:
         if (document['map_id'], document['map_revision']) != (navigation_map.map_id, navigation_map.revision):
             raise InvalidTask('catalog map revision mismatch')
         self.doc, self.world, self.map = deepcopy(document), deepcopy(world), navigation_map
+        self.placement_policy = placement_policy
         self.xy, self.motion, self.scene, self.clock = current_xy, motion, scene_revision, clock
         t = self.doc['transport']
         if set(t) != {'arm', 'height_um'} or not isinstance(t['arm'], dict) or type(t['height_um']) is not int:
@@ -76,6 +77,8 @@ class MissionCatalog:
         if name not in self.doc['places'] or not isinstance(reason, str) or not reason:
             raise InvalidTask('registered place and change reason required')
         self.invalid_places[name] = reason
+        if self.placement_policy is not None:
+            self.placement_policy.reset()
         self.target = self.surface = None
 
     def check_place(self, name):
@@ -151,6 +154,8 @@ class MissionCatalog:
         return deepcopy(target)
 
     def resolve(self, skill, parameters, now):
+        if self.placement_policy is not None and (skill.startswith('align_') or skill.startswith('adjust_lift_') or skill in {'pick', 'place'}):
+            return self.placement_policy.resolve(skill, parameters, self, now)
         if skill.startswith('prepare_'): return deepcopy(self.doc['transport'])
         if skill == 'navigate_to':
             # Application already validates the request. Revalidate revision/path
@@ -171,6 +176,8 @@ class MissionCatalog:
             self.navigation_goal = deepcopy(plan['goal'])
             return plan
         if skill == 'search':
+            if self.placement_policy is not None:
+                self.placement_policy.reset()
             self.object_id = identifier(parameters['object_id'], 'object')
             self.target = self.surface = self.source_place = self.source_view = None
             return deepcopy(parameters)

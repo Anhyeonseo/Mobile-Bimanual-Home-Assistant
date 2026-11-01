@@ -1,0 +1,107 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "home-assistant-s1-baseline",
+      "displayName": "S1 dual-arm baseline; mobile commissioning disabled",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/../../build/s1-common-control",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/arm-none-eabi.cmake",
+        "CMAKE_BUILD_TYPE": "Release",
+        "BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE": "ON",
+        "ACTUATOR_MOBILE_FIRST_ID": "7",
+        "MOBILE_BOARD_PROFILE_HEADER": ""
+      }
+    },
+    {
+      "name": "home-assistant-s1-inventory",
+      "inherits": "home-assistant-s1-baseline",
+      "displayName": "S1 fixed-block read-only device inventory",
+      "binaryDir": "${sourceDir}/../../build/s1-inventory",
+      "cacheVariables": {
+        "HOME_ASSISTANT_INVENTORY": "ON"
+      }
+    },
+    {
+      "name": "home-assistant-s1-calibration",
+      "displayName": "S1 isolated selected-arm calibration; no motion",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/../../build/s1-calibration",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/arm-none-eabi.cmake",
+        "CMAKE_BUILD_TYPE": "Release",
+        "BIMANUAL_CALIBRATION_ONLY": "ON",
+        "ACTUATOR_MOBILE_FIRST_ID": "7",
+        "MOBILE_BOARD_PROFILE_HEADER": ""
+      }
+    },
+    {
+      "name": "home-assistant-s1-ranges",
+      "inherits": "home-assistant-s1-baseline",
+      "displayName": "S1 shared continuous ranges; output-disabled verification",
+      "binaryDir": "${sourceDir}/../../build/s1-ranges",
+      "cacheVariables": {
+        "S1_ARM_RANGE_PROFILE_HEADER": "${sourceDir}/Core/Inc/generated_s1_arm_ranges.h"
+      }
+    },
+    {
+      "name": "home-assistant-s1-lift-measurement",
+      "displayName": "S1 hand-guided lift measurement; all motor writes blocked",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/../../build/s1-lift-measurement",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/arm-none-eabi.cmake",
+        "CMAKE_BUILD_TYPE": "Release",
+        "MOBILE_BUS_INSPECTION_ONLY": "ON",
+        "ACTUATOR_MOBILE_FIRST_ID": "7",
+        "MOBILE_BOARD_PROFILE_HEADER": ""
+      }
+    },
+    {
+      "name": "home-assistant-s1-lift-teleop",
+      "displayName": "S1 ID10 lift-only manual descent; no arm or wheel output",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/../../build/s1-lift-teleop",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/arm-none-eabi.cmake",
+        "CMAKE_BUILD_TYPE": "Release",
+        "LIFT_TELEOP_ONLY": "ON",
+        "ACTUATOR_MOBILE_FIRST_ID": "7",
+        "MOBILE_BOARD_PROFILE_HEADER": ""
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "home-assistant-s1-baseline",
+      "configurePreset": "home-assistant-s1-baseline",
+      "jobs": 4
+    },
+    {
+      "name": "home-assistant-s1-inventory",
+      "configurePreset": "home-assistant-s1-inventory",
+      "jobs": 4
+    },
+    {
+      "name": "home-assistant-s1-calibration",
+      "configurePreset": "home-assistant-s1-calibration",
+      "jobs": 4
+    },
+    {
+      "name": "home-assistant-s1-ranges",
+      "configurePreset": "home-assistant-s1-ranges",
+      "jobs": 4
+    },
+    {
+      "name": "home-assistant-s1-lift-measurement",
+      "configurePreset": "home-assistant-s1-lift-measurement",
+      "jobs": 4
+    },
+    {
+      "name": "home-assistant-s1-lift-teleop",
+      "configurePreset": "home-assistant-s1-lift-teleop",
+      "jobs": 4
+    }
+  ]
+}

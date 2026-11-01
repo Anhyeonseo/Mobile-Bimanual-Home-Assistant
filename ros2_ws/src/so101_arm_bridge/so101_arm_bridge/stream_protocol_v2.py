@@ -72,6 +72,8 @@ class StreamMessageTypeV2(IntEnum):
     FEEDBACK_SNAPSHOT = 62
     MOBILE_REQUEST = 64
     MOBILE_RESPONSE = 65
+    DEVICE_INVENTORY_REQUEST = 66
+    DEVICE_INVENTORY_RESPONSE = 67
 
 
 class BatchKindV2(IntEnum):
@@ -550,11 +552,13 @@ def decode_frame_v2(packet: bytes) -> FrameV2:
     )
 
 
-def parse_hello_v2(payload: bytes) -> HelloV2:
+def parse_hello_v2(payload: bytes, *, expected_joint_count: int = JOINT_COUNT) -> HelloV2:
+    if type(expected_joint_count) is not int or expected_joint_count not in (6, JOINT_COUNT):
+        raise StreamContractError("unsupported physical joint count")
     if len(payload) != HELLO_V2.size:
         raise StreamContractError("invalid protocol v2 HELLO length")
     values = HELLO_V2.unpack(payload)
-    if values[0] != PROTOCOL_VERSION or values[1] != JOINT_COUNT or values[3] != 0:
+    if values[0] != PROTOCOL_VERSION or values[1] != expected_joint_count or values[3] != 0:
         raise StreamContractError("invalid protocol v2 HELLO identity")
     return HelloV2(
         protocol_version=values[0],
@@ -568,11 +572,13 @@ def parse_hello_v2(payload: bytes) -> HelloV2:
     )
 
 
-def parse_state_v2(payload: bytes) -> StateV2:
+def parse_state_v2(payload: bytes, *, expected_joint_count: int = JOINT_COUNT) -> StateV2:
+    if type(expected_joint_count) is not int or expected_joint_count not in (6, JOINT_COUNT):
+        raise StreamContractError("unsupported physical joint count")
     if len(payload) != STATE_V2.size:
         raise StreamContractError("invalid protocol v2 STATE length")
     values = STATE_V2.unpack(payload)
-    if values[2] != JOINT_COUNT or values[3] != PROTOCOL_VERSION:
+    if values[2] != expected_joint_count or values[3] != PROTOCOL_VERSION:
         raise StreamContractError("invalid protocol v2 STATE identity")
     return StateV2(
         stop_latched=values[0] != 0,
@@ -638,7 +644,9 @@ def parse_executor_diagnostics_v2(payload: bytes) -> StreamExecutorDiagnosticsV2
     )
 
 
-def parse_shadow_snapshot_v2(payload: bytes) -> StreamShadowSnapshotV2:
+def parse_shadow_snapshot_v2(payload: bytes, *, expected_joint_count: int = JOINT_COUNT) -> StreamShadowSnapshotV2:
+    if type(expected_joint_count) is not int or expected_joint_count not in (6, JOINT_COUNT):
+        raise StreamContractError("unsupported physical joint count")
     if len(payload) == SHADOW_SNAPSHOT_V2.size:
         values = SHADOW_SNAPSHOT_V2.unpack(payload)
         positions_raw = tuple(values[4:16])
@@ -651,7 +659,7 @@ def parse_shadow_snapshot_v2(payload: bytes) -> StreamShadowSnapshotV2:
         anchor_positions_urad = tuple(values[28:40])
     else:
         raise StreamContractError("invalid protocol v2 shadow snapshot length")
-    if values[1] != JOINT_COUNT:
+    if values[1] != expected_joint_count:
         raise StreamContractError("invalid protocol v2 shadow joint count")
     return StreamShadowSnapshotV2(
         status_code=values[0],
@@ -710,11 +718,13 @@ def parse_tracking_diagnostics_v2(
 
 
 
-def parse_feedback_snapshot_v2(payload: bytes) -> BimanualFeedbackSnapshotV2:
+def parse_feedback_snapshot_v2(payload: bytes, *, expected_joint_count: int = JOINT_COUNT) -> BimanualFeedbackSnapshotV2:
+    if type(expected_joint_count) is not int or expected_joint_count not in (6, JOINT_COUNT):
+        raise StreamContractError("unsupported physical joint count")
     if len(payload) != FEEDBACK_SNAPSHOT_V2.size:
         raise StreamContractError("invalid bimanual feedback snapshot length")
     values = FEEDBACK_SNAPSHOT_V2.unpack(payload)
-    if values[1] != JOINT_COUNT:
+    if values[1] != expected_joint_count:
         raise StreamContractError("invalid bimanual feedback joint count")
     return BimanualFeedbackSnapshotV2(
         status_code=values[0],

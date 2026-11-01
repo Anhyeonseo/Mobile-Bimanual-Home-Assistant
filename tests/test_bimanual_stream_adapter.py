@@ -720,3 +720,41 @@ def test_poll_accepts_a_normal_in_flight_dispatch() -> None:
 
     assert instance.state is AdapterState.ACTIVE
     assert transport.safe_stop_count == 0
+
+@pytest.mark.parametrize('pending',[True,False])
+def test_feedback_bus_busy_is_not_a_dispatch_fault(pending):
+    instance,transport=adapter();instance.prepare();instance.start('policy',points(80,130,180),finite=False)
+    original=transport.get_dispatch_diagnostics
+    def busy():
+        value=original();value.ready=False;return value
+    transport.get_dispatch_diagnostics=busy
+    transport.tracking_active=True;transport.tracking_pending=pending
+    instance.poll('policy')
+    assert instance.state is AdapterState.ACTIVE and transport.safe_stop_count==0
+
+
+def test_terminal_waits_for_bus_ready_without_latching_stop():
+    instance,transport=adapter();instance.prepare();instance.start('policy',points(80,130),finite=True)
+    transport.executor_state=StreamExecutorStateV2.SUCCEEDED
+    original=transport.get_dispatch_diagnostics
+    def busy():
+        value=original();value.ready=False;return value
+    transport.get_dispatch_diagnostics=busy
+    instance.poll('policy')
+    assert instance.state is AdapterState.ACTIVE and transport.safe_stop_count==0
+    transport.get_dispatch_diagnostics=original;instance.poll('policy')
+    assert instance.state is AdapterState.READY and transport.safe_stop_count==0
+
+@pytest.mark.parametrize('problem',['status','fault_flag','failure_count'])
+def test_dispatch_errors_still_stop_while_bus_is_busy(problem):
+    instance,transport=adapter();instance.prepare();instance.start('policy',points(80,130),finite=False)
+    original=transport.get_dispatch_diagnostics
+    def broken():
+        value=original();value.ready=False
+        if problem=='status':value.status_code=1
+        elif problem=='fault_flag':value.faulted=True
+        else:value.failure_count=1
+        return value
+    transport.get_dispatch_diagnostics=broken
+    with pytest.raises(BimanualStreamError,match='dispatch fault'):instance.poll('policy')
+    assert transport.safe_stop_count==1

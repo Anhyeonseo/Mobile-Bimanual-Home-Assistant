@@ -83,17 +83,36 @@ option(
     OFF
 )
 
+option(LEFT_ONLY_CALIBRATION_ONLY "Left six-motor centering service; no motion commands" OFF)
+option(BIMANUAL_CALIBRATION_ONLY "Selected-arm centering service on two buses; no motion commands" OFF)
+
+set(TAUGHT_POSE_PROFILE_HEADER "" CACHE FILEPATH "Measured five-pose profile; only with left-only filming")
+set(S1_ARM_RANGE_PROFILE_HEADER "" CACHE FILEPATH "Generated S1 arm ranges; read-only verification build")
+
+option(LEFT_ONLY_FILMING_CANDIDATE "Six physical left-arm joints; no right/mobile bus access" OFF)
+
 option(MOBILE_BUS_INSPECTION_ONLY "Read-only mobile bus maintenance; no arm/mobile motion" OFF)
 
 option(MOBILE_WHEEL_SETUP_ONLY "Wheel mode setup only; no torque enable or motion" OFF)
 
 option(MOBILE_WHEEL_PULSE_ONLY "Raised-wheel single bounded pulse; no arm/lift or EEPROM writes" OFF)
 
+option(LIFT_TELEOP_ONLY "Isolated ID 10 downward lift commissioning with watchdog" OFF)
+
 option(MOBILE_BASE_TELEOP_ONLY "Manual base keyboard teleop with watchdog; no arm/lift writes" OFF)
+
+option(HOME_ASSISTANT_INVENTORY "Read-only S1 inventory on dual-arm resident firmware" OFF)
+if(HOME_ASSISTANT_INVENTORY AND NOT BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE)
+    message(FATAL_ERROR "HOME_ASSISTANT_INVENTORY requires the dual-arm resident candidate")
+endif()
 
 set(VALIDATION_CANDIDATE_COUNT 0)
 foreach(CANDIDATE_OPTION
+    BIMANUAL_CALIBRATION_ONLY
+    LEFT_ONLY_CALIBRATION_ONLY
+    LEFT_ONLY_FILMING_CANDIDATE
     MOBILE_BASE_TELEOP_ONLY
+    LIFT_TELEOP_ONLY
     MOBILE_WHEEL_PULSE_ONLY
     MOBILE_WHEEL_SETUP_ONLY
     MOBILE_BUS_INSPECTION_ONLY
@@ -124,6 +143,13 @@ if(VALIDATION_CANDIDATE_COUNT GREATER 1)
     message(FATAL_ERROR "Select only one validation candidate")
 endif()
 
+if(LEFT_ONLY_FILMING_CANDIDATE)
+    set(ARM_DISPATCH_SOURCE left_servo_dispatch.c)
+    set(ARM_TRACKING_SOURCE left_tracking_feedback.c)
+else()
+    set(ARM_DISPATCH_SOURCE bimanual_servo_dispatch.c)
+    set(ARM_TRACKING_SOURCE bimanual_tracking_feedback.c)
+endif()
 set(TARGET_NAME stm32_g474_single_arm)
 set(CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Core")
 set(DRIVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Drivers")
@@ -157,6 +183,14 @@ set(CORE_SOURCES
     "${CORE_DIR}/Src/timebase.c"
     "${CORE_DIR}/Startup/startup_stm32g474retx.s"
 )
+if(HOME_ASSISTANT_INVENTORY)
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/device_inventory.c")
+endif()
+
+if(LEFT_ONLY_CALIBRATION_ONLY OR BIMANUAL_CALIBRATION_ONLY)
+    list(REMOVE_ITEM CORE_SOURCES "${CORE_DIR}/Src/single_arm_app.c")
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/left_calibration_app.c")
+endif()
 
 if(MOBILE_BUS_INSPECTION_ONLY OR MOBILE_WHEEL_SETUP_ONLY OR MOBILE_WHEEL_PULSE_ONLY)
     list(REMOVE_ITEM CORE_SOURCES "${CORE_DIR}/Src/single_arm_app.c")
@@ -169,6 +203,11 @@ endif()
 
 if(MOBILE_WHEEL_PULSE_ONLY)
     list(APPEND CORE_SOURCES "${CORE_DIR}/Src/mobile_wheel_pulse.c")
+endif()
+
+if(LIFT_TELEOP_ONLY)
+    list(REMOVE_ITEM CORE_SOURCES "${CORE_DIR}/Src/single_arm_app.c")
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/lift_teleop_app.c")
 endif()
 
 if(MOBILE_BASE_TELEOP_ONLY)
@@ -251,6 +290,10 @@ target_compile_definitions(
         STM32G474xx
 )
 
+if(LIFT_TELEOP_ONLY)
+    target_compile_definitions(${TARGET_NAME} PRIVATE HOST_LIFT_TELEOP_ONLY=1 HOST_LEFT_ONLY_BUILD=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
+
 if(MOBILE_BASE_TELEOP_ONLY)
     target_compile_definitions(${TARGET_NAME} PRIVATE HOST_MOBILE_BASE_TELEOP_ONLY=1 HOST_BINARY_UART_BAUD=921600UL)
 endif()
@@ -258,6 +301,13 @@ endif()
 if(MOBILE_WHEEL_PULSE_ONLY)
     target_compile_definitions(${TARGET_NAME} PRIVATE
         HOST_MOBILE_WHEEL_PULSE_ONLY=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
+
+if(LEFT_ONLY_CALIBRATION_ONLY)
+    target_compile_definitions(${TARGET_NAME} PRIVATE HOST_LEFT_ONLY_CALIBRATION_ONLY=1 HOST_LEFT_ONLY_BUILD=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
+if(BIMANUAL_CALIBRATION_ONLY)
+    target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BIMANUAL_CALIBRATION_ONLY=1 HOST_BINARY_UART_BAUD=921600UL)
 endif()
 
 if(MOBILE_BUS_INSPECTION_ONLY)
@@ -314,12 +364,12 @@ if(BIMANUAL_DMA_DISPATCH_CANDIDATE OR
    BIMANUAL_RESIDENT_FINITE_CANDIDATE OR
    BIMANUAL_RESIDENT_FEEDBACK_CANDIDATE OR
    BIMANUAL_TERMINAL_SETTLE_CANDIDATE OR
-   BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE)
+   BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE OR LEFT_ONLY_FILMING_CANDIDATE)
     target_sources(
         "${TARGET_NAME}"
         PRIVATE
             "${CORE_DIR}/Src/bimanual_operational_limits.c"
-            "${CORE_DIR}/Src/bimanual_servo_dispatch.c"
+            "${CORE_DIR}/Src/${ARM_DISPATCH_SOURCE}"
             "${ACTUATOR_CORE_DIR}/src/bimanual_dispatch.c"
             "${ACTUATOR_CORE_DIR}/src/bimanual_goal_map.c"
             "${ACTUATOR_CORE_DIR}/src/stream_contract_v2.c"
@@ -334,8 +384,9 @@ if(BIMANUAL_DMA_DISPATCH_CANDIDATE OR
             ACTUATOR_ENABLE_STREAM_V2_EXECUTOR_MESSAGES=1U
             ACTUATOR_ENABLE_STREAM_V2_SHADOW_MESSAGES=1U
             ACTUATOR_ENABLE_BIMANUAL_DISPATCH_MESSAGES=1U
-            HOST_BINARY_CAPABILITIES=0xEFFFFFFFUL
-            HOST_BINARY_JOINT_COUNT=12U
+            HOST_BINARY_CAPABILITIES=$<IF:$<BOOL:${LEFT_ONLY_FILMING_CANDIDATE}>,0xEF81FFFFUL,0xEFFFFFFFUL>
+            HOST_BINARY_JOINT_COUNT=$<IF:$<BOOL:${LEFT_ONLY_FILMING_CANDIDATE}>,6U,12U>
+            HOST_LEFT_ONLY_BUILD=$<BOOL:${LEFT_ONLY_FILMING_CANDIDATE}>
             HOST_BINARY_UART_BAUD=921600UL
             HOST_PROTOCOL_V2_VALIDATION_ONLY_BUILD=1U
             HOST_PROTOCOL_V2_EXECUTOR_VALIDATION_BUILD=1U
@@ -357,11 +408,11 @@ if(BIMANUAL_DMA_DISPATCH_CANDIDATE OR
            BIMANUAL_RESIDENT_FINITE_CANDIDATE OR
            BIMANUAL_RESIDENT_FEEDBACK_CANDIDATE OR
            BIMANUAL_TERMINAL_SETTLE_CANDIDATE OR
-           BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE)
+           BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE OR LEFT_ONLY_FILMING_CANDIDATE)
         target_sources(
             "${TARGET_NAME}"
             PRIVATE
-                "${CORE_DIR}/Src/bimanual_tracking_feedback.c"
+                "${CORE_DIR}/Src/${ARM_TRACKING_SOURCE}"
         )
         target_compile_definitions(
             "${TARGET_NAME}"
@@ -371,17 +422,31 @@ if(BIMANUAL_DMA_DISPATCH_CANDIDATE OR
         )
         if(BIMANUAL_RESIDENT_FEEDBACK_CANDIDATE OR
            BIMANUAL_TERMINAL_SETTLE_CANDIDATE OR
-           BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE)
+           BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE OR LEFT_ONLY_FILMING_CANDIDATE)
             target_sources(
                 "${TARGET_NAME}"
                 PRIVATE
                     "${CORE_DIR}/Src/bimanual_feedback_snapshot.c"
             )
-            if(BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE)
+            if(BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE OR LEFT_ONLY_FILMING_CANDIDATE)
+                if(LEFT_ONLY_FILMING_CANDIDATE)
+                    if(TAUGHT_POSE_PROFILE_HEADER)
+                        target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024A07UL)
+                    else()
+                        target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024A01UL)
+                    endif()
+                else()
+                    if(S1_ARM_RANGE_PROFILE_HEADER)
+                        target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x0002490AUL)
+                    elseif(HOME_ASSISTANT_INVENTORY)
+                        target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024909UL)
+                    else()
+                        target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024908UL)
+                    endif()
+                endif()
                 target_compile_definitions(
                     "${TARGET_NAME}"
                     PRIVATE
-                        HOST_BINARY_FIRMWARE_VERSION=0x00024908UL
                         HOST_BIMANUAL_RESIDENT_FINITE_BUILD=1U
                         HOST_BIMANUAL_FEEDBACK_SNAPSHOT_BUILD=1U
                         HOST_BIMANUAL_TERMINAL_SETTLE_BUILD=1U
@@ -664,8 +729,11 @@ add_custom_command(
 )
 
 set(MOBILE_BOARD_PROFILE_HEADER "" CACHE FILEPATH "Explicit commissioned mobile profile header; empty disables boot setup")
-if((MOBILE_BUS_INSPECTION_ONLY OR MOBILE_WHEEL_SETUP_ONLY OR MOBILE_WHEEL_PULSE_ONLY OR MOBILE_BASE_TELEOP_ONLY) AND MOBILE_BOARD_PROFILE_HEADER)
+if((BIMANUAL_CALIBRATION_ONLY OR MOBILE_BUS_INSPECTION_ONLY OR MOBILE_WHEEL_SETUP_ONLY OR MOBILE_WHEEL_PULSE_ONLY OR MOBILE_BASE_TELEOP_ONLY OR LIFT_TELEOP_ONLY) AND MOBILE_BOARD_PROFILE_HEADER)
     message(FATAL_ERROR "Maintenance images must not include a runtime motion profile")
+endif()
+if((LEFT_ONLY_FILMING_CANDIDATE OR LEFT_ONLY_CALIBRATION_ONLY) AND MOBILE_BOARD_PROFILE_HEADER)
+    message(FATAL_ERROR "Left-only filming cannot include a mobile board profile")
 endif()
 if(MOBILE_BOARD_PROFILE_HEADER)
     target_compile_definitions(${TARGET_NAME} PRIVATE MOBILE_BOARD_PROFILE_HEADER="${MOBILE_BOARD_PROFILE_HEADER}")
@@ -677,7 +745,36 @@ if(NOT ACTUATOR_MOBILE_FIRST_ID MATCHES "^[0-9]+$" OR ACTUATOR_MOBILE_FIRST_ID L
     message(FATAL_ERROR "ACTUATOR_MOBILE_FIRST_ID must be an integer in 7..250")
 endif()
 target_compile_definitions(${TARGET_NAME} PRIVATE ACTUATOR_MOBILE_FIRST_ID=${ACTUATOR_MOBILE_FIRST_ID})
+if(HOME_ASSISTANT_INVENTORY)
+    if(NOT ACTUATOR_MOBILE_FIRST_ID STREQUAL "7")
+        message(FATAL_ERROR "S1 inventory expects the declared mobile IDs 7..10")
+    endif()
+    target_compile_definitions(${TARGET_NAME} PRIVATE HOST_DEVICE_INVENTORY_BUILD=1U)
+endif()
 
-if((MOBILE_WHEEL_PULSE_ONLY OR MOBILE_BASE_TELEOP_ONLY) AND NOT ACTUATOR_MOBILE_FIRST_ID STREQUAL "7")
+if((MOBILE_WHEEL_PULSE_ONLY OR MOBILE_BASE_TELEOP_ONLY OR LIFT_TELEOP_ONLY) AND NOT ACTUATOR_MOBILE_FIRST_ID STREQUAL "7")
     message(FATAL_ERROR "Raised-wheel pulse tool requires the inspected wheel IDs 7/8/9")
+endif()
+
+if(TAUGHT_POSE_PROFILE_HEADER)
+    if(NOT LEFT_ONLY_FILMING_CANDIDATE OR NOT EXISTS "${TAUGHT_POSE_PROFILE_HEADER}")
+        message(FATAL_ERROR "Taught profile requires left-only filming and an existing generated header")
+    endif()
+    target_compile_definitions(${TARGET_NAME} PRIVATE TAUGHT_POSE_PROFILE_HEADER="${TAUGHT_POSE_PROFILE_HEADER}")
+    target_sources(${TARGET_NAME} PRIVATE "${CORE_DIR}/Src/taught_pose_guard.c")
+endif()
+
+if(S1_ARM_RANGE_PROFILE_HEADER)
+    if(NOT BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE OR HOME_ASSISTANT_INVENTORY OR
+       TAUGHT_POSE_PROFILE_HEADER OR MOBILE_BOARD_PROFILE_HEADER OR
+       NOT EXISTS "${S1_ARM_RANGE_PROFILE_HEADER}")
+        message(FATAL_ERROR "S1 ranges require dual-arm resident verification with no taught/mobile/inventory profile")
+    endif()
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        S1_ARM_RANGE_PROFILE_HEADER="${S1_ARM_RANGE_PROFILE_HEADER}"
+        HOST_S1_RANGE_VERIFY_ONLY=1U)
+    add_custom_target(check_s1_ranges
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/setup/firmware/generate_development_ranges.py" --check
+        VERBATIM)
+    add_dependencies(${TARGET_NAME} check_s1_ranges)
 endif()

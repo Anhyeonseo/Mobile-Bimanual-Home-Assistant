@@ -68,7 +68,7 @@ class GatewayStore:
 
 
 class Gateway:
-    def __init__(self, application, token, store, *, public_origin=None):
+    def __init__(self, application, token, store, *, public_origin=None, assistant=None):
         if (
             not isinstance(token, str)
             or len(token) < 32
@@ -96,6 +96,7 @@ class Gateway:
                 raise ValueError("exact HTTPS origin required outside loopback")
         self.public_origin = public_origin
         self.app, self.token, self.store = application, token, store
+        self.assistant = assistant
         self.started = time.monotonic()
         self.lock = threading.RLock()
         self.permits = {}
@@ -119,6 +120,8 @@ class Gateway:
         result = self.app.tick(self.now())
         if result:
             self.store.save(self.app.requests[result["request_id"]], result)
+            if self.assistant is not None:
+                self.assistant.on_tick(result)
 
     def dispatch(self, method, path, authorization, body, permit=None):
         with self.lock:
@@ -129,6 +132,11 @@ class Gateway:
             authorization.encode(), ("Bearer " + self.token).encode()
         ):
             return 401, {"error": "unauthorized"}
+        if self.faulted and path.startswith('/v1/assistant/') and method == 'POST' and not path.endswith('/cancel'):
+            return 503, {'error': 'gateway_fault_latched'}
+        if path.startswith('/v1/assistant/'):
+            from .assistant.api import dispatch
+            return dispatch(self, method, path, body, authorization, permit)
         if self.faulted and (
             path == "/v1/permit" or (path == "/v1/requests" and method == "POST")
         ):
@@ -230,7 +238,10 @@ def handler_for(gateway):
                 if len(lengths) > 1:
                     raise InvalidTask("ambiguous content length")
                 length = int(lengths[0]) if lengths else 0
-                if length < 0 or length > 16384:
+                geometry_input = (self.path == "/v1/assistant/furniture/observations" or
+                                  self.path.startswith("/v1/assistant/scans/") and self.path.endswith("/map"))
+                body_limit = 131072 if geometry_input else 16384
+                if length < 0 or length > body_limit:
                     self.respond(413, {"error": "body_too_large"})
                     return
                 if (
@@ -262,6 +273,9 @@ def handler_for(gateway):
                     raise InvalidTask("unexpected URL parameters")
                 assets = {
                     "/": ("index.html", "text/html; charset=utf-8"),
+                    "/assistant": ("assistant.html", "text/html; charset=utf-8"),
+                    "/assistant.js": ("assistant.js", "text/javascript"),
+                    "/assistant.css": ("assistant.css", "text/css"),
                     "/app.css": ("app.css", "text/css"),
                     "/map.js": ("map.js", "text/javascript"),
                     "/app.js": ("app.js", "text/javascript"),
@@ -318,6 +332,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("world", "map", "token-file", "database"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--assistant-database", type=Path)
+    parser.add_argument("--assistant-demo", action="store_true")
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(
@@ -337,10 +353,23 @@ def main(argv=None):
         KinematicRobot(),
         task_timeout_s=args.task_timeout,
     )
+    assistant = None
+    if args.assistant_database:
+        from .assistant.contracts import Context
+        from .assistant.service import AssistantService
+        from .assistant.world import WorldStore
+        assistant = AssistantService(app, WorldStore(args.assistant_database),
+            Context(app.map.map_id, app.map.revision, 'simulation-calibration',
+                    'session-'+secrets.token_hex(8), app.map.frame_id), time.time)
+        if args.assistant_demo and not assistant.store.entities():
+            assistant.refresh_demo()
+    elif args.assistant_demo:
+        parser.error('--assistant-demo requires --assistant-database')
     gateway = Gateway(
         app,
         args.token_file.read_text().strip(),
         GatewayStore(args.database),
+        assistant=assistant,
         public_origin=args.public_origin
         or (
             f"{'https' if args.cert else 'http'}://{args.bind}:{args.port}"
@@ -380,6 +409,8 @@ def main(argv=None):
             if app.lease.owner:
                 app.cancel(app.lease.owner, gateway.now())
             gateway.store.db.close()
+            if assistant is not None:
+                assistant.store.close()
 
 
 if __name__ == "__main__":

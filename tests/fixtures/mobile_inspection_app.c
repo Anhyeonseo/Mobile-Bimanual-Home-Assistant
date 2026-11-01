@@ -55,5 +55,10 @@ int main(void) {
     fail_identity=0;fail_reference=1;feed("SCAN\n");assert(reads==39);output[0]=0;
     skip_service=1;feed("SCAN\n");assert(reads==44);
     assert(strstr(output,"SERVICE_NOT_STARTED"));
+    skip_service=0;fail_reference=0;output[0]=0;
+    unsigned before=reads;
+    feed("LIFT\n");
+    assert(reads==before+4&&strstr(output,"\"id\":10"));
+    assert(strstr(output,"\"read_sequence\":")&&!strstr(output,"\"id\":7"));
     return 0;
 }

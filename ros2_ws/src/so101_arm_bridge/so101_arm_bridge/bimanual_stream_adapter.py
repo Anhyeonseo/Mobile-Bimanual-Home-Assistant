@@ -101,6 +101,7 @@ class OperationalLimits:
     minimum_urad: tuple[int, ...]
     maximum_urad: tuple[int, ...]
     source_sha256: str | None = None
+    hardware_authorized: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +213,15 @@ def _tick_after(candidate: int, reference: int) -> bool:
 class ResidentBimanualStreamAdapter:
     """Single-owner, fail-closed session around the synchronous v2 transport."""
 
+    # Wire slots stay fixed at twelve; physical masks are profile-specific.
+    calibration_hash = CALIBRATION_HASH
+    firmware_version = F8_FIRMWARE_VERSION
+    capabilities = F8_CAPABILITIES
+    physical_joint_count = JOINT_COUNT
+    right_present_mask = 0x3F
+    feedback_present_mask = 0x0FFF
+    arm_mask = ARM_MASK_BOTH
+
     def __init__(
         self,
         transport: StreamTransportV2,
@@ -220,6 +230,8 @@ class ResidentBimanualStreamAdapter:
         motion_authorized: bool = False,
         config: ResidentStreamConfig = ResidentStreamConfig(),
     ) -> None:
+        if motion_authorized and not limits.hardware_authorized:
+            raise BimanualStreamContractError('development ranges cannot authorize hardware motion')
         self._transport = transport
         self._limits = limits
         self._motion_authorized = motion_authorized
@@ -339,19 +351,19 @@ class ResidentBimanualStreamAdapter:
                 "unknown firmware shadow failure",
             )
             raise BimanualStreamError(
-                "12-axis anchor failed: "
+                f"{self.physical_joint_count}-axis anchor failed: "
                 f"status={snapshot.status_code} reason={reason}; "
                 "firmware stop is latched and STM32 reset is required"
             )
         if (
-            snapshot.joint_count != JOINT_COUNT
+            snapshot.joint_count != self.physical_joint_count
             or snapshot.left_present_mask != 0x3F
-            or snapshot.right_present_mask != 0x3F
+            or snapshot.right_present_mask != self.right_present_mask
             or len(snapshot.positions_raw) != JOINT_COUNT
             or len(snapshot.unwrapped_positions_raw) != JOINT_COUNT
             or len(snapshot.anchor_positions_urad) != JOINT_COUNT
         ):
-            raise BimanualStreamError(f"12-axis anchor failed: {snapshot}")
+            raise BimanualStreamError(f"{self.physical_joint_count}-axis anchor failed: {snapshot}")
         for index, position in enumerate(snapshot.anchor_positions_urad):
             if not (
                 self._limits.minimum_urad[index]
@@ -376,11 +388,11 @@ class ResidentBimanualStreamAdapter:
             hello = self._transport.enter_binary_mode()
             if (
                 hello.protocol_version != PROTOCOL_VERSION
-                or hello.joint_count != JOINT_COUNT
-                or hello.firmware_version != F8_FIRMWARE_VERSION
-                or hello.left_calibration_hash != CALIBRATION_HASH
-                or hello.right_calibration_hash != CALIBRATION_HASH
-                or hello.capabilities != F8_CAPABILITIES
+                or hello.joint_count != self.physical_joint_count
+                or hello.firmware_version != self.firmware_version
+                or hello.left_calibration_hash != self.calibration_hash
+                or hello.right_calibration_hash != self.calibration_hash
+                or hello.capabilities != self.capabilities
                 or hello.stop_latched
             ):
                 raise BimanualStreamError(f"unexpected F8 identity: {hello}")
@@ -467,13 +479,13 @@ class ResidentBimanualStreamAdapter:
         snapshot = self._transport.get_feedback_snapshot()
         if (
             snapshot.status_code != 0
-            or snapshot.joint_count != JOINT_COUNT
-            or snapshot.present_mask != 0x0FFF
+            or snapshot.joint_count != self.physical_joint_count
+            or snapshot.present_mask != self.feedback_present_mask
             or len(snapshot.positions_urad) != JOINT_COUNT
             or len(snapshot.sample_age_ms) != JOINT_COUNT
         ):
             raise BimanualStreamError(
-                f"incomplete 12-axis feedback snapshot: {snapshot}"
+                f"incomplete {self.physical_joint_count}-axis feedback snapshot: {snapshot}"
             )
         return snapshot
 
@@ -654,7 +666,7 @@ class ResidentBimanualStreamAdapter:
                 horizon_end_tick=self._finite_horizon_tick,
                 arbiter_epoch=self._epoch,
                 samples=tuple(ready),
-                arm_mask=ARM_MASK_BOTH,
+                arm_mask=self.arm_mask,
             )
         )
         self._require_accepted(status, "finite plan append")
@@ -688,15 +700,14 @@ class ResidentBimanualStreamAdapter:
                 self._config.maximum_step_urad_per_tick,
             )
             * JOINT_COUNT,
-            arm_mask=ARM_MASK_BOTH,
+            arm_mask=self.arm_mask,
         )
 
-    @staticmethod
-    def _require_accepted(status, label: str) -> None:
+    def _require_accepted(self, status, label: str) -> None:
         if (
             status.status_code != StreamStatusCodeV2.OK
             or status.contract_result != StreamContractResultV2.OK
-            or status.arm_mask != ARM_MASK_BOTH
+            or status.arm_mask != self.arm_mask
         ):
             raise BimanualStreamError(f"{label} rejected: {status}")
 
@@ -799,7 +810,7 @@ class ResidentBimanualStreamAdapter:
         try:
             if not self._armed:
                 self._armed = True
-                self._transport.arm(CALIBRATION_HASH)
+                self._transport.arm(self.calibration_hash)
                 post_arm = self._healthy_heartbeat()
                 if post_arm.stop_latched or post_arm.status_code != 0:
                     raise BimanualStreamError(
@@ -828,7 +839,7 @@ class ResidentBimanualStreamAdapter:
                             sample_ticks, converted, strict=True
                         )
                     ),
-                    arm_mask=ARM_MASK_BOTH,
+                    arm_mask=self.arm_mask,
                 )
             )
             self._require_accepted(appended, "initial append")
@@ -901,7 +912,7 @@ class ResidentBimanualStreamAdapter:
                             sample_ticks, converted, strict=True
                         )
                     ),
-                    arm_mask=ARM_MASK_BOTH,
+                    arm_mask=self.arm_mask,
                 )
             )
             self._require_accepted(status, "append")
@@ -994,7 +1005,7 @@ class ResidentBimanualStreamAdapter:
                     arbiter_epoch=self._epoch,
                     splice_at_tick=splice_tick,
                     samples=replacement_samples,
-                    arm_mask=ARM_MASK_BOTH,
+                    arm_mask=self.arm_mask,
                 )
             )
             self._require_accepted(status, "splice")
@@ -1027,9 +1038,9 @@ class ResidentBimanualStreamAdapter:
             tracking = self._transport.get_tracking_diagnostics()
             state = self._healthy_heartbeat()
             if (
-                dispatch.faulted
+                dispatch.status_code != 0
+                or dispatch.faulted
                 or dispatch.failure_count
-                or (not dispatch.active and not dispatch.ready)
             ):
                 raise BimanualStreamError(f"dispatch fault: {dispatch}")
             # failed_pairs is cumulative degraded-telemetry evidence. F8.6
@@ -1044,7 +1055,11 @@ class ResidentBimanualStreamAdapter:
             ) or executor.safe_stop_required:
                 raise BimanualStreamError(f"executor requires stop: {executor}")
             if executor.state is StreamExecutorStateV2.SUCCEEDED:
-                if dispatch.active or tracking.active or tracking.pending:
+                # ready is instantaneous bus availability: a normal feedback
+                # read can own the bus between diagnostic requests. It is not
+                # a fault. Require idle availability only to finish the leg;
+                # firmware still enforces every dispatch deadline and fault.
+                if not dispatch.ready or dispatch.active or tracking.active or tracking.pending:
                     return state, executor, dispatch, tracking
                 if self._prepared is None or self._tail_positions_urad is None:
                     raise BimanualStreamError(
@@ -1055,7 +1070,7 @@ class ResidentBimanualStreamAdapter:
                         "finite completion has no terminal feedback"
                     )
                 feedback = terminal_feedback
-                maximum_age = max(int(age) for age in feedback.sample_age_ms)
+                maximum_age = max(int(age) for age in feedback.sample_age_ms[:self.physical_joint_count])
                 if maximum_age > self._config.terminal_feedback_max_age_ms:
                     raise BimanualStreamError(
                         f"terminal feedback is stale: maximum_age_ms={maximum_age}"

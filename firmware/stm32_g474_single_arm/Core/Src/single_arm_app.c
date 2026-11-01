@@ -431,6 +431,10 @@ void SingleArmApp_Process(void)
 
       if (host_receive_status == HAL_OK)
       {
+#ifdef TAUGHT_POSE_PROFILE_HEADER
+          /* No legacy jog/configuration/centering path in pose-locked image. */
+          if (rx_byte != 'P' && rx_byte != 'p') return;
+#endif
 	  if (BinaryControl_IsBinaryMode() != 0U)
 	  {
 	      BinaryControl_ProcessByte(rx_byte, HAL_GetTick());

@@ -119,16 +119,22 @@ int main(void)
   MX_DMA_Init();
   MX_LPUART1_UART_Init();
   MX_USART1_UART_Init();
+  #if !HOST_LEFT_ONLY_BUILD
   MX_UART4_Init();
+  #endif
 
   /* USER CODE BEGIN 2 */
   SingleArmApp_Init(&hlpuart1, &huart1);
-  #if !HOST_MOBILE_BUS_INSPECTION_ONLY && !HOST_MOBILE_WHEEL_SETUP_ONLY && !HOST_MOBILE_WHEEL_PULSE_ONLY && !HOST_MOBILE_BASE_TELEOP_ONLY
+  #if !HOST_BIMANUAL_CALIBRATION_ONLY && !HOST_LEFT_ONLY_CALIBRATION_ONLY && !HOST_MOBILE_BUS_INSPECTION_ONLY && !HOST_MOBILE_WHEEL_SETUP_ONLY && !HOST_MOBILE_WHEEL_PULSE_ONLY && !HOST_MOBILE_BASE_TELEOP_ONLY && !HOST_LIFT_TELEOP_ONLY
+  #if !HOST_LEFT_ONLY_BUILD
   RightServoBus_Init(&huart4);
+  #endif
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
-  BimanualServoDispatch_Init(&huart1, &huart4);
+  BimanualServoDispatch_Init(&huart1, HOST_LEFT_ONLY_BUILD ? NULL : &huart4);
 #endif
+  #if !HOST_LEFT_ONLY_BUILD
   (void)MobileBoard_Boot(&huart1, &huart4);
+  #endif
   #endif
   /* USER CODE END 2 */
 
@@ -144,7 +150,7 @@ int main(void)
     BimanualServoDispatch_Poll();
 #endif
     SingleArmApp_Process();
-    #if !HOST_MOBILE_BUS_INSPECTION_ONLY && !HOST_MOBILE_WHEEL_SETUP_ONLY && !HOST_MOBILE_WHEEL_PULSE_ONLY && !HOST_MOBILE_BASE_TELEOP_ONLY
+    #if !HOST_BIMANUAL_CALIBRATION_ONLY && !HOST_LEFT_ONLY_CALIBRATION_ONLY && !HOST_MOBILE_BUS_INSPECTION_ONLY && !HOST_MOBILE_WHEEL_SETUP_ONLY && !HOST_MOBILE_WHEEL_PULSE_ONLY && !HOST_MOBILE_BASE_TELEOP_ONLY && !HOST_LIFT_TELEOP_ONLY
     MobileBoard_Poll();
     MobileServoOutput_Poll();
     MobileHoldOutput_Poll();

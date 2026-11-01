@@ -59,7 +59,8 @@ def _serialized(method):
 class StreamValidationTransportV2:
     """Exchange v2 packets; motion admission belongs to the resident adapter."""
 
-    def __init__(self, port: Any, response_timeout_s: float = 0.4) -> None:
+    def __init__(self, port: Any, response_timeout_s: float = 0.4, *,
+                 physical_joint_count: int = 12) -> None:
         if (
             isinstance(response_timeout_s, bool)
             or not isinstance(response_timeout_s, (int, float))
@@ -67,6 +68,9 @@ class StreamValidationTransportV2:
             or not 0 < response_timeout_s <= 3
         ):
             raise ValueError("bounded response timeout required")
+        if type(physical_joint_count) is not int or physical_joint_count not in (6, 12):
+            raise ValueError("unsupported physical joint count")
+        self._physical_joint_count = physical_joint_count
         self._transaction_lock = RLock()
         self._port = port
         self._timeout_s = response_timeout_s
@@ -173,7 +177,8 @@ class StreamValidationTransportV2:
             self._port.reset_input_buffer()
         sequence, _ = self._send(StreamMessageTypeV2.HELLO_REQUEST)
         hello = parse_hello_v2(
-            self._receive(sequence, StreamMessageTypeV2.HELLO_RESPONSE).payload
+            self._receive(sequence, StreamMessageTypeV2.HELLO_RESPONSE).payload,
+            expected_joint_count=self._physical_joint_count,
         )
         return hello
 
@@ -200,7 +205,8 @@ class StreamValidationTransportV2:
     def enable(self) -> StateV2:
         sequence, _ = self._send(StreamMessageTypeV2.ENABLE)
         state = parse_state_v2(
-            self._receive(sequence, StreamMessageTypeV2.STATE_FEEDBACK).payload
+            self._receive(sequence, StreamMessageTypeV2.STATE_FEEDBACK).payload,
+            expected_joint_count=self._physical_joint_count,
         )
         if state.status_code != 0 or state.stop_latched:
             raise StreamTransportV2Error(
@@ -215,7 +221,8 @@ class StreamValidationTransportV2:
         state = parse_state_v2(
             self._receive(
                 sequence, StreamMessageTypeV2.STATE_FEEDBACK, timeout_s=3.0
-            ).payload
+            ).payload,
+            expected_joint_count=self._physical_joint_count,
         )
         if not state.stop_latched:
             raise StreamTransportV2Error("SAFE_STOP was not latched")
@@ -225,14 +232,24 @@ class StreamValidationTransportV2:
     def heartbeat(self) -> StateV2:
         sequence, _ = self._send(StreamMessageTypeV2.HEARTBEAT)
         return parse_state_v2(
-            self._receive(sequence, StreamMessageTypeV2.STATE_FEEDBACK).payload
+            self._receive(sequence, StreamMessageTypeV2.STATE_FEEDBACK).payload,
+            expected_joint_count=self._physical_joint_count,
         )
+
+    @_serialized
+    def read_device_inventory(self, bus: int, motor_id: int) -> dict:
+        from .device_inventory import inventory_request, decode_inventory
+        packet = inventory_request(bus, motor_id)
+        sequence, _ = self._send(StreamMessageTypeV2.DEVICE_INVENTORY_REQUEST, packet)
+        response = self._receive(sequence, StreamMessageTypeV2.DEVICE_INVENTORY_RESPONSE)
+        return decode_inventory(response.payload, bus, motor_id)
 
     @_serialized
     def get_state(self) -> StateV2:
         sequence, _ = self._send(StreamMessageTypeV2.GET_STATE)
         return parse_state_v2(
-            self._receive(sequence, StreamMessageTypeV2.STATE_FEEDBACK).payload
+            self._receive(sequence, StreamMessageTypeV2.STATE_FEEDBACK).payload,
+            expected_joint_count=self._physical_joint_count,
         )
 
     def _stream_exchange(
@@ -335,7 +352,8 @@ class StreamValidationTransportV2:
             self._receive(
                 sequence,
                 StreamMessageTypeV2.FEEDBACK_SNAPSHOT,
-            ).payload
+            ).payload,
+            expected_joint_count=self._physical_joint_count,
         )
         if snapshot.request_sequence != sequence:
             raise StreamTransportV2Error("feedback snapshot sequence echo mismatch")
@@ -369,7 +387,8 @@ class StreamValidationTransportV2:
                 sequence,
                 StreamMessageTypeV2.SHADOW_SNAPSHOT,
                 timeout_s=6.0,
-            ).payload
+            ).payload,
+            expected_joint_count=self._physical_joint_count,
         )
 
     @_serialized

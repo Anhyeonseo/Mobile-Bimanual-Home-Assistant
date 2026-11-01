@@ -29,14 +29,14 @@ def build_runtime(*, world, navigation_map, catalog_document, state, payload, ca
                   source, detector, navigation, arm, lift, planner, planning_context=None,
                   surface_observer, stop_client, clock, scene_revision,
                   maintenance=(), observations=(), maximum_tick_gap_s=.1,
-                  manipulation_factory=None, surface_sampler=None):
+                  manipulation_factory=None, surface_sampler=None, placement_policy=None):
     lease = TaskLease()
     stop = SystemStopBackend(stop_client, lease)
     # Device factories bind to the SAME stop owner as every nested task.
     arm = arm(stop) if callable(arm) else arm
     lift = lift(stop) if callable(lift) else lift
     catalog = MissionCatalog(catalog_document, world, navigation_map,
-        lambda: state.latest.xy_yaw[:2], state.motion, scene_revision, clock)
+        lambda: state.latest.xy_yaw[:2], state.motion, scene_revision, clock, placement_policy=placement_policy)
     state.catalog = catalog
     monitor = PayloadTaskMonitor(state, payload)
 
@@ -59,7 +59,8 @@ def build_runtime(*, world, navigation_map, catalog_document, state, payload, ca
         return PlanningContext(state.latest.observed_s,
             target['capture_id'],state.motion().pose_revision,scene_revision(),
             target['calibration_id'],target['frame_id'],state.latest.joints_rad,
-            state.motion().base_stopped,state.motion().lift_stopped, target_observed_s=target['observed_s'])
+            state.motion().base_stopped,state.motion().lift_stopped, target_observed_s=target['observed_s'],
+            joint_names=state.joint_names)
     manipulation = ManipulationPort(planner, arm, planning_context or context, clock,
         maximum_age_s=catalog.doc['grasp']['maximum_target_age_s'])
     if manipulation_factory is not None:

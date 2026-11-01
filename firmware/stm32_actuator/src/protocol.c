@@ -1,3 +1,4 @@
+#include "actuator_core/device_inventory.h"
 #include "actuator_core/protocol.h"
 
 #include <string.h>
@@ -36,6 +37,8 @@ static uint32_t read_u32_le(const uint8_t *source) {
 bool actuator_protocol_message_is_known(uint8_t message_type) {
     switch (message_type) {
 #if ACTUATOR_PROTOCOL_VERSION == 2
+        case ACTUATOR_V2_MSG_DEVICE_INVENTORY_REQUEST:
+        case ACTUATOR_V2_MSG_DEVICE_INVENTORY_RESPONSE:
         case ACTUATOR_V2_MSG_MOBILE_REQUEST:
         case ACTUATOR_V2_MSG_MOBILE_RESPONSE:
 #endif

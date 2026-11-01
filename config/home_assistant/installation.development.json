@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "purpose": "S2 installation facts and measurement backlog; not a TF publisher or motion configuration",
+  "status": "measurements_incomplete",
+  "hardware_enabled": false,
+  "base_reference": {
+    "frame": "base_link",
+    "physical_origin_definition": null
+  },
+  "d415": {
+    "mount_motion": "fixed_to_base_or_fixed_column",
+    "moves_with_lift": false,
+    "proposed_parent_frame": "base_link",
+    "translation_m": null,
+    "rotation_xyzw": null,
+    "extrinsic_calibrated": false,
+    "source": "operator confirmation 2026-11-01"
+  },
+  "lift": {
+    "geometry": "config/home_assistant/lift_geometry.measured.json",
+    "platform_low_floor_height_m": 0.26,
+    "travel_m": 0.64,
+    "platform_frame_offset_m": null,
+    "live_origin_validated": false
+  },
+  "arms": {
+    "left_mount_transform": null,
+    "right_mount_transform": null,
+    "home_2048_to_model_zero_verified": false,
+    "tcp_calibrated": false
+  },
+  "lidar": {
+    "model": "LDS-01",
+    "connected_verified": false,
+    "mount_transform": null
+  },
+  "simulation_model_is_hardware_description": false
+}

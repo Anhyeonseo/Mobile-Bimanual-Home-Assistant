@@ -101,7 +101,8 @@ actuator_v2_executor_result_t actuator_v2_stream_executor_init(
         return ACTUATOR_V2_EXECUTOR_NULL_ARGUMENT;
     }
     for (joint = 0u; joint < ACTUATOR_V2_JOINT_COUNT; ++joint) {
-        if (joint_limits[joint].minimum_urad >=
+        /* Inclusive singleton limits lock an inactive wire slot to one value. */
+        if (joint_limits[joint].minimum_urad >
             joint_limits[joint].maximum_urad) {
             return ACTUATOR_V2_EXECUTOR_INVALID_LIMIT;
         }
@@ -387,8 +388,13 @@ actuator_v2_executor_result_t actuator_v2_stream_executor_step(
         return ACTUATOR_V2_EXECUTOR_OUTPUT_READY;
     }
 
-    span = next->apply_tick - executor->anchor.apply_tick;
-    elapsed = current_tick - executor->anchor.apply_tick;
+    /* Samples are applied on the first control tick at/after their timestamp.
+     * Interpolate on that SAME timeline. Mixing a snapped output with the
+     * original timestamp makes the next 5 ms step cover up to 9 ms of travel. */
+    const uint32_t anchor_tick = first_control_tick_at_or_after(
+        executor, executor->anchor.apply_tick);
+    span = due_tick - anchor_tick;
+    elapsed = current_tick - anchor_tick;
     if (span == 0u || elapsed > span) {
         return terminate(
             executor,
