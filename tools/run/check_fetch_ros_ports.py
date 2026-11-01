@@ -60,9 +60,18 @@ def main():
     source=RosEvidenceSource(node,received,payload,s.clock,'a'*64,namespace='evidence')
     evidence_publisher=RosEvidencePublisher(node,s.clock,'a'*64,namespace='evidence')
     publishers=evidence_publisher.publishers
+    # Exercise the generated bounded ROS schema with an explicitly installed
+    # single arm as well as the legacy twelve-joint full fetch below.
+    left_profile=dict(config['state'], joint_names=names[:6])
+    for key in ('transport_joints_rad','safe_minimum_rad','safe_maximum_rad'):
+        left_profile[key]=left_profile[key][:6]
+    left_state=RobotStateStore(left_profile,s.clock)
+    left_payload=PayloadMonitor(**config['payload'])
+    left_source=RosEvidenceSource(node,left_state,left_payload,s.clock,'a'*64,namespace='left_evidence')
+    left_publisher=RosEvidencePublisher(node,s.clock,'a'*64,namespace='left_evidence')
     deadline=time.monotonic()+10
     try:
-        while not nav.ready() or not planner.ready() or any(p.get_subscription_count()==0 for p in publishers):
+        while not nav.ready() or not planner.ready() or any(p.get_subscription_count()==0 for p in (*publishers,*left_publisher.publishers)):
             if time.monotonic()>deadline:raise TimeoutError('ROS services unavailable')
             rclpy.spin_once(node,timeout_sec=.01)
         from dataclasses import replace
@@ -73,6 +82,19 @@ def main():
         assert source.error is None and received.latest is not None and payload.grip and payload.vision, (source.error, received.latest, payload.grip, payload.vision)
         assert received.latest.observed_s<=old_stamp+.001 and payload.grip.observed_s<=old_stamp+.001
         assert payload.vision.camera_frame==config['camera']['camera_frame']
+        left_observation=replace(s.state.latest,observed_s=old_stamp,
+                                 joints_rad=s.state.latest.joints_rad[:6],joint_names=tuple(names[:6]))
+        left_publisher.publish(robot=left_observation)
+        for _ in range(20):rclpy.spin_once(node,timeout_sec=.01)
+        assert left_source.error is None and left_state.latest is not None, left_source.error
+        assert left_state.latest.joint_names==tuple(names[:6])
+        assert len(left_state.latest.joints_rad)==6
+        assert left_state.latest.observed_s<=old_stamp+.001
+        left_publisher.publish(robot=replace(left_observation,sequence=left_observation.sequence+1,
+            observed_s=old_stamp+.001,joint_names=tuple(names[6:])))
+        for _ in range(20):rclpy.spin_once(node,timeout_sec=.01)
+        assert left_source.error=='installed joint feedback names mismatch', left_source.error
+        assert left_state.latest.joint_names==tuple(names[:6])
         q=dict(schema_version=1,operation='fetch_object',request_id='ros-fetch',request=read('fetch_remote.example.json'))
         s.runtime.submit(q);task=s.runtime.app.tasks['ros-fetch']
         for _ in range(1200):
@@ -85,7 +107,8 @@ def main():
         assert len(s.ports['gripper'].starts)==3 and len(s.ports['scene'].starts)==2
         print(json.dumps({'passed':True,'mode':'simulation','servers':'synthetic ROS action/service',
             'completed_steps':result['completed_steps'],'calls':calls,'typed_evidence_topics':3,
-            'manipulation_stages':11,'source_timestamps_preserved':True,'hardware_commands':0}))
+            'manipulation_stages':11,'source_timestamps_preserved':True,
+            'installed_joint_counts_transported':[6,12],'wrong_arm_names_rejected':True,'hardware_commands':0}))
     finally:
         server.destroy();node.destroy_service(service);node.destroy_node();rclpy.shutdown()
 if __name__=='__main__':main()

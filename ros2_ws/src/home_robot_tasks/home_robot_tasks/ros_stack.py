@@ -40,6 +40,7 @@ class RosEvidenceSource:
             if msg.header.frame_id != self.world_frame: raise InvalidTask('robot world frame mismatch')
             values={f.name:getattr(msg,f.name) for f in fields(RobotObservation) if f.name!='observed_s'}
             for k in ('xy_yaw','base_velocity','joints_rad'):values[k]=tuple(float(v) for v in values[k])
+            values['joint_names']=tuple(values['joint_names'])
             self.state.observe(RobotObservation(observed_s=self.stamp(msg),**values))
         except Exception as error:self.error=str(error);self.state.fault=self.error
 
