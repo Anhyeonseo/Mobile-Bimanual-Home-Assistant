@@ -107,9 +107,9 @@ def test_mask_shape_must_match_depth():
 
 def test_qwen_output_has_no_invented_score(tmp_path):
     path = tmp_path / 'detections.json'
-    path.write_text('{"model": "qwen", "detections": [{"label": "cup", "bbox_xyxy": [1, 2, 3, 4]}]}')
+    path.write_text('{"model": "qwen", "revision": "r1", "detections": [{"label": "cup", "bbox_xyxy": [1, 2, 3, 4]}]}')
     detection = parse_detections(path)[0]
-    assert detection.box_xyxy == [1., 2., 3., 4.] and detection.score is None
+    assert detection.box_xyxy == [1., 2., 3., 4.] and detection.score is None and detection.revision == 'r1'
 
 
 @pytest.mark.parametrize('kind', PERTURBATIONS)

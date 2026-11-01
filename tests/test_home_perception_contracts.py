@@ -16,6 +16,9 @@ OBSERVATION = dict(capture_id='05', captured_at_utc='2026-11-01T11:12:44+00:00',
     TaskRequest('r1', 'u1', '리모컨 가져다줘', action='fetch', target='리모컨', unresolved=['destination']),
     ObjectObservation(**OBSERVATION, status=ACCEPTED, center_xyz_m=[0., 0., .4], valid_depth_fraction=1.),
     WorldEntity('e1', 'remote', 'stale', 'observed', 'map', evidence=['capture-1']),
+    WorldEntity('e2', 'cup', 'placed', 'observed', 'map', evidence=['capture-2'], position_m=[1., 2., .7],
+                extent_m=[.08, .08, .1], geometry_kind='visible_surface_center', room_id='room-1',
+                support_id='table-1', aliases=['내 컵'], revision=2),
     ScanSession('s1', 'd415', 'unmeasured', 'running', coverage_fraction=.5),
 ])
 def test_contract_json_round_trip(item):
@@ -31,6 +34,12 @@ def test_contract_json_round_trip(item):
     lambda: ObjectObservation(**OBSERVATION, status=ACCEPTED, center_xyz_m=[float('nan'), 0., 1.]),
     lambda: WorldEntity('e', 'cup', 'observed', 'observed', 'map'),
     lambda: ScanSession('s', 'd', 'c', 'done'),
+    lambda: WorldEntity('e', 'cup', 'stale', 'inferred', 'map', position_m=[0., 0., 0.]),
+    lambda: WorldEntity('e', 'cup', 'stale', 'inferred', 'map', geometry_kind='surface_point'),
+    lambda: WorldEntity('e', 'cup', 'stale', 'inferred', 'map', support_id='e'),
+    lambda: WorldEntity('e', 'cup', 'stale', 'inferred', 'map', revision=0),
+    lambda: WorldEntity('e', 'cup', 'stale', 'inferred', 'map', position_m=[0., 0., 0.],
+                        geometry_kind='surface_point', extent_m=[0., 1., 1.]),
 ])
 def test_contract_rejects_invalid_values(build):
     with pytest.raises(ValueError):
@@ -43,7 +52,7 @@ def test_contract_rejects_unknown_fields():
 
 
 def report(point):
-    return {'source_snapshot': '/x/05_remote_only', 'captured_at_utc': '2026-11-01T11:12:44+00:00',
+    return {'model_revision': 'abc', 'source_sha256': {'color.png': 'hash'}, 'source_snapshot': '/x/05_remote_only', 'captured_at_utc': '2026-11-01T11:12:44+00:00',
             'coordinate_frame': 'color_camera_optical_frame', 'model_id': 'dino', 'robot_transform': None,
             'point_semantics': 'surface pixel; not object centroid'}, {
             'label': 'remote', 'box_xyxy': [1, 2, 3, 4], 'score': .4, 'surface_point': point}
@@ -54,6 +63,7 @@ def test_grounding_adapter_keeps_surface_point_semantics():
     assert item.status == ACCEPTED and item.surface_xyz_m == [0., 0., .4]
     assert item.center_xyz_m is None and item.robot_transform is None
     assert 'not object centroid' in item.point_semantics
+    assert item.detector_revision == 'abc' and item.source_sha256 == {'color.png': 'hash'}
 
 
 def test_grounding_adapter_maps_missing_depth_to_failure():

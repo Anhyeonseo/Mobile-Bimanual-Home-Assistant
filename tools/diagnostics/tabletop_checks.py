@@ -69,8 +69,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('check', choices=['data', 'z', 'grasp'])
     parser.add_argument('--dataset', type=Path, default=ROOT / 'data/tabletop_rgbd_20261101')
-    parser.add_argument('--perception', type=Path, default=ROOT / 'tmp/tabletop-perception-r3')
-    parser.add_argument('--grasps', type=Path, default=ROOT / 'tmp/tabletop-grasps-r3')
+    parser.add_argument('--perception', type=Path, default=ROOT / 'tmp/tabletop-perception')
+    parser.add_argument('--grasps', type=Path, default=ROOT / 'tmp/tabletop-grasps')
     args = parser.parse_args()
     {'data': check_data, 'z': check_z, 'grasp': check_grasp}[args.check](args)
 

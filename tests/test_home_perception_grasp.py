@@ -65,7 +65,7 @@ def test_flat_rule_pinches_short_side_above_table():
 def test_flat_rule_rejects_tall_wide_and_blocked_objects():
     tall = bar() + [0, 0, .05]
     assert flat_object_grasp(tall, tall, TABLE)[1] == 'not_flat'
-    wide = bar() * [1, 3, 1]
+    wide = bar() * [3, 3, 1]
     assert flat_object_grasp(wide, wide, TABLE)[1] == 'too_wide'
     neighbour = np.column_stack((np.zeros(50), np.full(50, .03), np.linspace(.01, .04, 50)))
     assert flat_object_grasp(bar(), np.vstack((bar(), neighbour)), TABLE)[1] == 'finger_collision'
@@ -75,3 +75,15 @@ def test_flat_rule_ignores_table_noise_beside_the_object():
     noise = np.column_stack((np.zeros(50), np.full(50, .03), np.linspace(.003, .0045, 50)))
     array, reason = flat_object_grasp(bar(), np.vstack((bar(), noise)), TABLE)
     assert reason is None and array is not None
+
+
+def test_flat_rule_rejects_shapes_without_a_clear_long_axis():
+    x, y = np.meshgrid(np.linspace(-.03, .03, 40), np.linspace(-.03, .03, 40))
+    square = np.column_stack((x.ravel(), y.ravel(), np.full(x.size, .012)))
+    assert flat_object_grasp(square, square, TABLE)[1] == 'not_elongated'
+
+
+def test_flat_rule_rejects_a_shape_with_an_empty_middle():
+    x, y = np.meshgrid(np.r_[np.linspace(-.09, -.06, 20), np.linspace(.06, .09, 20)], np.linspace(-.015, .015, 20))
+    ends = np.column_stack((x.ravel(), y.ravel(), np.full(x.size, .012)))
+    assert flat_object_grasp(ends, ends, TABLE)[1] == 'no_object_between_fingers'

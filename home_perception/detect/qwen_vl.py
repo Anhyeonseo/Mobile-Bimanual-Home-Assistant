@@ -19,8 +19,8 @@ def command(image, prompt, output, model, device='cuda'):
 def parse_detections(path):
     """Qwen emits no confidence score, so score stays None."""
     data = json.loads(Path(path).read_text(encoding='utf-8'))
-    name = data['model']
-    return [Detection(item['label'], [float(v) for v in item['bbox_xyxy']], name)
+    name, revision = data['model'], data.get('revision')
+    return [Detection(item['label'], [float(v) for v in item['bbox_xyxy']], name, revision=revision)
             for item in data['detections']]
 
 

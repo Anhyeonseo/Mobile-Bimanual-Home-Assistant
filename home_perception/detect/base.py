@@ -9,3 +9,4 @@ class Detection:
     detector: str
     score: float | None = None
     prompt_name: str | None = None
+    revision: str | None = None

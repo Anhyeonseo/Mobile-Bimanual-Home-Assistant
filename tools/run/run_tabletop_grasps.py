@@ -104,7 +104,7 @@ def finish(folder, objects, record, observation, plane):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--perception', type=Path, default=ROOT / 'tmp/tabletop-perception-gpu-r2')
+    parser.add_argument('--perception', type=Path, default=ROOT / 'tmp/tabletop-perception')
     parser.add_argument('--dataset', type=Path, default=ROOT / 'data/tabletop_rgbd_20261101')
     parser.add_argument('--checkpoint', type=Path, default=ROOT / 'artifacts/models/checkpoint-rs.tar')
     parser.add_argument('--output', type=Path, default=ROOT / 'tmp/tabletop-grasps')

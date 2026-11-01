@@ -15,8 +15,9 @@ FAILURE_CODES = (NOT_FOUND, AMBIGUOUS_TARGET, INVALID_DEPTH, STALE_OBSERVATION)
 
 ACCEPTED, HELD, REJECTED = 'accepted', 'held', 'rejected'
 OBSERVATION_STATUSES = (ACCEPTED, HELD, REJECTED)
-ENTITY_STATES = ('observed', 'stale', 'occluded', 'carried', 'placed')
+ENTITY_STATES = ('observed', 'unconfirmed', 'stale', 'occluded', 'carried', 'released_unconfirmed', 'placed')
 ENTITY_SOURCES = ('observed', 'inferred', 'user_confirmed')
+GEOMETRY_KINDS = ('none', 'surface_point', 'visible_surface_center')
 SCAN_STATUSES = ('running', 'paused', 'stopped', 'saved', 'failed')
 
 
@@ -87,7 +88,9 @@ class ObjectObservation(_Json):
     status: str
     calibration_id: str = 'unmeasured'
     clock_domain: str = 'global_time'
+    detector_revision: str | None = None
     detector_score: float | None = None
+    source_sha256: dict | None = None
     mask_quality: float | None = None
     mask_pixels: int | None = None
     valid_depth_fraction: float | None = None
@@ -131,19 +134,36 @@ class WorldEntity(_Json):
     source: str
     frame_id: str
     position_m: list | None = None
+    extent_m: list | None = None
+    geometry_kind: str = 'none'
     position_uncertainty_m: float | None = None
     last_seen_utc: str | None = None
+    room_id: str | None = None
+    support_id: str | None = None
+    aliases: list = field(default_factory=list)
     attributes: dict = field(default_factory=dict)
     relations: list = field(default_factory=list)
     evidence: list = field(default_factory=list)
     map_version: str | None = None
+    revision: int = 1
 
     def __post_init__(self):
         for name in ('entity_id', 'kind', 'frame_id'):
             _text(getattr(self, name), name)
         _vector(self.position_m, 'position_m')
+        _vector(self.extent_m, 'extent_m')
         if self.state not in ENTITY_STATES or self.source not in ENTITY_SOURCES:
             raise ValueError('invalid entity state or source')
+        if self.geometry_kind not in GEOMETRY_KINDS:
+            raise ValueError('invalid geometry kind')
+        if (self.position_m is None) != (self.geometry_kind == 'none'):
+            raise ValueError('geometry kind and position disagree')
+        if self.extent_m is not None and any(value <= 0 for value in self.extent_m):
+            raise ValueError('extent must be positive')
+        if self.entity_id in (self.room_id, self.support_id):
+            raise ValueError('entity cannot contain itself')
+        if type(self.revision) is not int or self.revision < 1:
+            raise ValueError('positive revision required')
         if self.source == 'observed' and not self.evidence:
             raise ValueError('observed entity requires evidence')
 

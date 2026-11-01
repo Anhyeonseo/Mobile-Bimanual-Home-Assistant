@@ -4,7 +4,7 @@ import pytest
 pytest.importorskip('cv2')
 from home_perception.detect.base import Detection
 from home_perception.detect.verify import (crop_box, missing_objects, parse_answer, question,
-                                           resize_for_model, split_verified)
+                                           question_english, resize_for_model, split_verified)
 
 
 @pytest.mark.parametrize('text,expected', [
@@ -24,6 +24,10 @@ def test_crop_pads_box_and_stays_inside_image():
 def test_small_crop_is_enlarged_and_large_crop_is_kept():
     assert min(resize_for_model(np.zeros((30, 60, 3), np.uint8)).shape[:2]) == 224
     assert resize_for_model(np.zeros((300, 300, 3), np.uint8)).shape[:2] == (300, 300)
+
+
+def test_english_question_names_the_object_and_allows_no():
+    assert 'cup' in question_english('cup') and 'answer no' in question_english('cup')
 
 
 def test_question_names_the_object_and_allows_no():

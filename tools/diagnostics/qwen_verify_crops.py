@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from home_perception.detect.verify import question
+from home_perception.detect.verify import question_english
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
     answers = []
     for job in json.loads(args.jobs.read_text(encoding='utf-8')):
         messages = [{'role': 'user', 'content': [{'type': 'image', 'image': Image.open(job['crop']).convert('RGB')},
-                                                 {'type': 'text', 'text': question(job['name'])}]}]
+                                                 {'type': 'text', 'text': question_english(job['name'])}]}]
         inputs = processor.apply_chat_template(messages, tokenize=True, add_generation_prompt=True,
                                                return_dict=True, return_tensors='pt').to(args.device)
         with torch.inference_mode():

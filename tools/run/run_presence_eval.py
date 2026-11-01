@@ -14,7 +14,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools/diagnostics'))
-from home_perception.detect.verify import crop_box, parse_answer, question, resize_for_model
+from home_perception.detect.verify import crop_box, parse_answer, question, question_english, resize_for_model
 from home_perception.io.snapshot import load_snapshot, snapshot_folders
 from tools.lib.run_manifest import provenance, write_json
 
@@ -41,6 +41,7 @@ def main(argv=None):
     parser.add_argument('--model', type=Path, default=ROOT / 'artifacts/models/qwen3-vl-2b')
     parser.add_argument('--output', type=Path, default=ROOT / 'tmp/presence-eval')
     parser.add_argument('--detector', choices=['qwen', 'dino'], default='qwen')
+    parser.add_argument('--verify-language', choices=['ko', 'en'], default='en')
     args = parser.parse_args(argv)
     args.output.mkdir(parents=True, exist_ok=False)
     import cv2
@@ -83,7 +84,9 @@ def main(argv=None):
             answers = []
             for number, box in enumerate(boxes):
                 crop = resize_for_model(crop_box(snapshot.bgr, box))
-                answer = ask(Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)), question(korean), 16)
+                text = (question(korean) if args.verify_language == 'ko'
+                        else question_english(english))
+                answer = ask(Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)), text, 16)
                 answers.append({'box': box, 'answer': answer, 'yes': parse_answer(answer)})
                 cv2.imwrite(str(args.output / f'{snapshot.capture_id[:2]}_{english.replace(" ", "_")}_{number}.jpg'), crop)
             rows.append({'capture': snapshot.capture_id, 'object': english, 'present': english in snapshot.objects,

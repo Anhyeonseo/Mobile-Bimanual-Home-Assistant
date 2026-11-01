@@ -8,7 +8,7 @@ class DinoDetector:
         self.model = GroundingRGBD(device=device, **options)
 
     def detect(self, bgr, prompt):
-        from tools.lib.grounding_rgbd import MODEL_ID
+        from tools.lib.grounding_rgbd import MODEL_ID, MODEL_REVISION
         detections, _ = self.model.detect(bgr, prompt)
-        return [Detection(item['label'], item['box_xyxy'], MODEL_ID, item['score'])
+        return [Detection(item['label'], item['box_xyxy'], MODEL_ID, item['score'], revision=MODEL_REVISION)
                 for item in detections]

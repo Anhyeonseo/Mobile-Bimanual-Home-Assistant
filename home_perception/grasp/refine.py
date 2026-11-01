@@ -13,6 +13,7 @@ MAX_CENTER_OFFSET_M = .025
 FLAT_OBJECT_HEIGHT_M = .03
 FLAT_MAX_TILT_DEG = 45.
 TALL_MAX_TILT_DEG = 100.
+MIN_ELONGATION = 2.
 TIP_CLEARANCE_M = .001
 SUPPORT_MARGIN_M = .003
 OBSTACLE_HEIGHT_M = .005
@@ -113,7 +114,11 @@ def flat_object_grasp(target_points, scene_points, plane, margin_m=.01, max_widt
         return None, 'not_flat'
     flat = target - np.outer((target - plane.point) @ normal, normal)
     middle = flat.mean(axis=0)
-    long_axis = np.linalg.eigh(np.cov((flat - middle).T))[1][:, 2]
+    values, vectors = np.linalg.eigh(np.cov((flat - middle).T))
+    # values[0] is the flattened normal; the other two are the spread on the table.
+    if values[2] < MIN_ELONGATION ** 2 * values[1]:
+        return None, 'not_elongated'
+    long_axis = vectors[:, 2]
     short_axis = np.cross(normal, long_axis)
     across = np.percentile((flat - middle) @ short_axis, [1, 99])
     along = np.percentile((flat - middle) @ long_axis, [1, 99])
@@ -131,6 +136,10 @@ def flat_object_grasp(target_points, scene_points, plane, margin_m=.01, max_widt
     array[0, 4:13] = rotation.ravel()
     array[0, 13:16] = centre
     array[0, 16] = -1
+    # A concave shape can leave the middle of its bounding extent empty.
+    counts, offsets = between_fingers(array, target)
+    if counts[0] < MIN_CONTACT_POINTS or offsets[0] > MAX_CENTER_OFFSET_M:
+        return None, 'no_object_between_fingers'
     # Fingers must not land on neighbouring objects seen by the camera.
     above = scene_points[plane.height(scene_points) > OBSTACLE_HEIGHT_M]
     local = (above - centre) @ rotation

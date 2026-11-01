@@ -42,7 +42,8 @@ def observe(snapshot, detection, mask, score, plane):
     item = ObjectObservation(
         capture_id=snapshot.capture_id, captured_at_utc=snapshot.captured_at_utc,
         frame_id=snapshot.frame_id, label=detection.label, box_xyxy=detection.box_xyxy,
-        detector=detection.detector, detector_score=detection.score, status=result.status,
+        detector=detection.detector, detector_revision=detection.revision, detector_score=detection.score,
+        source_sha256=snapshot.source_sha256, status=result.status,
         mask_quality=score, mask_pixels=int(mask.sum()),
         valid_depth_fraction=result.valid_depth_fraction, point_count=result.point_count,
         cluster_fraction=result.cluster_fraction,
@@ -74,7 +75,8 @@ def verify(folder, entries, args, environment):
 def rejected_record(snapshot, detection):
     return dataclasses.asdict(ObjectObservation(
         capture_id=snapshot.capture_id, captured_at_utc=snapshot.captured_at_utc, frame_id=snapshot.frame_id,
-        label=detection.label, box_xyxy=detection.box_xyxy, detector=detection.detector, status=REJECTED,
+        label=detection.label, box_xyxy=detection.box_xyxy, detector=detection.detector,
+        detector_revision=detection.revision, source_sha256=snapshot.source_sha256, status=REJECTED,
         failure=NOT_FOUND, reason='verification_failed'))
 
 
@@ -161,7 +163,7 @@ def _run(args, folders, output, environment, report):
     # Detection always returns something, so nothing below trusts a box before this.
     jobs = [(item, box) for item in snapshots for box in detections[item.capture_id]]
     for item, box in jobs:
-        box.prompt_name = next((korean for english, korean in KOREAN.items()
+        box.prompt_name = next((english for english, korean in KOREAN.items()
                                 if korean in box.label or english in box.label.lower()), box.label)
     answers = verify(output / 'verify', jobs, args, environment)
     by_capture = {item.capture_id: [] for item in snapshots}
@@ -173,7 +175,7 @@ def _run(args, folders, output, environment, report):
         detections[item.capture_id], rejected[item.capture_id] = split_verified(found, by_capture[item.capture_id])
     absent_jobs = [(row, box) for row in absent for box in row.pop('found')]
     for row, box in absent_jobs:
-        box.prompt_name = KOREAN[row['target']]
+        box.prompt_name = row['target']
     absent_answers = verify(output / 'verify_absent', [(by_id[row['capture']], box) for row, box in absent_jobs],
                             args, environment) if absent_jobs else []
     for row in absent:

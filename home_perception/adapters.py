@@ -13,6 +13,7 @@ def observation_from_grounding(report, detection):
         capture_id=Path(report['source_snapshot']).name, captured_at_utc=report['captured_at_utc'],
         frame_id=report['coordinate_frame'], label=detection['label'],
         box_xyxy=[float(v) for v in detection['box_xyxy']], detector=report['model_id'],
+        detector_revision=report.get('model_revision'), source_sha256=report.get('source_sha256'),
         detector_score=detection['score'], status=ACCEPTED if valid else REJECTED,
         mask_quality=segmentation.get('predicted_iou'), mask_pixels=segmentation.get('pixels'),
         valid_depth_fraction=point.get('valid_fraction'),

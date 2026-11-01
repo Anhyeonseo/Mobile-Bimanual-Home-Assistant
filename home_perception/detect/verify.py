@@ -4,6 +4,8 @@ import re
 import cv2
 
 CROP_PADDING = .25
+# Same ten dev captures: English kept 24 of 25 present objects, Korean 23; both 0 of 25 absent.
+ENGLISH_NAMES = {'utility knife': 'utility knife (box cutter)'}
 
 
 def crop_box(bgr, box, padding=CROP_PADDING):
@@ -21,6 +23,12 @@ def crop_box(bgr, box, padding=CROP_PADDING):
 def question(name):
     return (f'이 사진의 가운데에 있는 물체가 {name} 맞나요? 다른 물체이거나, 물체가 없거나, '
             "확실하지 않으면 '아니오'라고 답하세요. '예' 또는 '아니오'로만 답하세요.")
+
+
+def question_english(name):
+    name = ENGLISH_NAMES.get(name, name)
+    return (f'Is the object in the center of this photo a {name}? If it is a different object, if there is '
+            "no object, or if you are unsure, answer no. Answer only yes or no.")
 
 
 def parse_answer(text):
