@@ -1,0 +1,1045 @@
+[
+ {
+  "group": "pick",
+  "text": "리모컨 집어줘",
+  "action": "pick",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "리모컨 좀 집어줄래",
+  "action": "pick",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "리모컨을 집어",
+  "action": "pick",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "저 리모컨 잡아줘",
+  "action": "pick",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "리모컨 들어줘",
+  "action": "pick",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "컵 집어줘",
+  "action": "pick",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "검은 컵 집어줘",
+  "action": "pick",
+  "target": "검은 컵",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "마커펜 잡아줘",
+  "action": "pick",
+  "target": "마커펜",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "계산기 들어올려줘",
+  "action": "pick",
+  "target": "계산기",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "커터칼 집어",
+  "action": "pick",
+  "target": "커터칼",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "리모컨 가져다줘",
+  "action": "fetch",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "리모컨 좀 갖다줘",
+  "action": "fetch",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "나한테 컵 가져와",
+  "action": "fetch",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "마커펜 가져와줘",
+  "action": "fetch",
+  "target": "마커펜",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "계산기 좀 가져다 줄래",
+  "action": "fetch",
+  "target": "계산기",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "검은 컵 갖다줘",
+  "action": "fetch",
+  "target": "검은 컵",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "내 리모컨 가져와",
+  "action": "fetch",
+  "target": "내 리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "커터칼 가져와",
+  "action": "fetch",
+  "target": "커터칼",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch_source",
+  "text": "책상에 있는 리모컨 가져다줘",
+  "action": "fetch",
+  "target": "리모컨",
+  "source": "책상",
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch_source",
+  "text": "소파 위 리모컨 가져와",
+  "action": "fetch",
+  "target": "리모컨",
+  "source": "소파",
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch_source",
+  "text": "탁자에 있는 컵 가져와줘",
+  "action": "fetch",
+  "target": "컵",
+  "source": "탁자",
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch_source",
+  "text": "협탁 위에 있는 계산기 갖다줘",
+  "action": "fetch",
+  "target": "계산기",
+  "source": "협탁",
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch_source",
+  "text": "거실 탁자 위의 마커펜 가져와",
+  "action": "fetch",
+  "target": "마커펜",
+  "source": "거실 탁자",
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "거실 탁자에 있는 리모컨을 침실 협탁에 놓아줘",
+  "action": "move",
+  "target": "리모컨",
+  "source": "거실 탁자",
+  "destination": "침실 협탁",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "리모컨을 협탁에 놓아줘",
+  "action": "move",
+  "target": "리모컨",
+  "source": null,
+  "destination": "협탁",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "컵을 책상 위에 올려줘",
+  "action": "move",
+  "target": "컵",
+  "source": null,
+  "destination": "책상",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "계산기를 소파로 옮겨줘",
+  "action": "move",
+  "target": "계산기",
+  "source": null,
+  "destination": "소파",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "마커펜을 탁자에 갖다 놔",
+  "action": "move",
+  "target": "마커펜",
+  "source": null,
+  "destination": "탁자",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "소파에 있는 리모컨을 책상으로 옮겨",
+  "action": "move",
+  "target": "리모컨",
+  "source": "소파",
+  "destination": "책상",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "책상 위 컵을 협탁으로 옮겨줘",
+  "action": "move",
+  "target": "컵",
+  "source": "책상",
+  "destination": "협탁",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "리모컨 침대 위에 놔줘",
+  "action": "move",
+  "target": "리모컨",
+  "source": null,
+  "destination": "침대",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "커터칼을 서랍장 위에 둬",
+  "action": "move",
+  "target": "커터칼",
+  "source": null,
+  "destination": "서랍장",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "탁자의 계산기를 책상에 놓아",
+  "action": "move",
+  "target": "계산기",
+  "source": "탁자",
+  "destination": "책상",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "find",
+  "text": "리모컨 어디 있어",
+  "action": "find",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "find",
+  "text": "리모컨 찾아줘",
+  "action": "find",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "find",
+  "text": "컵 찾아봐",
+  "action": "find",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "find",
+  "text": "계산기 어디 뒀지",
+  "action": "find",
+  "target": "계산기",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "find",
+  "text": "마커펜 좀 찾아줄래",
+  "action": "find",
+  "target": "마커펜",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "왼쪽 컵 집어줘",
+  "action": "pick",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": "left",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "오른쪽 컵 집어줘",
+  "action": "pick",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": "right",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "앞에 있는 컵 집어줘",
+  "action": "pick",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": "front",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "뒤에 있는 컵 집어줘",
+  "action": "pick",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": "back",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "왼쪽에 있는 컵 잡아",
+  "action": "pick",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": "left",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "오른쪽 컵 가져다줘",
+  "action": "fetch",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": "right",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "앞쪽 컵 가져와",
+  "action": "fetch",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": "front",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "뒤쪽 컵 찾아줘",
+  "action": "find",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": "back",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "컵 말고 계산기 집어줘",
+  "action": "pick",
+  "target": "계산기",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "컵"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "리모컨 말고 마커펜 집어",
+  "action": "pick",
+  "target": "마커펜",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "리모컨"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "계산기 말고 컵 잡아줘",
+  "action": "pick",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "계산기"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "마커펜 말고 커터칼 집어줘",
+  "action": "pick",
+  "target": "커터칼",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "마커펜"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "컵 말고 리모컨 가져와",
+  "action": "fetch",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "컵"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "커터칼 말고 계산기 가져다줘",
+  "action": "fetch",
+  "target": "계산기",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "커터칼"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "리모컨 말고 컵 찾아줘",
+  "action": "find",
+  "target": "컵",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "리모컨"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "컵 아니고 리모컨 집어줘",
+  "action": "pick",
+  "target": "리모컨",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "컵"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "계산기 아니라 마커펜 가져와",
+  "action": "fetch",
+  "target": "마커펜",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "계산기"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "빨간 컵 말고 검은 컵 집어줘",
+  "action": "pick",
+  "target": "검은 컵",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "빨간 컵"
+  ],
+  "supported": true
+ },
+ {
+  "group": "multiple",
+  "text": "컵 집고 나서 리모컨도 가져와",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "리모컨 가져온 다음에 컵도 가져와",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "컵 옮기고 나서 계산기 찾아줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "리모컨 찾은 뒤 책상에 놔줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "컵 들어준 다음 소파로 와",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "리모컨 가져오고 그리고 컵도 치워",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "계산기 집고 나서 탁자에 놓아줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "컵 가져와 그리고 리모컨도",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "마커펜 찾은 다음에 가져와",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "리모컨 집은 뒤 협탁에 놔줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "컵에 물 따라줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "라면 끓여줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "방 청소해줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "창문 열어줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "서랍 열어줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "문 닫아줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "불 켜줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "설거지 해줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "빨래 개줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "커피 데워줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "쓰레기 버려줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "리모컨 내 손에 건네줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "2층으로 올라가",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "노래 불러줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "바닥 닦아줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "계란 볶아줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "컵 던져줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "춤 춰봐",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "뜨거운 냄비 옮겨줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "물병 따라줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "missing_target",
+  "text": "그거 집어줘",
+  "action": "pick",
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "missing_target",
+  "text": "저거 가져와",
+  "action": "fetch",
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "missing_target",
+  "text": "이것 좀",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "missing_target",
+  "text": "가져다줘",
+  "action": "fetch",
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "missing_target",
+  "text": "옮겨줘",
+  "action": "move",
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "missing_target",
+  "text": "집어줘",
+  "action": "pick",
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "missing_target",
+  "text": "찾아줘",
+  "action": "find",
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ }
+]

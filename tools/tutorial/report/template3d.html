@@ -1,0 +1,87 @@
+<title>집게 후보 3D 보기</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<style>
+/* Layout: the 3D view is the page; controls sit in plain rows around it. */
+:root{--bg:#f3f6f8;--panel:#fff;--fg:#17232c;--muted:#566875;--line:#d6dfe5;--on:#1d5f8a;--on-fg:#fff;--ok:#15803d;--hold:#a16207;--view:#0f161b;--font:"IBM Plex Sans KR","Noto Sans KR","Apple SD Gothic Neo",sans-serif}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10181e;--panel:#18232b;--fg:#e8eef2;--muted:#9fb0bb;--line:#2c3a44;--on:#7cc0ea;--on-fg:#0f161b;--ok:#4ade80;--hold:#fbbf24;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#10181e;--panel:#18232b;--fg:#e8eef2;--muted:#9fb0bb;--line:#2c3a44;--on:#7cc0ea;--on-fg:#0f161b;--ok:#4ade80;--hold:#fbbf24;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:16px;line-height:1.6}
+main{max-width:1100px;margin:0 auto;padding-block:28px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:16px}
+h1{font-size:clamp(26px,4vw,34px);line-height:1.25;margin:0 0 4px}p{margin:0;max-width:70ch}.sub{color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.row>span{font-size:14px;color:var(--muted);min-width:64px}
+button{font:inherit;font-size:14px;padding:5px 11px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--fg);cursor:pointer}
+button[aria-pressed="true"]{background:var(--on);border-color:var(--on);color:var(--on-fg)}button:focus-visible{outline:2px solid var(--on);outline-offset:2px}
+button .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+#stage{position:relative;height:clamp(380px,62vh,640px);background:var(--view);border-radius:8px;overflow:hidden;touch-action:none}
+#stage canvas{display:block}
+#fallback{position:absolute;inset:0;display:grid;place-items:center;color:#e8eef2;padding:24px;text-align:center}
+#info{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+#info div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 13px;min-width:0}#info b{display:block;font-size:19px;font-variant-numeric:tabular-nums}#info span{color:var(--muted);font-size:13px}
+.notes{display:grid;gap:4px;padding-left:20px;margin:0;max-width:75ch}
+@media(max-width:640px){#info{grid-template-columns:repeat(2,1fr)}}
+</style>
+<main>
+<header><h1>집게 후보 3D 보기</h1>
+<p class="sub">실제 사진과 거리 정보로 만든 3D 점들 위에, AI가 제안한 집게 위치를 올렸습니다. 드래그로 돌리고, 휠이나 두 손가락으로 확대합니다.</p></header>
+<div class="row" id="scenes"><span>사진</span></div>
+<div class="row" id="objects"><span>물체</span></div>
+<div class="row"><span>보기</span><button id="v-cam">사진 시점</button><button id="v-top">위에서</button><button id="v-side">옆에서</button><span style="min-width:12px"></span><button id="all" aria-pressed="false">후보 전부 보기</button></div>
+<div id="stage" aria-label="3차원 점구름과 집게 후보"><div id="fallback" hidden>이 브라우저에서는 3D 화면을 열 수 없습니다.</div></div>
+<div id="info"></div>
+<ol class="notes">
+<li>초록·노랑으로 물든 점이 고른 물체입니다. 초록은 통과, 노랑은 보류입니다.</li>
+<li>주황 ㄷ자가 1순위 집게 자세, 하늘색은 나머지 후보입니다. 집게 사이에 물체가 있고 책상에 닿지 않는 후보만 남겼습니다.</li><li>납작한 물체는 위에서 수직으로 짧은 폭을 집는 규칙 후보를 1순위로 둡니다. 화면에 규칙이라고 표시됩니다.</li><li>보류된 물체의 후보는 볼 수 있지만 실행 후보에서는 제외했습니다.</li>
+<li>컵 표면에 뚫린 빈 곳이 거리를 재지 못한 자리입니다. 컵 주변 후보가 흩어지는 이유를 여기서 볼 수 있습니다.</li>
+<li>집게 크기는 GraspNet 기본값(최대 10cm)이며 실제 로봇 집게 치수가 아닙니다. 실제로 집어본 결과가 아닙니다.</li>
+</ol>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const SCENES=/*DATA*/null;
+const bytes=b=>Uint8Array.from(atob(b),c=>c.charCodeAt(0));
+const stage=document.getElementById('stage'),info=document.getElementById('info');
+let renderer,scene,camera,controls,cloud,group,cur=0,sel=0,showAll=false;
+const TINT={accepted:[.13,.77,.37],held:[.96,.62,.04]};
+function box(a,b,t,mat){const A=new THREE.Vector3(...a),B=new THREE.Vector3(...b),L=A.distanceTo(B);const m=new THREE.Mesh(new THREE.BoxGeometry(t,L,t),mat);m.position.copy(A).add(B).multiplyScalar(.5);m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),B.clone().sub(A).normalize());return m}
+function gripper(c,color,opacity,t){
+ const g=new THREE.Group(),mat=new THREE.MeshBasicMaterial({color,transparent:opacity<1,opacity});
+ const w=c.w/2,d=c.d,b=-.02,tail=-.06;
+ [[[b,-w,0],[d,-w,0]],[[b,w,0],[d,w,0]],[[b,-w,0],[b,w,0]],[[tail,0,0],[b,0,0]]].forEach(p=>g.add(box(p[0],p[1],t,mat)));
+ const r=c.r,m=new THREE.Matrix4();m.set(r[0][0],r[0][1],r[0][2],c.t[0],r[1][0],r[1][1],r[1][2],c.t[1],r[2][0],r[2][1],r[2][2],c.t[2],0,0,0,1);
+ g.matrixAutoUpdate=false;g.matrix.copy(m);return g}
+function drawCloud(){
+ const s=SCENES[cur];if(!s.buf){const x=bytes(s.xyz);s.buf={xyz:new Int16Array(x.buffer),rgb:bytes(s.rgb),obj:new Int8Array(bytes(s.obj).buffer)}}
+ const n=s.n,pos=new Float32Array(n*3),col=new Float32Array(n*3),t=TINT[s.objects[sel].status];
+ for(let i=0;i<n;i++){for(let k=0;k<3;k++){pos[i*3+k]=s.buf.xyz[i*3+k]/10000;let v=s.buf.rgb[i*3+k]/255;if(s.buf.obj[i]===sel)v=.3*v+.7*t[k];col[i*3+k]=v}}
+ if(cloud){scene.remove(cloud);cloud.geometry.dispose()}
+ const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));g.setAttribute('color',new THREE.BufferAttribute(col,3));
+ cloud=new THREE.Points(g,new THREE.PointsMaterial({size:.0034,vertexColors:true}));scene.add(cloud)}
+function drawGrasps(){
+ if(group)scene.remove(group);group=new THREE.Group();const c=SCENES[cur].objects[sel].cands;
+ c.forEach((x,i)=>{if(i===0)group.add(gripper(x,0xff7a18,1,.0035));else if(showAll)group.add(gripper(x,0x56c8f5,.55,.002))});scene.add(group)}
+function updateInfo(){
+ const o=SCENES[cur].objects[sel],c=o.cands,b=c[0],st=o.status==='accepted'?'통과':'보류';
+ info.innerHTML=`<div><b>${o.label}</b><span>${st}${o.exec?' · 실행 후보':' · 실행 제외'}</span></div><div><b>${c.length}개</b><span>집게 후보</span></div><div><b>${b?(b.src==='rule'?'규칙':'GraspNet'):'없음'}</b><span>최고 후보 만든 방식</span></div><div><b>${b?(b.w*100).toFixed(1)+'cm':'없음'}</b><span>최고 후보 집게 폭</span></div>`}
+function buttons(){
+ const sc=document.getElementById('scenes'),ob=document.getElementById('objects');
+ sc.querySelectorAll('button').forEach(b=>b.remove());ob.querySelectorAll('button').forEach(b=>b.remove());
+ SCENES.forEach((s,i)=>{const b=document.createElement('button');b.textContent=s.id;b.title=s.name;b.setAttribute('aria-label',s.name);b.setAttribute('aria-pressed',i===cur);b.onclick=()=>{cur=i;sel=0;refresh()};sc.append(b)});
+ SCENES[cur].objects.forEach((o,i)=>{const b=document.createElement('button');b.innerHTML=`<span class="dot" style="background:${o.status==='accepted'?'#22c55e':'#f59e0b'}"></span>${o.label} ${o.cands.length}`;b.setAttribute('aria-pressed',i===sel);b.onclick=()=>{sel=i;refresh()};ob.append(b)})}
+function view(p){camera.position.set(...p);controls.target.set(0,.03,0);controls.update()}
+function camView(){view(SCENES[cur].cam)}
+function refresh(){buttons();drawCloud();drawGrasps();updateInfo()}
+function resize(){const w=stage.clientWidth,h=stage.clientHeight;renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix()}
+function start(){
+ try{renderer=new THREE.WebGLRenderer({antialias:true})}catch(e){document.getElementById('fallback').hidden=false;buttons();updateInfo();return}
+ renderer.setPixelRatio(Math.min(devicePixelRatio,2));stage.append(renderer.domElement);
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x0f161b);camera=new THREE.PerspectiveCamera(45,1,.01,10);
+ controls=new THREE.OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=.12;
+ resize();addEventListener('resize',resize);
+ refresh();camView();
+ document.getElementById('v-cam').onclick=camView;document.getElementById('v-top').onclick=()=>view([0,.55,.001]);document.getElementById('v-side').onclick=()=>view([.55,.18,0]);
+ document.getElementById('all').onclick=e=>{showAll=!showAll;e.currentTarget.setAttribute('aria-pressed',showAll);drawGrasps()};
+ renderer.setAnimationLoop(()=>{controls.update();renderer.render(scene,camera)})}
+cur=SCENES.findIndex(s=>s.id==='10');sel=1;start();
+</script>

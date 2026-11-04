@@ -1,0 +1,450 @@
+[
+ {
+  "group": "pick",
+  "text": "안경 집어줘",
+  "action": "pick",
+  "target": "안경",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "휴대폰 좀 집어줄래",
+  "action": "pick",
+  "target": "휴대폰",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "파란 수첩 잡아줘",
+  "action": "pick",
+  "target": "파란 수첩",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "pick",
+  "text": "지갑 들어줘",
+  "action": "pick",
+  "target": "지갑",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "충전기 가져다줘",
+  "action": "fetch",
+  "target": "충전기",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "내 안경 갖다줘",
+  "action": "fetch",
+  "target": "내 안경",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "수건 좀 가져와",
+  "action": "fetch",
+  "target": "수건",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch",
+  "text": "나한테 지갑 가져다줄래",
+  "action": "fetch",
+  "target": "지갑",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch_source",
+  "text": "식탁에 있는 안경 가져와",
+  "action": "fetch",
+  "target": "안경",
+  "source": "식탁",
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch_source",
+  "text": "침대 위 휴대폰 가져다줘",
+  "action": "fetch",
+  "target": "휴대폰",
+  "source": "침대",
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "fetch_source",
+  "text": "선반에 있는 수첩 갖다줘",
+  "action": "fetch",
+  "target": "수첩",
+  "source": "선반",
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "지갑을 식탁에 놓아줘",
+  "action": "move",
+  "target": "지갑",
+  "source": null,
+  "destination": "식탁",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "안경을 침대 위에 올려줘",
+  "action": "move",
+  "target": "안경",
+  "source": null,
+  "destination": "침대",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "수첩을 선반으로 옮겨줘",
+  "action": "move",
+  "target": "수첩",
+  "source": null,
+  "destination": "선반",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "책상에 있는 충전기를 소파로 옮겨",
+  "action": "move",
+  "target": "충전기",
+  "source": "책상",
+  "destination": "소파",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "move",
+  "text": "식탁의 지갑을 협탁에 놔줘",
+  "action": "move",
+  "target": "지갑",
+  "source": "식탁",
+  "destination": "협탁",
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "find",
+  "text": "안경 어디 있어",
+  "action": "find",
+  "target": "안경",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "find",
+  "text": "지갑 찾아줘",
+  "action": "find",
+  "target": "지갑",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "find",
+  "text": "충전기 어디 뒀지",
+  "action": "find",
+  "target": "충전기",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "왼쪽 수첩 집어줘",
+  "action": "pick",
+  "target": "수첩",
+  "source": null,
+  "destination": null,
+  "location": "left",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "오른쪽에 있는 안경 가져와",
+  "action": "fetch",
+  "target": "안경",
+  "source": null,
+  "destination": null,
+  "location": "right",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "앞쪽 지갑 잡아줘",
+  "action": "pick",
+  "target": "지갑",
+  "source": null,
+  "destination": null,
+  "location": "front",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "location",
+  "text": "뒤에 있는 수첩 찾아줘",
+  "action": "find",
+  "target": "수첩",
+  "source": null,
+  "destination": null,
+  "location": "back",
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "안경 말고 지갑 집어줘",
+  "action": "pick",
+  "target": "지갑",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "안경"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "수첩 말고 충전기 가져와",
+  "action": "fetch",
+  "target": "충전기",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "수첩"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "지갑 아니고 안경 찾아줘",
+  "action": "find",
+  "target": "안경",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "지갑"
+  ],
+  "supported": true
+ },
+ {
+  "group": "negation",
+  "text": "파란 수첩 말고 빨간 수첩 가져다줘",
+  "action": "fetch",
+  "target": "빨간 수첩",
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [
+   "파란 수첩"
+  ],
+  "supported": true
+ },
+ {
+  "group": "multiple",
+  "text": "안경 가져온 다음 지갑도 찾아줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "지갑 찾은 뒤 식탁에 놔줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "multiple",
+  "text": "수첩 집고 나서 침대에 올려줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "국 끓여줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "현관문 열어줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "바닥 청소해줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "냉장고 닫아줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "물 좀 따라줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "아기한테 건네줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "unsupported",
+  "text": "옷 빨래해줘",
+  "action": null,
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": false
+ },
+ {
+  "group": "missing_target",
+  "text": "그것 좀 가져와",
+  "action": "fetch",
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "missing_target",
+  "text": "이거 옮겨줘",
+  "action": "move",
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ },
+ {
+  "group": "missing_target",
+  "text": "저것 집어",
+  "action": "pick",
+  "target": null,
+  "source": null,
+  "destination": null,
+  "location": null,
+  "excluded": [],
+  "supported": true
+ }
+]

@@ -1,0 +1,23 @@
+[
+  {"capture": "07_same_objects", "text": "컵 집어줘", "expect": "AMBIGUOUS_TARGET"},
+  {"capture": "07_same_objects", "text": "검은 컵 집어줘", "expect": "AMBIGUOUS_TARGET"},
+  {"capture": "07_same_objects", "text": "왼쪽 컵 집어줘", "expect": [61, 45, 214, 234]},
+  {"capture": "07_same_objects", "text": "오른쪽 컵 가져와", "expect": [429, 28, 589, 220]},
+  {"capture": "07_same_objects", "text": "리모컨 가져와", "expect": "NOT_FOUND"},
+  {"capture": "08_same_objects", "text": "앞에 있는 컵 집어줘", "expect": [269, 134, 470, 369]},
+  {"capture": "08_same_objects", "text": "뒤에 있는 컵 가져와", "expect": [291, 9, 428, 144]},
+  {"capture": "09_misc_objects", "text": "검은 컵 갖다줘", "expect": [214, 53, 374, 252]},
+  {"capture": "09_misc_objects", "text": "흰 컵 가져와", "expect": "NOT_FOUND"},
+  {"capture": "09_misc_objects", "text": "흰 리모컨 집어줘", "expect": [410, 117, 485, 244]},
+  {"capture": "09_misc_objects", "text": "검은 리모컨 가져와", "expect": "NOT_FOUND"},
+  {"capture": "09_misc_objects", "text": "마커펜 말고 커터칼 집어줘", "expect": [218, 282, 512, 332]},
+  {"capture": "09_misc_objects", "text": "계산기 가져다줘", "expect": "NOT_FOUND"},
+  {"capture": "10_misc_objects", "text": "리모컨 가져와", "expect": [545, 110, 609, 237]},
+  {"capture": "10_misc_objects", "text": "계산기 집어줘", "expect": [56, 103, 210, 250]},
+  {"capture": "10_misc_objects", "text": "계산기 말고 마커펜 집어줘", "expect": [127, 215, 351, 271]},
+  {"capture": "10_misc_objects", "text": "커터칼 어디 있어", "expect": [376, 89, 485, 215]},
+  {"capture": "03_similar_objects", "text": "마커펜 집어줘", "expect": [536, 132, 598, 286]},
+  {"capture": "03_similar_objects", "text": "커터칼 가져와", "expect": [125, 168, 243, 325]},
+  {"capture": "05_remote_only", "text": "컵 가져와", "expect": "NOT_FOUND"},
+  {"capture": "04_similar_objects", "text": "컵 찾아줘", "expect": "NOT_FOUND"}
+]

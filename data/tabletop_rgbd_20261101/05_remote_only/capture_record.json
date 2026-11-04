@@ -1,0 +1,11 @@
+{
+  "index": 5,
+  "category": "remote_only",
+  "objects": [
+    "remote control"
+  ],
+  "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T111244_707329Z",
+  "captured_at_utc": "2026-11-01T11:12:44.639640+00:00",
+  "visual_check": "Single remote near table center, oriented vertically, fully within frame.",
+  "status": "captured"
+}

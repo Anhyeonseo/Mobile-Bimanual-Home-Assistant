@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "mode": "virtual",
+  "description": "Illustrative GraspNet-to-TCP convention. Not a measured gripper calibration.",
+  "grasp_from_tcp_rotation": [[0, 0, 1], [-1, 0, 0], [0, -1, 0]],
+  "grasp_to_tcp_translation_m": [0, 0, 0],
+  "axis_description": "TCP +Z = GraspNet +X approach; TCP -X = GraspNet +Y closing axis.",
+  "policy": {
+    "position_tolerance_m": 0.005,
+    "orientation_tolerance_degrees": 10.0,
+    "allow_parallel_jaw_half_turn": true,
+    "maximum_starts": 10,
+    "maximum_function_evaluations": 120,
+    "random_seed": 0
+  }
+}

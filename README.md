@@ -4,6 +4,10 @@ ALOHA Mini 1 기반의 자취방·소형 주거공간용 모바일 매니퓰레�
 
 기존 [Bimanual-Pick-And-Place](https://github.com/Anhyeonseo/Bimanual-Pick-And-Place)의 Classical P&P를 재사용한다. 해당 기반은 상단 카메라 인식부터 왼팔 집기, 오른팔 전달, 내려놓기까지 실기 완료한 시스템이다. 모바일 베이스와 리프트로 팔이 작업하기 좋은 상대 위치·높이를 재현하고, 새 장착 조건에 맞춰 통합한다.
 
+**2026-10-31 개발 범위:** 원룸의 수동 가구 등록·고정 정차 후보·RGB-D 정렬과 Qwen-VL 인식을 우선한다.
+작업 계획은 FSM이 맡으며 SAM 유지 여부는 별도 평가한다. 실물 없이 시작하는 명령과 GPU 전체 인식은
+[오프라인 개발 안내](docs/OFFLINE_DEVELOPMENT.md)를 따른다. 자동 시맨틱 매핑·동적 정차 선택은 후속 확장이다.
+
 ## 개발 방향
 
 - **전체 과정의 통합과 검증:** VLM, 시맨틱 매핑(semantic mapping), 2D LiDAR SLAM/Nav2, RGB-D, MoveIt와 기존 P&P를 연결한다. 단계 사이에서 필요한 증거·실패 조건·재관측·복구를 명시하고 실제 작업으로 평가한다.

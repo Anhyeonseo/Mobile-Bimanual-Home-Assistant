@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "mode": "simulation",
+  "description": "Synthetic 4.5 x 4.5 m studio. Furniture, poses, lift heights and camera geometry are development fixtures, not measurements.",
+  "stack_template": "fetch_stack.simulation.json",
+  "world": {
+    "schema_version": 1,
+    "transport_mode": "carry_in_gripper",
+    "rooms": {"living_room": {"search_locations": ["desk", "coffee_table", "sofa"]}},
+    "places": {
+      "desk": {"room": "living_room", "label": "책상"},
+      "coffee_table": {"room": "living_room", "label": "탁상"},
+      "sofa": {"room": "living_room", "label": "소파"}
+    },
+    "objects": {"remote_control": {"label": "리모컨"}}
+  },
+  "map": {
+    "schema_version": 1,
+    "map_id": "studio-demo",
+    "revision": "synthetic-1",
+    "floor_id": "ground",
+    "frame_id": "map",
+    "floor_z_m": 0,
+    "resolution_m": 0.25,
+    "origin": {"x": 0, "y": 0},
+    "robot_radius_m": 0.2,
+    "clearance_m": 0.05,
+    "surface_tolerance_m": 0.03,
+    "rows": [
+      "##################",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "#................#",
+      "##################"
+    ]
+  },
+  "places": {
+    "desk": {"point": {"x": 1.5, "y": 2.0, "z": 0}, "yaw_rad": 0, "height_um": 200000},
+    "coffee_table": {"point": {"x": 2.5, "y": 2.0, "z": 0}, "yaw_rad": 0, "height_um": 150000},
+    "sofa": {"point": {"x": 3.0, "y": 3.0, "z": 0}, "yaw_rad": 1.5707963267948966, "height_um": 200000}
+  },
+  "request": {
+    "schema_version": 1,
+    "operation": "fetch_object",
+    "request_id": "studio-fetch",
+    "request": {
+      "task": "fetch_object",
+      "object_id": "remote_control",
+      "source_room": "living_room",
+      "source_place": "desk",
+      "destination_place": "sofa"
+    }
+  }
+}

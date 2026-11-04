@@ -30,6 +30,7 @@ class FetchRequest:
     object_id: str
     source_room: str
     destination_place: str
+    source_place: str | None = None
 
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> FetchRequest:
@@ -38,10 +39,11 @@ class FetchRequest:
         if document.get("task") != "fetch_object":
             raise InvalidTask("only fetch_object is implemented")
         expected = {"task", "object_id", "source_room", "destination_place"}
-        if set(document) != expected:
-            raise InvalidTask("request fields must be task, object_id, source_room, destination_place")
+        if set(document) not in (expected, expected | {"source_place"}):
+            raise InvalidTask("request fields must be task, object_id, source_room, destination_place; optional source_place")
+        source = _identifier(document["source_place"], "source_place") if "source_place" in document else None
         return cls(*(_identifier(document[key], key) for key in
-                     ("object_id", "source_room", "destination_place")))
+                     ("object_id", "source_room", "destination_place")), source_place=source)
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,15 @@ def plan_fetch(request: FetchRequest, world: Mapping[str, Any]) -> dict[str, Any
     if any(not isinstance(places.get(location), dict) or places[location].get("room") != room_id
            for location in locations):
         raise InvalidTask("each search location must belong to the source room")
+    source_place = request.source_place
+    if source_place is not None:
+        source_place = _identifier(source_place, "source_place")
+        if source_place not in locations:
+            raise InvalidTask("source_place must be a registered search location in the source room")
+        locations = [source_place]
+    source = {"room": room_id}
+    if source_place is not None:
+        source["source_place"] = source_place
     target = {"object_id": object_id}
     stationary = ("base_stopped", "lift_stopped")
     travel_ready = ("arm_in_transport_pose", "lift_in_transport_position")
@@ -91,7 +102,7 @@ def plan_fetch(request: FetchRequest, world: Mapping[str, Any]) -> dict[str, Any
     steps = (
         TaskStep("prepare_navigation", {}, (*stationary, *travel_ready), 30,
                  start_requires=(*stationary, "hardware_ready")),
-        TaskStep("navigate", {"room": room_id},
+        TaskStep("navigate", source,
                  ("localized_in_source_room", "base_stopped", *travel_ready), 180,
                  start_requires=(*stationary, *travel_ready, "localized")),
         TaskStep("search", {**target, "locations": locations},
@@ -129,10 +140,13 @@ def plan_fetch(request: FetchRequest, world: Mapping[str, Any]) -> dict[str, Any
                  ("fresh_observation", "object_at_destination"), 30,
                  start_requires=stationary),
     )
+    normalized = asdict(FetchRequest(object_id, room_id, destination, source_place))
+    if source_place is None:
+        normalized.pop("source_place")
     return {
         "schema_version": 1,
         "task": "fetch_object",
-        "request": asdict(FetchRequest(object_id, room_id, destination)),
+        "request": normalized,
         "mode": "plan_only",
         "motion_authorized": False,
         "executable": False,

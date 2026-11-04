@@ -45,6 +45,8 @@ output/
 tmp/
 artifacts/
 datasets/
+# Local measured place registrations (recreate the blank DB from config/home_places.json).
+/data/*.sqlite3*
 *.bag
 *.db3
 *.mcap

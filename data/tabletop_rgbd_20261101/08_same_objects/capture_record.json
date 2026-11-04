@@ -1,0 +1,12 @@
+{
+  "index": 8,
+  "category": "same_objects",
+  "objects": [
+    "cup",
+    "cup"
+  ],
+  "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T112023_641007Z",
+  "captured_at_utc": "2026-11-01T11:20:23.547638+00:00",
+  "visual_check": "Two black cups at different distances, within RGB frame. Front cup partially occludes the lower rear cup. Raw depth has missing pixels on cups.",
+  "status": "captured"
+}

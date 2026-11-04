@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-11-01T11:07:30.199733+00:00",
+  "device": {
+    "name": "RealSense D415",
+    "serial": "851112060029",
+    "firmware": "5.17.0.10",
+    "usb": "3.2"
+  },
+  "depth_scale_m": 0.0010000000474974513,
+  "native_depth_intrinsics": {
+    "width": 640,
+    "height": 360,
+    "fx": 448.1411437988281,
+    "fy": 448.1411437988281,
+    "ppx": 314.6636657714844,
+    "ppy": 179.9028778076172,
+    "coeffs": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "model": "distortion.brown_conrady"
+  },
+  "color_intrinsics": {
+    "width": 640,
+    "height": 480,
+    "fx": 617.6232299804688,
+    "fy": 617.08984375,
+    "ppx": 319.24639892578125,
+    "ppy": 233.9661102294922,
+    "coeffs": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "model": "distortion.inverse_brown_conrady"
+  },
+  "depth_to_color": {
+    "rotation_column_major": [
+      0.9999894499778748,
+      0.0009868999477475882,
+      -0.0044886283576488495,
+      -0.0010051240678876638,
+      0.999991238117218,
+      -0.00405962485820055,
+      0.00448458269238472,
+      0.004064093343913555,
+      0.999981701374054
+    ],
+    "translation_m": [
+      0.014780142344534397,
+      -6.43906241748482e-05,
+      3.310992906335741e-05
+    ]
+  },
+  "coordinate_frame": "color_camera_optical_frame",
+  "axes": "X right, Y down, Z forward; metres",
+  "robot_transform": null,
+  "depth_capture": {
+    "width": 640,
+    "height": 360,
+    "fps": 30
+  },
+  "depth_sensor_options": {
+    "visual_preset": 0.0,
+    "emitter_enabled": 1.0,
+    "laser_power": 150.0,
+    "enable_auto_exposure": 1.0
+  },
+  "depth_preview_filter": {
+    "mode": "spatial",
+    "purpose": "display only; XYZ uses unfiltered aligned depth",
+    "order": "native depth -> disparity -> spatial -> optional temporal -> depth -> align to color",
+    "spatial_iterations": 2,
+    "smooth_alpha": 0.6,
+    "smooth_delta": 8,
+    "hole_filling": false,
+    "temporal_persistence": false,
+    "decimation": false
+  },
+  "depth_color_range_m": [
+    0.2,
+    0.8
+  ],
+  "aligned_depth_intrinsics": {
+    "width": 640,
+    "height": 480,
+    "fx": 617.6232299804688,
+    "fy": 617.08984375,
+    "ppx": 319.24639892578125,
+    "ppy": 233.9661102294922,
+    "coeffs": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "model": "distortion.inverse_brown_conrady"
+  },
+  "depth_frame": {
+    "number": 24529,
+    "timestamp_ms": 1793531250138.3374,
+    "timestamp_domain": "timestamp_domain.global_time"
+  },
+  "color_frame": {
+    "number": 24531,
+    "timestamp_ms": 1793531250138.6743,
+    "timestamp_domain": "timestamp_domain.global_time"
+  },
+  "depth_storage": "uint16 PNG; multiply by depth_scale_m for metres; zero is invalid",
+  "color_storage": "PNG encoded by OpenCV from BGR8",
+  "alignment": "depth to color via rs.align; no hole filling or temporal filtering",
+  "measurement_depth_file": "depth_aligned.png",
+  "preview_depth_file": "depth_preview_filtered.png",
+  "preview_showing_filtered": true,
+  "sample": {
+    "pixel": [
+      320,
+      240
+    ],
+    "valid": true,
+    "depth_z_m": 0.4090000092983246,
+    "xyz_m": [
+      0.0004990466986782849,
+      0.003999192267656326,
+      0.4090000092983246
+    ],
+    "range_m": 0.4090198652784859
+  },
+  "valid_depth_percent": 94.27473958333333,
+  "framesets": 23872,
+  "observed_fps": 29.00211252241932,
+  "frame_number_gaps": {
+    "depth": 627,
+    "color": 627
+  },
+  "repeated_frames": {
+    "depth": 0,
+    "color": 0
+  }
+}

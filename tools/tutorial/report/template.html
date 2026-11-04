@@ -1,0 +1,64 @@
+<title>책상 위 물체 인식 결과</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<style>
+/* Layout: a lab report that reads top to bottom, photos first, words second. */
+:root{--bg:#f3f6f8;--panel:#ffffff;--fg:#17232c;--muted:#566875;--line:#d6dfe5;--ok:#15803d;--ok-bg:#dcfce7;--hold:#a16207;--hold-bg:#fef3c7;--bad:#b91c1c;--bad-bg:#fee2e2;--accent:#1d5f8a;--font:"IBM Plex Sans KR","Noto Sans KR","Apple SD Gothic Neo",sans-serif}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10181e;--panel:#18232b;--fg:#e8eef2;--muted:#9fb0bb;--line:#2c3a44;--ok:#4ade80;--ok-bg:#12351f;--hold:#fbbf24;--hold-bg:#3b2d0b;--bad:#f87171;--bad-bg:#3f1616;--accent:#7cc0ea;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#10181e;--panel:#18232b;--fg:#e8eef2;--muted:#9fb0bb;--line:#2c3a44;--ok:#4ade80;--ok-bg:#12351f;--hold:#fbbf24;--hold-bg:#3b2d0b;--bad:#f87171;--bad-bg:#3f1616;--accent:#7cc0ea;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:16px;line-height:1.65}
+main{max-width:1040px;margin:0 auto;padding-block:40px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:56px}
+h1{font-size:clamp(28px,5vw,40px);line-height:1.25;margin:0 0 12px;text-wrap:balance}
+h2{font-size:24px;margin:0 0 6px;text-wrap:balance}
+h3{font-size:16px;margin:12px 14px 6px}
+p{margin:0;max-width:65ch}.lead{font-size:18px}.sub{color:var(--muted);margin-bottom:20px}
+img{display:block;width:100%;height:auto}
+section{min-width:0}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:24px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.stat b{display:block;font-size:34px;line-height:1.2;font-variant-numeric:tabular-nums}.stat span{color:var(--muted);font-size:14px}
+.stat.ok b{color:var(--ok)}.stat.hold b{color:var(--hold)}.stat.bad b{color:var(--bad)}
+.steps{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+figure{margin:0;min-width:0}.step img,.pair img,.rob img{border-radius:6px}
+.step figcaption{display:grid;gap:2px;margin-top:8px}.step span,.pair figcaption,.rob figcaption{color:var(--muted);font-size:15px}
+.legend{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;font-size:15px}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:6px;vertical-align:-2px}
+.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;min-width:0;padding-bottom:12px}
+.card ul{list-style:none;margin:0;padding:0 14px;display:grid;gap:4px}
+.card li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;padding:4px 8px;border-radius:4px;font-size:14px}
+.card li.ok{background:var(--ok-bg)}.card li.hold{background:var(--hold-bg)}
+.issue{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:20px;display:grid;gap:12px}
+.issue+.issue{margin-top:16px}.issue h3{margin:0;font-size:18px}
+.tag{display:inline-block;font-size:13px;font-weight:700;padding:1px 8px;border-radius:4px;margin-right:8px}
+.tag.bad{background:var(--bad-bg);color:var(--bad)}.tag.hold{background:var(--hold-bg);color:var(--hold)}
+.pair{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.pair figcaption{margin-top:4px}
+.rob{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.rob figcaption{margin-top:4px;text-align:center}
+ol{margin:0;padding-left:22px;display:grid;gap:6px;max-width:65ch}
+@media(max-width:720px){.stats,.rob{grid-template-columns:repeat(2,1fr)}.steps,.cards,.pair{grid-template-columns:1fr}}
+</style>
+<main>
+<header>
+<h1>책상 위 물체 인식 결과</h1>
+<p class="lead">로봇 카메라로 찍은 사진 10장을 AI에게 보여주고, 물체를 찾아서 실제 크기와 위치까지 계산하게 했습니다.</p>
+<div class="stats">
+<div class="stat"><b>27 / 27</b><span>찾으라고 한 물체를 찾은 수</span></div>
+<div class="stat ok"><b>17</b><span>통과: 계산에 쓸 정보가 충분함</span></div>
+<div class="stat hold"><b>10</b><span>보류: 정보가 부족해 다시 봐야 함</span></div>
+<div class="stat bad"><b>2 / 2</b><span>없는 물체를 있다고 답한 횟수</span></div>
+</div>
+<p class="sub" style="margin-top:14px">"통과"는 정답이라는 뜻이 아닙니다. 아직 줄자로 잰 실제 값과 비교하지 않았습니다.</p>
+</header>
+<section><h2>어떻게 동작하나요</h2><p class="sub">사진 한 장이 거치는 4단계입니다.</p><div class="steps">{{STEPS}}</div></section>
+<section><h2>사진 10장 결과</h2><p class="sub">색칠된 부분이 AI가 물체라고 판단한 영역입니다.</p>
+<div class="legend"><span><i style="background:#22c55e"></i>통과</span><span><i style="background:#f59e0b"></i>보류</span></div>
+<div class="cards">{{CARDS}}</div></section>
+<section><h2>발견한 문제 3가지</h2><p class="sub">심각한 순서입니다.</p>
+<div class="issue"><h3><span class="tag bad">가장 중요</span>없는 물체를 있다고 답합니다</h3><p>리모컨이 없는 사진 2장에서 리모컨을 찾으라고 했더니, AI가 "없다"고 답하지 않고 2번 모두 다른 것을 가리켰습니다. 로봇이었다면 엉뚱한 물체를 리모컨으로 알고 집으러 갔을 것입니다. 찾은 물체가 정말 맞는지 한 번 더 확인하는 단계가 필요합니다.</p><div class="pair"><figure><img src="{{FALSE7}}" alt="07번 사진의 잘못된 검출" loading="lazy"><figcaption>07번: 뒤쪽 어두운 천 위의 흰 고리 모양을 가리킴</figcaption></figure><figure><img src="{{FALSE8}}" alt="08번 사진의 잘못된 검출" loading="lazy"><figcaption>08번: 뒤쪽 컵을 리모컨이라고 답함</figcaption></figure></div></div>
+<div class="issue"><h3><span class="tag hold">컵 8개 모두 보류</span>검은 컵은 거리를 잘 못 잽니다</h3><p>이 카메라는 어둡고 반짝이는 표면의 거리를 재기 어렵습니다. 아래 오른쪽 사진의 빨간 부분이 거리를 재지 못한 자리입니다. 구멍을 추측으로 메우지 않고 보류로 남겼습니다.</p><div class="pair"><figure><img src="{{CUP_PHOTO}}" alt="08번 원본 사진" loading="lazy"><figcaption>원본 사진</figcaption></figure><figure><img src="{{CUP_HOLE}}" alt="거리 측정 결과" loading="lazy"><figcaption>초록: 거리를 잰 곳, 빨강: 못 잰 곳</figcaption></figure></div></div>
+<div class="issue"><h3><span class="tag hold">마커펜 4개 중 2개 보류</span>펜이 조각으로 끊겨 보입니다</h3><p>거리 정보가 중간에 끊기면 펜 하나가 두 조각처럼 보여서, 한 조각의 길이만 재게 됩니다. 처음에는 이런 경우도 통과시키고 있어서, 조각나면 보류하도록 규칙을 고쳤습니다.</p><div class="pair"><figure><img src="{{M_BAD}}" alt="조각난 마커펜" loading="lazy"><figcaption>03번: 조각남. 초록 부분만 재서 7.8cm로 나옴 (보류)</figcaption></figure><figure><img src="{{M_GOOD}}" alt="온전한 마커펜" loading="lazy"><figcaption>04번: 온전함. 14.8cm로 나옴 (통과)</figcaption></figure></div></div>
+</section>
+<section><h2>사진 상태가 나빠도 찾을까요</h2><p class="sub">사진을 일부러 망가뜨려 다시 시켜봤습니다. 네 가지 모두 원본과 같은 위치에서 27개를 전부 다시 찾았습니다. 아래는 9번 사진 예시입니다.</p><div class="rob">{{ROB}}</div></section>
+<section><h2>이번 결과로 아직 말할 수 없는 것</h2><p class="sub">사진이 한 책상, 비슷한 거리, 같은 각도에서만 찍혔습니다.</p>
+<ol><li>실제로 얼마나 정확한지: 줄자로 잰 값이 없어 오차를 모릅니다.</li><li>다른 거리, 다른 조명, 다른 가구에서도 되는지: 그런 사진이 아직 없습니다.</li><li>로봇이 실제로 집을 수 있는지: 지금은 카메라 기준 위치까지만 계산합니다.</li></ol></section>
+</main>

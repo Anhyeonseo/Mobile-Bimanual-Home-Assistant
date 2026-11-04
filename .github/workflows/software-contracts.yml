@@ -92,6 +92,14 @@ jobs:
           for fault in sensor_loss reboot load_loss; do
             python tools/run/run_fetch_stack.py --fault "$fault"
           done
+      - name: Verify studio task lifecycle and cancellation scenarios
+        run: python tools/run/dev_lab.py suite --output output/studio-lab
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: studio-lab-reports
+          path: output/studio-lab
+          if-no-files-found: ignore
       - name: Generate a non-executable fetch plan
         env:
           PYTHONPATH: ros2_ws/src/home_robot_tasks

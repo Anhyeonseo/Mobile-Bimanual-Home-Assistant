@@ -1,0 +1,4 @@
+# In addition to requirements/qwen3-vl.txt and the locally built PointNet2 extension.
+transforms3d>=0.4,<0.5
+# Official graspnetAPI is installed with --no-deps: its legacy pins conflict with Python 3.12.
+# See docs/QWEN3_VL.md for the tested source and local build environment.

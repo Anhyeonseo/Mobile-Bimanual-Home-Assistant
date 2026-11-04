@@ -1,0 +1,13 @@
+{
+  "index": 3,
+  "category": "similar_objects",
+  "objects": [
+    "remote control",
+    "marker pen",
+    "utility knife"
+  ],
+  "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T110600_431147Z",
+  "captured_at_utc": "2026-11-01T11:06:00.394906+00:00",
+  "visual_check": "Utility knife left, remote center, marker pen right; all within frame and separated.",
+  "status": "captured"
+}

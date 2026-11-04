@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "mode": "virtual",
+  "description": "Illustrative camera-to-arm layout, not a measured calibration or an IK solution.",
+  "arm": "left",
+  "camera_translation_m": [0.12, -0.10, 0.47],
+  "camera_rpy_degrees": [180.0, 0.0, -90.0],
+  "joint_positions_degrees": {
+    "base": 0.0,
+    "shoulder": 0.0,
+    "elbow": 0.0,
+    "wrist_flex": 0.0,
+    "wrist_roll": 0.0,
+    "gripper": 35.0
+  }
+}

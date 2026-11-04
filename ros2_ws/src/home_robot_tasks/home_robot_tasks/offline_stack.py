@@ -54,7 +54,7 @@ class SyntheticPort:
     def result(self,g):
         if self.role=='detector':
             if self.plant.hidden: return []
-            return [ImageDetection('remote_control',.95,((20,18),(40,18),(40,30),(20,30)))]
+            return [ImageDetection(self.plant.object_id,.95,((20,18),(40,18),(40,30),(20,30)))]
         if self.role=='planner':return (self.entries[g]['parameters']['task']['operation'],)
         raise RuntimeError('no result for this port')
 
@@ -82,6 +82,11 @@ class OfflineStack:
     def __init__(self, config, world, map_document, *, navigation=None, planner=None, boot_id=42, guarded_navigation=False):
         if config.get('mode')!='simulation' or config.get('schema_version')!=1:
             raise ValueError('explicit simulation configuration required')
+        scene = config.get('synthetic_scene', {})
+        self.object_id = scene.get('object_id', 'remote_control')
+        self.destination_place = scene.get('destination_place', 'bedroom_drop_zone')
+        if self.object_id not in world['objects'] or self.destination_place not in world['places']:
+            raise ValueError('synthetic scene must use registered object and destination')
         self.now=1.;self.seq=0;self.boot=boot_id;self.xy_yaw=(1.5,1.5,0.)
         self.velocity=(0.,0.,0.);self.height=10000;self.lift_speed=0.;self.held=False
         self.hidden=False;self.sensor_loss=False;self.scene_revision='scene-1';self.attached=None
@@ -89,7 +94,7 @@ class OfflineStack:
         self.state=RobotStateStore(config['state'],self.clock)
         self.evidence=EvidenceProducer(self.clock,boot_id=boot_id,profile_sha256='a'*64,
             maximum_age_s=config['state']['maximum_age_s'],maximum_skew_s=.05)
-        self.payload=PayloadMonitor(**config['payload']);self.payload.expect('empty','remote_control',self.now)
+        self.payload=PayloadMonitor(**config['payload']);self.payload.expect('empty',self.object_id,self.now)
         self.camera=StationaryRGBD(CapturePolicy(**config['camera']))
         self.surface=SurfaceObserver(self.camera,self.state.motion,self.clock,
             maximum_residual_m=.01,minimum_span_m=.1,maximum_tilt_rad=.3,destination_radius_m=.2)
@@ -112,7 +117,7 @@ class OfflineStack:
             clock=self.clock,scene_revision=lambda:self.scene_revision,
             maintenance=(self.guarded_navigation.maintain,) if guarded_navigation else (),
             manipulation_factory=self.manipulation_factory,
-            surface_sampler=SurfaceSampler({'bedroom_drop_zone':(24,16,40,32)}))
+            surface_sampler=SurfaceSampler({place:(24,16,40,32) for place in config['catalog']['places']}))
         self.runtime=self.assembly.runtime
 
     def manipulation_factory(self, *, motion, arm, monitor, clock, catalog):
@@ -155,8 +160,8 @@ class OfflineStack:
             self.state.fault=str(error)
             raise
         self.payload.observe_grip(GripMeasurement(self.seq,self.now,15 if self.held else 45,40 if self.held else 0,True),self.now)
-        self.payload.observe_vision(PayloadObservation(self.seq,self.now,'remote_control','held' if self.held else 'empty',
-            'bedroom_drop_zone',not self.held,self.camera.policy.camera_frame),self.now)
+        self.payload.observe_vision(PayloadObservation(self.seq,self.now,self.object_id,'held' if self.held else 'empty',
+            self.destination_place,not self.held,self.camera.policy.camera_frame),self.now)
         self.payload.proof(self.now)
         p=self.camera.policy
         frame=RGBDFrame(f'frame-{self.seq}',self.now,self.state.motion().pose_revision,p.camera_frame,p.calibration_id,
@@ -173,9 +178,14 @@ class OfflineStack:
         self.observe()
         return self.runtime.tick()
 
-    def run(self,request,*,cancel_step=None,fault=None):
+    def run(self,request,*,cancel_step=None,fault=None,on_tick=None):
+        if fault not in (None, 'sensor_loss', 'reboot', 'load_loss'):
+            raise ValueError('unknown synthetic fault')
+        if cancel_step is not None and (type(cancel_step) is not int or not 0 <= cancel_step < 15):
+            raise ValueError('cancel_step must be within 0..14')
         self.runtime.submit(request)
         task=self.runtime.app.tasks[request['request_id']]
+        if on_tick is not None:on_tick(self,task.result())
         injected=False
         for _ in range(6200):
             if not injected and task.state=='RUNNING':
@@ -189,6 +199,7 @@ class OfflineStack:
             try:self.tick()
             except ValueError as error:
                 self.runtime.fault=str(error);self.runtime.tick()
+            if on_tick is not None:on_tick(self,task.result())
             if task.state in task.TERMINAL or task.state=='STOP_UNCONFIRMED':break
         manipulation = self.assembly.manipulation
         stages = [h for goal in manipulation.sequence.entries for h in manipulation.history(goal)]

@@ -1,5 +1,10 @@
 # Python 의존성
 
+실물 없는 원룸 개발은 `offline.lock.txt`를 설치한 `.venv-offline`을 사용한다.
+Qwen/SAM/GraspNet GPU 추론은 별도 `.venv-qwen3-vl`을 사용한다.
+환경 확인·FSM 일괄 실행·RGB-D 기록 검사·GPU 전체 실행은
+[오프라인 개발 안내](../docs/OFFLINE_DEVELOPMENT.md)를 따른다.
+
 `host.txt`는 하드웨어 없는 Python 시험과 설정 검사에 사용한다. ROS 2 Jazzy, colcon, CMake와 ARM 컴파일러는 운영체제에서 별도로 설치한다. RGB-D 실험은 아래 별도 환경을 사용하며 LiDAR·통합 모델 런타임은 별도 선정한다.
 
 현재 실물 제어 시험은 Pi 5/Ubuntu 24.04.3이다. D415 물체 탐지·분할은 Jetson Orin Nano Super에서 독립 실행을 검증했으며 제어 런타임의 Jetson 전환은 별도다.

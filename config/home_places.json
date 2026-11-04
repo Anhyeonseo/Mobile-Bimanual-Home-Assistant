@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "실제 장소의 이름만 등록한다. SLAM 지도, 가구 위치와 로봇 정차 위치는 측정 후 입력한다.",
+  "places": [
+    {
+      "place_id": "desk", "label": "큰 책상", "aliases": ["큰책상", "책상"],
+      "room_id": null, "map": null, "furniture_pose": null, "stop_pose": null, "surface_height_m": null
+    },
+    {
+      "place_id": "coffee_table", "label": "탁상", "aliases": [],
+      "room_id": null, "map": null, "furniture_pose": null, "stop_pose": null, "surface_height_m": null
+    },
+    {
+      "place_id": "mini_table", "label": "미니 테이블", "aliases": ["미니테이블"],
+      "room_id": null, "map": null, "furniture_pose": null, "stop_pose": null, "surface_height_m": null
+    },
+    {
+      "place_id": "sofa", "label": "소파", "aliases": ["쇼파"],
+      "room_id": null, "map": null, "furniture_pose": null, "stop_pose": null, "surface_height_m": null
+    },
+    {
+      "place_id": "sink", "label": "싱크대", "aliases": [],
+      "room_id": null, "map": null, "furniture_pose": null, "stop_pose": null, "surface_height_m": null
+    },
+    {
+      "place_id": "trash_bin", "label": "쓰레기통", "aliases": ["휴지통"],
+      "room_id": null, "map": null, "furniture_pose": null, "stop_pose": null, "surface_height_m": null
+    }
+  ]
+}

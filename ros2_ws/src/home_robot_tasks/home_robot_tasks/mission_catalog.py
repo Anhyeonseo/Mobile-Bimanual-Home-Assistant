@@ -160,7 +160,7 @@ class MissionCatalog:
             self.navigation_goal = deepcopy(parameters['goal'])
             return deepcopy(parameters)
         if skill in ('navigate', 'navigate_with_load') or skill.startswith('align_'):
-            if skill == 'navigate': place = self.world['rooms'][parameters['room']]['search_locations'][0]
+            if skill == 'navigate': place = parameters.get('source_place') or self.world['rooms'][parameters['room']]['search_locations'][0]
             elif skill == 'align_for_pick': place = self.source_place
             else: place = parameters['destination_place']
             if place not in self.doc['places']: raise InvalidTask('unregistered approach')
