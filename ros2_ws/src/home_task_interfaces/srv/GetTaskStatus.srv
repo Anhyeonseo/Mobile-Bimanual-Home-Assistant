@@ -1,0 +1,6 @@
+# Empty task_id returns the manager snapshot; otherwise return a retained task.
+string task_id
+---
+bool found
+string status_json
+string message

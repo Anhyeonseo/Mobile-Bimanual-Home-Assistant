@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "request_id": "pick-001",
+  "operation": "pick",
+  "target": {"object": "remote", "color": "black", "location": "desk"}
+}

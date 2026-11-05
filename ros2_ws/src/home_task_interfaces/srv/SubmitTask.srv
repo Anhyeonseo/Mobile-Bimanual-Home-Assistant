@@ -1,0 +1,6 @@
+string json_request
+---
+bool accepted
+string task_id
+string message
+string status_json

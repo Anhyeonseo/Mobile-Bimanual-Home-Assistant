@@ -1,0 +1,6 @@
+string task_id
+---
+# accepted means stop requested, not stop confirmed. Inspect status_json.
+bool accepted
+string message
+string status_json

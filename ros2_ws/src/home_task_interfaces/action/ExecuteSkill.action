@@ -1,0 +1,16 @@
+# Prototype contract: servers must explicitly identify synthetic evidence.
+string run_id
+string goal_id
+string skill
+string parameters_json
+---
+string goal_id
+bool simulated
+bool success
+string conditions_json
+string output_json
+string reason
+---
+string goal_id
+bool simulated
+string conditions_json

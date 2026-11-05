@@ -1,0 +1,9 @@
+# Query whole-task stop evidence AFTER all dispatched actions have terminated.
+# Cancel acceptance alone is never stop evidence.
+string run_id
+bool preserve_load
+---
+string run_id
+bool simulated
+bool stopped
+string conditions_json
