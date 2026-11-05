@@ -46,18 +46,18 @@ def receive(port, seconds):
     raise RuntimeError(f"firmware reply timeout; partial_bytes={len(data)}; partial={bytes(data[:160])!r}")
 
 
-def inspect(port):
+def inspect(port, expected_info=None):
     port.reset_input_buffer()
     port._lift_reply_buffer = bytearray()
     send(port, b"INFO\n")
     info = receive(port, 2)
-    if info != INFO: raise RuntimeError("리프트 전용 펌웨어가 아닙니다. 이동하지 않았습니다.")
+    if info != (INFO if expected_info is None else expected_info): raise RuntimeError("리프트 전용 펌웨어가 아닙니다. 이동하지 않았습니다.")
     return info
 
 
-def link_check(port, path):
+def link_check(port, path, expected_info=None):
     """Motor-free check: overlapping host commands while MCU deliberately waits."""
-    inspect(port)
+    inspect(port, expected_info)
     send(port, b"STATUS\n"); before = receive(port, 2)
     if before.get("armed") is not False or before.get("fault") is not False:
         raise RuntimeError("통신 검사는 오류 없는 대기 상태에서만 가능합니다.")
@@ -183,7 +183,7 @@ class StartupNotStationary(RuntimeError):
         self.reply = reply
 
 
-def arm_when_stationary(port, nonce, test, record):
+def arm_when_stationary(port, nonce, test, record, *, allow_holding_retry=False):
     """Retry only a proven pre-enable rejection; never retry uncertain ARM."""
     send(port, b"STATUS\n")
     baseline = receive(port, 2); record(baseline)
@@ -195,10 +195,25 @@ def arm_when_stationary(port, nonce, test, record):
     for attempt in range(20):
         send(port, frame(f"{'TEST' if test else 'ARM'} {nonce:08X}"))
         reply = receive(port, 2); record(reply)
+        holding_unchanged = (
+            allow_holding_retry and baseline.get('stop_confirmed') is True
+            and baseline.get('torque_raw') == reply.get('torque_raw') == 1
+            and baseline.get('goal_raw') == 0
+            and type(baseline.get('reference_id')) is int
+            and baseline['reference_id'] != 0
+            and reply.get('reference_id') == baseline['reference_id']
+            and reply.get('session') == baseline.get('session')
+            and type(baseline.get('nonzero_speed_writes')) is int
+            and reply.get('nonzero_speed_writes') == baseline['nonzero_speed_writes']
+            and reply.get('telemetry_valid') is True
+            and type(baseline.get('relative_counts')) is int
+            and type(reply.get('relative_counts')) is int
+            and abs(reply['relative_counts'] - baseline['relative_counts']) <= 2)
         retryable = (reply.get("type") == "error"
                      and reply.get("reason") == "ARM_NOT_STATIONARY"
                      and reply.get("armed") is False and reply.get("fault") is False
-                     and reply.get("torque_raw") == 0 and reply.get("goal_raw") == 0
+                     and (reply.get("torque_raw") == 0 or holding_unchanged)
+                     and reply.get("goal_raw") == 0
                      and reply.get("motor_write_count") == baseline["motor_write_count"])
         if not retryable:
             validate(reply, "armed", nonce, 0)

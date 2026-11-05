@@ -211,7 +211,10 @@ def run(args, detector=None, frame_callback=None, stop_event=None):
             "coordinate_frame": "color_camera_optical_frame",
             "axes": "X right, Y down, Z forward; metres",
             "robot_transform": None,
-            "depth_capture": {"width": args.depth_width, "height": args.depth_height, "fps": args.fps},
+            "depth_capture": {"width": native_intrinsics.width, "height": native_intrinsics.height,
+                              "fps": profile.get_stream(rs.stream.depth).fps(), "format": "z16"},
+            "color_capture": {"width": color_profile.width(), "height": color_profile.height(),
+                              "fps": color_profile.fps(), "format": "bgr8"},
             "depth_sensor_options": {name: sensor.get_option(getattr(rs.option, name)) for name in
                                      ("visual_preset", "emitter_enabled", "laser_power", "enable_auto_exposure")},
             "depth_preview_filter": preview_filter.describe(),

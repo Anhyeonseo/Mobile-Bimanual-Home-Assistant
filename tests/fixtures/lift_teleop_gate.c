@@ -29,7 +29,11 @@ int main(void){
         }
         for(unsigned id=0;id<256;id++)for(unsigned reg=0;reg<66;reg++)for(unsigned v=0;v<256;v++)
             check(api,id,reg,v,1,id==10&&((reg==33&&v==1)||((reg==40||reg==55)&&v<=1)),false);
-        for(unsigned v=0;v<65536;v++)check(api,10,46,v,2,v==0||v==100,false);
+        for(unsigned v=0;v<65536;v++)check(api,10,46,v,2,v==0||v==100
+#if HOST_LIFT_BIDIRECTIONAL
+            ||v==32868
+#endif
+            ,false);
         for(unsigned id=0;id<256;id++){check(api,id,46,100,2,id==10,false);check(api,id,42,100,2,false,false);}
         check(api,10,40,1,1,false,true);check(api,10,46,100,2,false,true);
     }

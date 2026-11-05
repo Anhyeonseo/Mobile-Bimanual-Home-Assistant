@@ -9,54 +9,139 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ros2_ws/src/home_robot_tasks"))
 
 
+GEOMETRY = ROOT / "config/home_assistant/official_geometry.json"
+
+
 def audit():
+    from home_robot_tasks.s2_commissioning import load_geometry, digest, POLICY
+    geometry = load_geometry(GEOMETRY)
     installation = json.loads((ROOT / "config/home_assistant/installation.development.json").read_text())
     lift = json.loads((ROOT / installation["lift"]["geometry"]).read_text())
+    camera_observation = installation["d415"].get("device_observation", {})
+    camera_recorded = camera_observation.get("status") == "recorded_metadata_validated"
+    nominal_retained = installation["d415"].get("development_transform_choice", {}).get("status") == "nominal_model_retained_by_operator"
+    from home_robot_tasks import s2_development as dev
+    profile = dev.build(ROOT)
+    integration_path=ROOT/'config/home_assistant/s2_integration.observed.json'
+    integration=json.loads(integration_path.read_text()) if integration_path.exists() else {}
+    integrated=(integration.get('status')=='development_integration_verified'
+                and integration.get('profile_id')==profile['calibration_id']
+                and integration.get('development_s2_complete') is True
+                and integration.get('motor_write_commands')==0
+                and integration.get('synchronized_coordinate_count',0)>0)
+    raw_verified=False
+    if integrated:
+        raw=ROOT/integration['source_report']
+        if raw.exists():
+            import hashlib
+            raw_verified=hashlib.sha256(raw.read_bytes()).hexdigest()==integration['source_report_sha256']
+            if not raw_verified:raise ValueError('integrated hardware evidence changed')
     return {
-        "stage": "S2", "hardware_commands": 0,
+        "stage": "S2", "status": "development_integration_verified" if integrated else "software_ready_pending_integrated_hardware_check",
+        "s2_complete": integrated, "development_s2_complete": integrated, "software_connection_complete": True,
+        "acceptance_scope": "operator-agreed nominal development coordinates; strict precision commissioning remains separate",
+        "historical_integration_evidence": integration,
+        "raw_integration_report_hash_verified_locally": raw_verified,
+        "strict_commissioning_passed": False, "hardware_commands": 0, "motion_authorized": False,
+        "robot_model": geometry["robot_model"], "arm_model": geometry["arm_model"],
+        "geometry_sha256": digest(geometry), "profile_id": profile["calibration_id"],
+        "official_sources": geometry["sources"],
         "camera_moves_with_lift": installation["d415"]["moves_with_lift"],
-        "lift_measured_travel_m": lift["maximum_height_um"] / 1e6,
-        "lift_measured_mm_per_turn": lift["measured_um_per_turn"] / 1000,
-        "confirmed_model": installation,
-        "measurement_groups": [
-            {"id": "base_reference", "needed": "베이스 기준점·정면 방향 정의"},
-            {"id": "mounts", "needed": "기준점에서 최저 상판과 양팔 장착 원점까지의 위치·방향"},
-            {"id": "home_tcp", "needed": "현재 양팔 Home과 기존 모델 영점 비교, 집게 끝 기준"},
-            {"id": "camera", "needed": "고정 카메라와 베이스에서 같은 점을 잰 보정·독립 확인 자료"},
+        "lift_historical_mm_per_turn": lift["measured_um_per_turn"] / 1000,
+        "lift_nominal_mm_per_turn": geometry["lift_nominal_m_per_turn"] * 1000,
+        "next_step": "S3_task_accuracy_and_grasp_development" if integrated else "power_off_then_switch_to_read_only_s2_observer",
+        "remaining_s2": [] if integrated else ["stationary integrated RGB-D + 13-axis acquisition on the robot",
+                         "fresh lift bottom / arm turn anchors for a live coordinate session"],
+        "additional_precision_measurements_required_now": False,
+        "deferred_to_s3": ["camera extrinsic task accuracy", "multi-pose TCP accuracy and historical direction verification"],
+        "current_sequence": [
+            {"id": "floor", "state": "operator_confirmed_approximate", "value_m": installation['base_reference']['floor_measurement']['clearance_m']},
+            {"id": "camera_device", "state": "recorded_metadata_validated" if camera_recorded else "pending_capture", "live_connection_checked_by_audit": False},
+            {"id": "camera_extrinsic", "state": "nominal_retained_precision_validation_deferred" if nominal_retained else "pending_independent_reference"},
+            {"id": "arm_home", "state": "both_arms_reference_captured_software_offsets_derived"},
+            {"id": "arm_mounts", "state": "official_shared_mesh_adapter_derived"},
+            {"id": "lift_model", "state": "CAD_contacts_and_approximate_up_down_observations_retained"},
+            {"id": "coordinate_software", "state": "FK_URDF_viewer_and_capture_time_contracts_connected"},
+            {"id": "live_session", "state": "stationary_integrated_capture_verified_session_closed" if integrated else "new_read_only_firmware_prepared_not_flashed"},
         ],
-        "reusable": ["SO101 link meshes and nominal link geometry",
-                     "Existing observation frame/time/revision validation",
-                     "Measured lift descent scale"],
-        "not_measured": ["Mobile simulation dimensions and mounts",
-                         "Legacy arm Home offsets on the current assembly",
-                         "Lift origin after restart and camera extrinsics"],
+        "strict_acceptance_policy_reference": POLICY,
+        "confirmed_installation": installation,
     }
+
+
+def read_profile(path):
+    value = json.loads(path.read_text())
+    return value.get("profile", value)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    survey = sub.add_parser("audit", help="show existing measurements and remaining survey groups")
+    survey = sub.add_parser("audit", help="official geometry and remaining physical evidence")
     survey.add_argument("--output", type=Path)
-    fit = sub.add_parser("fit-camera", help="fit explicit metre correspondences without device access")
+    evidence = sub.add_parser("camera-evidence", help="validate saved D415 SDK calibration; no device access")
+    evidence.add_argument("--snapshot", type=Path, required=True)
+    evidence.add_argument("--output", type=Path, required=True)
+    fit = sub.add_parser("fit-camera", help="standalone camera fit, no device access")
     fit.add_argument("--points", type=Path, required=True)
     fit.add_argument("--output", type=Path, required=True)
+    prepare = sub.add_parser("prepare", help="create an unfilled physical evidence record")
+    prepare.add_argument("--output", type=Path, required=True)
+    check = sub.add_parser("commission", help="recompute calibration and independent acceptance")
+    check.add_argument("--record", type=Path, required=True)
+    check.add_argument("--output", type=Path, required=True)
+    for name in ("observe", "export-urdf", "rebind-origin"):
+        cmd = sub.add_parser(name)
+        cmd.add_argument("--profile", type=Path, required=True)
+        cmd.add_argument("--output", type=Path, required=True)
+        if name != "rebind-origin":
+            cmd.add_argument("--allow-simulation", action="store_true")
+        if name == "observe":
+            cmd.add_argument("--snapshot", type=Path, required=True)
+            cmd.add_argument("--now-s", type=float, required=True, help="same clock as snapshot")
+        elif name == "rebind-origin":
+            cmd.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.output and args.output.exists():
             raise ValueError("output already exists; use a new filename")
+        from home_robot_tasks import s2_commissioning as s2
+        geometry = s2.load_geometry(GEOMETRY)
         if args.command == "audit":
             result = audit()
-        else:
+        elif args.command == "camera-evidence":
+            import hashlib
+            from home_robot_tasks.camera_evidence import from_metadata
+            metadata_path=args.snapshot/'metadata.json'
+            result=from_metadata(json.loads(metadata_path.read_text()))
+            result['source_files_sha256']={name:hashlib.sha256((args.snapshot/name).read_bytes()).hexdigest()
+                for name in ('metadata.json','color.png','depth_aligned.png','depth_native.png')}
+        elif args.command == "fit-camera":
             from home_robot_tasks.camera_registration import fit_fixed_camera
             result = fit_fixed_camera(json.loads(args.points.read_text()))
-        encoded = json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+        elif args.command == "prepare":
+            result = s2.template(geometry)
+        elif args.command == "commission":
+            result = s2.commission(json.loads(args.record.read_text()), geometry)
+        elif args.command == "observe":
+            result = s2.observe(read_profile(args.profile), geometry, json.loads(args.snapshot.read_text()),
+                                now_s=args.now_s, allow_simulation=args.allow_simulation)
+        elif args.command == "export-urdf":
+            result = s2.export_urdf(read_profile(args.profile), geometry, allow_simulation=args.allow_simulation)
+        else:
+            result = s2.rebind_origin(read_profile(args.profile), json.loads(args.evidence.read_text()))
+        encoded = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             with args.output.open("x") as stream:
                 stream.write(encoded)
         print(encoded, end="")
-        return 2 if result.get("within_threshold") is False else 0
+        if isinstance(result, dict):
+            if result.get("within_threshold") is False or result.get("status") == "rejected":
+                return 2
+            if args.command == "commission" and result.get("status") == "needs_physical_checks":
+                return 2
+        return 0
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(f"S2 확인 실패: {error}", file=sys.stderr)
         return 2

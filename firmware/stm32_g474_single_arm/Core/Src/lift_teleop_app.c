@@ -9,9 +9,20 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#ifndef HOST_LIFT_BIDIRECTIONAL
+#define HOST_LIFT_BIDIRECTIONAL 0
+#endif
 #define ID 10u
+#define UP_SPEED_RAW (0x8000u | 100u)
+#define TOP_GUARD_COUNTS 30000
+#define BOTTOM_GUARD_COUNTS 256
+#if HOST_LIFT_BIDIRECTIONAL
+static uint32_t reference_id;
+static int32_t direction_start;
+#endif
 #define LEASE_MS 400u
 #define SAMPLE_MS 20u
+#define TEST_PULSE_MS (HOST_LIFT_BIDIRECTIONAL ? 2000u : 150u)
 #define MAX_GAP_MS 200u
 static UART_HandleTypeDef *host;
 static bool armed, fault, prepared, velocity_known, stop_confirmed, tracking;
@@ -64,7 +75,14 @@ static bool sample(void){
         if((uint32_t)(now-sample_tick)>MAX_GAP_MS || abs(delta)>256){reason="ENCODER_CONTINUITY_LOST";return false;}
         if(total>10000000 || total< -10000000){reason="ENCODER_RANGE";return false;}
         total+=delta;
+        #if HOST_LIFT_BIDIRECTIONAL
+        if((goal==100 && total < direction_start-16) ||
+           (goal==(int)UP_SPEED_RAW && total > direction_start+16)){
+            reason="UNEXPECTED_REVERSE_MOTION";return false;
+        }
+#else
         if(goal==100 && total < -16){reason="UNEXPECTED_REVERSE_MOTION";return false;}
+#endif
     }
     position=p;speed=s;sample_tick=now;sample_count++;
     load_raw=b[4]|(b[5]<<8);voltage_raw=b[6];temperature_c=b[7];
@@ -79,6 +97,9 @@ static void reply(const char *type){
         "\"position_raw\":%d,\"speed_raw\":%d,\"goal_raw\":%d,\"torque_raw\":%d,"
         "\"relative_counts\":%ld,\"sample_tick\":%lu,\"sample_count\":%lu,\"test_only\":%s,"
         "\"motor_write_count\":%lu,\"nonzero_speed_writes\":%lu,"
+        #if HOST_LIFT_BIDIRECTIONAL
+        "\"reference_id\":%lu,"
+#endif
         "\"first_fault_reason\":\"%s\",\"checked_mode\":%d,\"checked_torque\":%d,"
         "\"failure_register\":%d,\"failure_hal_status\":%d,\"bus_failure_reason\":%u,"
         "\"bus_uart_error\":%lu,\"bus_servo_status\":%u,"
@@ -89,6 +110,9 @@ static void reply(const char *type){
         position,speed,goal,torque,(long)total,(unsigned long)sample_tick,
         (unsigned long)sample_count,test_only?"true":"false",
         (unsigned long)motor_write_count,(unsigned long)nonzero_speed_writes,
+        #if HOST_LIFT_BIDIRECTIONAL
+        (unsigned long)reference_id,
+#endif
         first_fault_reason,checked_mode,checked_torque,failure_register,failure_hal_status,
         (unsigned)first_bus_failure.reason,(unsigned long)first_bus_failure.uart_error_code,
         (unsigned)first_bus_failure.servo_status,telemetry_valid?"true":"false",
@@ -100,6 +124,9 @@ static void reply(const char *type){
 static void halt(bool latch,const char *why){
     if(latch && !fault)first_fault_reason=why;
     armed=false;fault|=latch;reason=why;stop_confirmed=false;
+#if HOST_LIFT_BIDIRECTIONAL
+    if(latch){reference_id=0;tracking=false;}
+#endif
     if(velocity_known){int mode=read_reg(33,1);if(mode>=0 && mode!=1)velocity_known=false;}
     if(!velocity_known){reply(latch?"fault":"stopped");return;}
     bool sent=write_checked(46,0,2);goal=read_reg(46,2);torque=read_reg(40,1);
@@ -121,10 +148,16 @@ static bool poll_safety(void){
         used=0;discard=true;halt(true,"HOST_RX_ERROR");return false;
     }
     if((uint32_t)(HAL_GetTick()-last_command)>=LEASE_MS){halt(true,"HOST_TIMEOUT");return false;}
-    if(test_only && pulse_started && (uint32_t)(HAL_GetTick()-pulse_start)>=150u){halt(false,"TEST_PULSE_COMPLETE");return false;}
+    if(test_only && pulse_started && (uint32_t)(HAL_GetTick()-pulse_start)>=TEST_PULSE_MS){halt(false,"TEST_PULSE_COMPLETE");return false;}
     if((uint32_t)(HAL_GetTick()-sample_tick)>=SAMPLE_MS){
         if(!sample()){const char *why=reason;tracking=false;halt(true,why);return false;}
     }
+#if HOST_LIFT_BIDIRECTIONAL
+    if((goal==(int)UP_SPEED_RAW && total<=-TOP_GUARD_COUNTS) ||
+       (goal==100 && total>=-BOTTOM_GUARD_COUNTS)){
+        halt(false,goal==100?"LOWER_GUARD":"UPPER_GUARD");return false;
+    }
+#endif
     return armed;
 }
 static void snapshot(void){
@@ -136,8 +169,15 @@ static void snapshot(void){
         if(Servo_ReadData(ID,(uint8_t)offset,(uint8_t)n,b+offset)!=HAL_OK){ok=false;break;}
     }
     torque=read_reg(40,1);goal=read_reg(46,2);
+#if !HOST_LIFT_BIDIRECTIONAL
     tracking=false;
-    if(!ok || !sample()){reason="SNAPSHOT_FAILED";reply("error");return;}
+#endif
+    if(!ok || !sample()){
+#if HOST_LIFT_BIDIRECTIONAL
+        if(reference_id){reference_id=0;tracking=false;fault=true;}
+#endif
+        reason="SNAPSHOT_FAILED";reply("error");return;
+    }
     char line[768];int n=snprintf(line,sizeof(line),"{\"type\":\"snapshot\",\"id\":10,\"torque\":%d,\"goal\":%d,\"position\":%d,\"speed\":%d,\"lock\":%d,\"eeprom\":[",torque,goal,position,speed,read_reg(55,1));
     for(unsigned i=0;i<40;i++)n+=snprintf(line+n,sizeof(line)-(unsigned)n,"%s%u",i?",":"",b[i]);
     snprintf(line+n,sizeof(line)-(unsigned)n,"],\"telemetry_valid\":%s,\"sample_tick\":%lu,\"telemetry_age_ms\":%lu,\"load_raw\":%d,\"voltage_raw\":%d,\"temperature_c\":%d,\"current_raw\":%d,\"motor_status_raw\":%d}\r\n",
@@ -169,9 +209,26 @@ static void prepare(void){
     fault=!prepared;reason=prepared?"PREPARED_TORQUE_OFF":"PREPARE_ZERO_OFF_FAILED";
     goal=read_reg(46,2);torque=read_reg(40,1);reply(prepared?"prepared":"error");
 }
+#if HOST_LIFT_BIDIRECTIONAL
+static void set_reference(uint32_t nonce){
+    if(armed || fault || reference_id){reason="REFERENCE_NOT_ALLOWED";reply("error");return;}
+    if(!identity() || read_reg(33,1)!=1 || read_reg(46,2)!=0){reason="REFERENCE_MODE_GOAL";reply("error");return;}
+    torque=read_reg(40,1);
+    if(torque!=0 && torque!=1){reason="REFERENCE_TORQUE_READ";reply("error");return;}
+    tracking=false;
+    if(!sample() || (speed&0x7fff)!=0){reason="REFERENCE_NOT_STATIONARY";reply("error");return;}
+    int anchor=position;HAL_Delay(40);
+    if(!sample() || (speed&0x7fff)!=0 || abs(position-anchor)>2){reason="REFERENCE_NOT_STATIONARY";reply("error");return;}
+    total=0;goal=0;reference_id=nonce;tracking=true;direction_start=0;
+    reason="BOTTOM_REFERENCED";reply("referenced");
+}
+#endif
 static void enable(uint32_t nonce,bool test){
     if(armed){halt(true,"DUPLICATE_ARM");return;}
     if(fault){reply("fault");return;}
+#if HOST_LIFT_BIDIRECTIONAL
+    if(!reference_id){reason="BOTTOM_REFERENCE_REQUIRED";reply("error");return;}
+#endif
     bus_failure_recorded=false;memset(&first_bus_failure,0,sizeof(first_bus_failure));
     failure_register=failure_hal_status=checked_mode=checked_torque=-1;
     first_fault_reason="NONE";
@@ -180,13 +237,19 @@ static void enable(uint32_t nonce,bool test){
     if(!identity() || read_reg(33,1)!=1 || read_reg(55,1)!=1 || read_reg(46,2)!=0){reason="ARM_ID_MODE_LOCK_GOAL";reply("error");return;}
     torque=read_reg(40,1);
     if(torque!=0 && torque!=1){reason="ARM_TORQUE_READ";reply("error");return;}
+#if !HOST_LIFT_BIDIRECTIONAL
     tracking=false;
+#endif
     if(!sample() || (speed&0x7fff)!=0){reason="ARM_NOT_STATIONARY";reply("error");return;}
     int anchor=position;HAL_Delay(40);
     if(!sample() || (speed&0x7fff)!=0 || abs(position-anchor)>2){reason="ARM_NOT_STATIONARY";reply("error");return;}
     prepared=velocity_known=true;
     if(!write_checked(40,1,1)){halt(true,"TORQUE_ENABLE_FAILED");return;}
-    torque=1;goal=0;total=0;tracking=true;sample_tick=HAL_GetTick();
+    torque=1;goal=0;
+#if !HOST_LIFT_BIDIRECTIONAL
+    total=0;
+#endif
+    tracking=true;sample_tick=HAL_GetTick();
     session=nonce;sequence=0;test_only=test;pulse_started=false;
     armed=true;stop_confirmed=false;last_command=HAL_GetTick();reason="ARMED_ZERO";reply("armed");
 }
@@ -205,7 +268,7 @@ static bool frame_crc(unsigned prefix,unsigned length){
 }
 static void drive(uint32_t nonce,uint32_t seq,char motion){
     if(!poll_safety()){if(!armed)reply("inactive");return;}
-    if(nonce!=session || sequence==UINT32_MAX || seq!=sequence+1 || (motion!='D' && motion!='Z')){halt(true,"SESSION_SEQUENCE_OR_MOTION");return;}
+    if(nonce!=session || sequence==UINT32_MAX || seq!=sequence+1 || (motion!='D' && motion!='Z' && !(HOST_LIFT_BIDIRECTIONAL && motion=='U'))){halt(true,"SESSION_SEQUENCE_OR_MOTION");return;}
     /* IRQ arrival time prevents queued traffic from renewing a dead link. */
     last_command=frame_tick;sequence=seq;
     checked_torque=-1;checked_mode=read_reg(33,1);
@@ -215,22 +278,41 @@ static void drive(uint32_t nonce,uint32_t seq,char motion){
     if(checked_torque<0){halt(true,"TORQUE_READ_FAILED");return;}
     if(checked_torque!=1){halt(true,"TORQUE_CHANGED");return;}
     if(!poll_safety())return;
-    int requested=motion=='D'?100:0;
+    int requested=motion=='D'?100:motion=='U'?(int)UP_SPEED_RAW:0;
+#if HOST_LIFT_BIDIRECTIONAL
+    if((requested==100 && total>=-BOTTOM_GUARD_COUNTS) ||
+       (requested==(int)UP_SPEED_RAW && total<=-TOP_GUARD_COUNTS)){
+        halt(false,requested==100?"LOWER_GUARD":"UPPER_GUARD");return;
+    }
+    /* Reverse through a verified stop; never directly flip motor direction. */
+    if(goal && requested && goal!=requested){halt(false,"DIRECTION_CHANGE_REQUIRES_STOP");return;}
+#endif
     if(requested!=goal){
+#if HOST_LIFT_BIDIRECTIONAL
+        if(requested && !sample()){const char *why=reason;halt(true,why);return;}
+        if(requested && (speed&0x7fff)!=0){halt(false,"DIRECTION_START_NOT_STATIONARY");return;}
+#endif
         /* Start the test timer before the first possible nonzero write. */
         if(requested && !pulse_started){pulse_started=true;pulse_start=HAL_GetTick();}
         if(!write_checked(46,(unsigned)requested,2)){halt(true,"SPEED_WRITE_READBACK");return;}
         goal=requested;
+#if HOST_LIFT_BIDIRECTIONAL
+        direction_start=total;
+#endif
     }
     if(!poll_safety())return;
     if(!sample()){const char *why=reason;tracking=false;halt(true,why);return;}
-    reason=requested?"DOWN":"ZERO";reply("ack");
+    reason=requested==(int)UP_SPEED_RAW?"UP":requested?"DOWN":"ZERO";reply("ack");
 }
 static void dispatch(void){
     uint32_t nonce,seq;
     if(!strcmp(command,"STOP")){halt(false,"OPERATOR_STOP");return;}
     if(!strcmp(command,"INFO")){
+#if HOST_LIFT_BIDIRECTIONAL
+        send("{\"firmware\":\"lift-teleop-v5\",\"host_baud\":921600,\"id\":10,\"max_raw\":100,\"watchdog_ms\":400,\"sample_gap_ms\":200,\"down_only\":false,\"stop_keeps_torque\":true,\"bottom_guard_counts\":256,\"top_guard_counts\":30000}\r\n");return;
+#else
         send("{\"firmware\":\"lift-teleop-v4\",\"host_baud\":921600,\"id\":10,\"max_raw\":100,\"watchdog_ms\":400,\"sample_gap_ms\":200,\"down_only\":true,\"stop_keeps_torque\":true}\r\n");return;
+#endif
     }
     if(!strcmp(command,"STATUS")){reply("status");return;}
     if((uint32_t)(HAL_GetTick()-frame_tick)>=LEASE_MS){
@@ -244,6 +326,9 @@ static void dispatch(void){
         snprintf(line,sizeof(line),"{\"type\":\"echo\",\"nonce\":%lu,\"motor_write_count\":%lu}\r\n",(unsigned long)nonce,(unsigned long)motor_write_count);
         send(line);return;
     }
+#if HOST_LIFT_BIDIRECTIONAL
+    if(!memcmp(command,"REF ",4) && frame_crc(12,17) && hex(command+4,8,&nonce) && nonce){set_reference(nonce);return;}
+#endif
     if(!strcmp(command,"SNAP")){snapshot();return;}
     if(!memcmp(command,"PREP ",5) && frame_crc(13,18) && hex(command+5,8,&nonce) && nonce){prepare();return;}
     if(!memcmp(command,"ARM ",4) && frame_crc(12,17) && hex(command+4,8,&nonce) && nonce){enable(nonce,false);return;}
@@ -252,6 +337,9 @@ static void dispatch(void){
     if(armed)halt(true,"INVALID_FRAME");else{reason="INVALID_FRAME";reply("error");}
 }
 void SingleArmApp_Init(UART_HandleTypeDef *h,UART_HandleTypeDef *servo){
+#if HOST_LIFT_BIDIRECTIONAL
+    reference_id=0;direction_start=0;
+#endif
     host=h;armed=fault=prepared=velocity_known=stop_confirmed=tracking=false;
     setup_attempted=discard=test_only=pulse_started=false;
     session=sequence=last_command=sample_tick=sample_count=pulse_start=0;
@@ -266,8 +354,19 @@ void SingleArmApp_Init(UART_HandleTypeDef *h,UART_HandleTypeDef *servo){
 }
 void SingleArmApp_Process(void){
     (void)poll_safety();
+#if HOST_LIFT_BIDIRECTIONAL
+    /* Keep the bottom anchor continuous between operator sessions, including
+     * stopped/torque-off manual displacement. Loss requires a new reference. */
+    if(!armed && !fault && reference_id && (uint32_t)(HAL_GetTick()-sample_tick)>=SAMPLE_MS){
+        if(!sample()){const char *why=reason;halt(true,why);}
+    }
+#endif
     if(HostUartRx_TakeFault()){
-        used=0;discard=true;fault=true;reason="HOST_RX_ERROR";reply("fault");
+        used=0;discard=true;fault=true;reason="HOST_RX_ERROR";
+#if HOST_LIFT_BIDIRECTIONAL
+        reference_id=0;tracking=false;
+#endif
+        reply("fault");
     }
     /* The IRQ ring receives complete commands while servo reads/STOP block.
      * Polling the one-byte hardware register here used to drop bytes at 921600. */
@@ -285,7 +384,11 @@ void SingleArmApp_Process(void){
         }else if(!discard)command[used++]=(char)c;
         (void)poll_safety();
         if(HostUartRx_TakeFault()){
-            used=0;discard=true;fault=true;reason="HOST_RX_ERROR";reply("fault");
+            used=0;discard=true;fault=true;reason="HOST_RX_ERROR";
+#if HOST_LIFT_BIDIRECTIONAL
+        reference_id=0;tracking=false;
+#endif
+        reply("fault");
         }
     }
 }

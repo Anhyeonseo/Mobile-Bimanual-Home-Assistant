@@ -1,0 +1,1022 @@
+{
+  "schema_version": 1,
+  "robot_model": "alohamini1",
+  "arm_model": "SO-ARM101",
+  "geometry_sha256": "873a16f87cfddafd79dcc880cae26862d13614218c7cf81accd5793b4e28fc81",
+  "provenance": "measured",
+  "operator": null,
+  "assembly_revision": null,
+  "base_reference": null,
+  "units": "m",
+  "stock_parts_confirmed": null,
+  "camera": {
+    "schema_version": 1,
+    "units": "m",
+    "source_frame": "color_camera_optical_frame",
+    "target_frame": "base_link",
+    "mount_revision": null,
+    "base_reference": null,
+    "provenance": "measured",
+    "maximum_error_m": 0.01,
+    "fit": [
+      {
+        "id": "camera-fit-0",
+        "camera_xyz_m": [
+          null,
+          null,
+          null
+        ],
+        "base_xyz_m": [
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "id": "camera-fit-1",
+        "camera_xyz_m": [
+          null,
+          null,
+          null
+        ],
+        "base_xyz_m": [
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "id": "camera-fit-2",
+        "camera_xyz_m": [
+          null,
+          null,
+          null
+        ],
+        "base_xyz_m": [
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "id": "camera-fit-3",
+        "camera_xyz_m": [
+          null,
+          null,
+          null
+        ],
+        "base_xyz_m": [
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "id": "camera-fit-4",
+        "camera_xyz_m": [
+          null,
+          null,
+          null
+        ],
+        "base_xyz_m": [
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "id": "camera-fit-5",
+        "camera_xyz_m": [
+          null,
+          null,
+          null
+        ],
+        "base_xyz_m": [
+          null,
+          null,
+          null
+        ]
+      }
+    ],
+    "check": [
+      {
+        "id": "camera-check-0",
+        "camera_xyz_m": [
+          null,
+          null,
+          null
+        ],
+        "base_xyz_m": [
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "id": "camera-check-1",
+        "camera_xyz_m": [
+          null,
+          null,
+          null
+        ],
+        "base_xyz_m": [
+          null,
+          null,
+          null
+        ]
+      },
+      {
+        "id": "camera-check-2",
+        "camera_xyz_m": [
+          null,
+          null,
+          null
+        ],
+        "base_xyz_m": [
+          null,
+          null,
+          null
+        ]
+      }
+    ]
+  },
+  "camera_device": {
+    "device_id_hash": null,
+    "stream_profile_id": null,
+    "factory_calibration_sha256": null,
+    "fixed_to_base_confirmed": null,
+    "depth_checks": [
+      {
+        "reference_z_m": null,
+        "observed_z_m": null
+      },
+      {
+        "reference_z_m": null,
+        "observed_z_m": null
+      },
+      {
+        "reference_z_m": null,
+        "observed_z_m": null
+      }
+    ]
+  },
+  "live_checks": [
+    {
+      "capture_id": null,
+      "assembly_revision": null,
+      "camera_device": {
+        "device_id_hash": null,
+        "stream_profile_id": null,
+        "factory_calibration_sha256": null
+      },
+      "source_frame": "color_camera_optical_frame",
+      "session_id": null,
+      "origin_id": null,
+      "clock_id": null,
+      "received_s": null,
+      "camera_time_s": null,
+      "joints_time_s": null,
+      "lift_time_s": null,
+      "camera_xyz_m": [
+        null,
+        null,
+        null
+      ],
+      "lift_raw_unwrapped": null,
+      "raw": {
+        "left": {
+          "base": null,
+          "shoulder": null,
+          "elbow": null,
+          "wrist_flex": null,
+          "wrist_roll": null,
+          "gripper": null
+        },
+        "right": {
+          "base": null,
+          "shoulder": null,
+          "elbow": null,
+          "wrist_flex": null,
+          "wrist_roll": null,
+          "gripper": null
+        }
+      }
+    },
+    {
+      "capture_id": null,
+      "assembly_revision": null,
+      "camera_device": {
+        "device_id_hash": null,
+        "stream_profile_id": null,
+        "factory_calibration_sha256": null
+      },
+      "source_frame": "color_camera_optical_frame",
+      "session_id": null,
+      "origin_id": null,
+      "clock_id": null,
+      "received_s": null,
+      "camera_time_s": null,
+      "joints_time_s": null,
+      "lift_time_s": null,
+      "camera_xyz_m": [
+        null,
+        null,
+        null
+      ],
+      "lift_raw_unwrapped": null,
+      "raw": {
+        "left": {
+          "base": null,
+          "shoulder": null,
+          "elbow": null,
+          "wrist_flex": null,
+          "wrist_roll": null,
+          "gripper": null
+        },
+        "right": {
+          "base": null,
+          "shoulder": null,
+          "elbow": null,
+          "wrist_flex": null,
+          "wrist_roll": null,
+          "gripper": null
+        }
+      }
+    },
+    {
+      "capture_id": null,
+      "assembly_revision": null,
+      "camera_device": {
+        "device_id_hash": null,
+        "stream_profile_id": null,
+        "factory_calibration_sha256": null
+      },
+      "source_frame": "color_camera_optical_frame",
+      "session_id": null,
+      "origin_id": null,
+      "clock_id": null,
+      "received_s": null,
+      "camera_time_s": null,
+      "joints_time_s": null,
+      "lift_time_s": null,
+      "camera_xyz_m": [
+        null,
+        null,
+        null
+      ],
+      "lift_raw_unwrapped": null,
+      "raw": {
+        "left": {
+          "base": null,
+          "shoulder": null,
+          "elbow": null,
+          "wrist_flex": null,
+          "wrist_roll": null,
+          "gripper": null
+        },
+        "right": {
+          "base": null,
+          "shoulder": null,
+          "elbow": null,
+          "wrist_flex": null,
+          "wrist_roll": null,
+          "gripper": null
+        }
+      }
+    }
+  ],
+  "lift": {
+    "m_per_turn": 0.084,
+    "scale_source": "official_nominal",
+    "origin_raw_unwrapped": null,
+    "origin_id": null,
+    "session_id": null,
+    "bottom_platform_height_m": null,
+    "checks": [
+      {
+        "raw_unwrapped": null,
+        "platform_height_m": null
+      },
+      {
+        "raw_unwrapped": null,
+        "platform_height_m": null
+      },
+      {
+        "raw_unwrapped": null,
+        "platform_height_m": null
+      },
+      {
+        "raw_unwrapped": null,
+        "platform_height_m": null
+      }
+    ],
+    "rehome_check": {
+      "previous_session_id": null,
+      "new_session_id": null,
+      "reference_height_m": null,
+      "observed_height_m": null
+    }
+  },
+  "arms": {
+    "left": {
+      "alignment_checks": {
+        "base": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ],
+        "shoulder": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ],
+        "elbow": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ],
+        "wrist_flex": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ],
+        "wrist_roll": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ],
+        "gripper": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ]
+      },
+      "tcp_definition": "official gripper_frame_link; fixed reference, not opening-dependent contact center",
+      "reference_from_tcp": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "fit": [
+        {
+          "id": "left-fit-0",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        },
+        {
+          "id": "left-fit-1",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        },
+        {
+          "id": "left-fit-2",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        },
+        {
+          "id": "left-fit-3",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        },
+        {
+          "id": "left-fit-4",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        },
+        {
+          "id": "left-fit-5",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        }
+      ],
+      "check": [
+        {
+          "id": "left-check-0",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null,
+          "camera_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "base_tcp_rotation": [
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        },
+        {
+          "id": "left-check-1",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null,
+          "camera_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "base_tcp_rotation": [
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        },
+        {
+          "id": "left-check-2",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null,
+          "camera_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "base_tcp_rotation": [
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    "right": {
+      "alignment_checks": {
+        "base": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ],
+        "shoulder": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ],
+        "elbow": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ],
+        "wrist_flex": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ],
+        "wrist_roll": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ],
+        "gripper": [
+          {
+            "unwrapped_raw": null,
+            "model_rad": 0.0
+          },
+          {
+            "unwrapped_raw": null,
+            "model_rad": null
+          }
+        ]
+      },
+      "tcp_definition": "official gripper_frame_link; fixed reference, not opening-dependent contact center",
+      "reference_from_tcp": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "fit": [
+        {
+          "id": "right-fit-0",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        },
+        {
+          "id": "right-fit-1",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        },
+        {
+          "id": "right-fit-2",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        },
+        {
+          "id": "right-fit-3",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        },
+        {
+          "id": "right-fit-4",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        },
+        {
+          "id": "right-fit-5",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null
+        }
+      ],
+      "check": [
+        {
+          "id": "right-check-0",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null,
+          "camera_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "base_tcp_rotation": [
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        },
+        {
+          "id": "right-check-1",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null,
+          "camera_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "base_tcp_rotation": [
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        },
+        {
+          "id": "right-check-2",
+          "raw": {
+            "base": null,
+            "shoulder": null,
+            "elbow": null,
+            "wrist_flex": null,
+            "wrist_roll": null,
+            "gripper": null
+          },
+          "lift_raw_unwrapped": null,
+          "base_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "clock_id": null,
+          "camera_time_s": null,
+          "joints_time_s": null,
+          "lift_time_s": null,
+          "camera_tcp_xyz_m": [
+            null,
+            null,
+            null
+          ],
+          "base_tcp_rotation": [
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ],
+            [
+              null,
+              null,
+              null
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

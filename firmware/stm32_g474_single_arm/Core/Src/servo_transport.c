@@ -140,9 +140,22 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
 {
     ServoTransportOwner *bus = find_bus(uart);
     if (!owns(bus, token) || !bus->transmit_allowed || data == NULL || !length) return false;
-#if HOST_LIFT_TELEOP_ONLY
+#if HOST_S2_OBSERVER_ONLY
+    extern UART_HandleTypeDef huart1;
+    /* Read-only observation: never any write, broadcast, wheel ID or other address. */
+    if (bus->read_sent || length != 8 || data[0] != 255 || data[1] != 255 ||
+        data[3] != 4 || data[4] != 2 ||
+        !((data[2] >= 1 && data[2] <= 6) || (uart == &huart1 && data[2] == 10)) ||
+        !((data[5] == 56 && data[6] == 4) || (data[5] == 40 && data[6] == 1))) return false;
+    unsigned observer_sum = 0;
+    for (unsigned i=2; i<length; ++i) observer_sum += data[i];
+    if ((observer_sum & 255U) != 255U) return false;
+    bus->read_sent = true;
+    return true;
+#elif HOST_LIFT_TELEOP_ONLY
     /* Isolated physical lift, left UART only (Register gate). No arm/wheel,
-     * broadcast, negative speed, position goal, or arbitrary EEPROM writes. */
+     * broadcast, position goal, or arbitrary EEPROM writes. V5 additionally allows
+     * exactly sign-magnitude -100; v4 remains positive-speed only. */
     if (bus->read_sent || length < 8 || length > 9 || data[0] != 255 || data[1] != 255 ||
         data[2] != 10 || data[3] != length - 4) return false;
     bool read = length == 8 && data[4] == 2 &&
@@ -153,7 +166,12 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
     bool write = !bus->read_only && data[4] == 3 &&
         ((length == 8 && ((data[5] == 33 && data[6] == 1) ||
                          ((data[5] == 40 || data[5] == 55) && data[6] <= 1))) ||
-         (length == 9 && data[5] == 46 && (data[6] == 0 || data[6] == 100) && data[7] == 0));
+         (length == 9 && data[5] == 46 &&
+          (((data[6] == 0 || data[6] == 100) && data[7] == 0)
+#if HOST_LIFT_BIDIRECTIONAL
+           || (data[6] == 100 && data[7] == 128)
+#endif
+          )));
     unsigned lift_sum = 0;
     for (unsigned i = 2; i < length; ++i) lift_sum += data[i];
     if ((!read && !write) || (lift_sum & 255u) != 255u) return false;

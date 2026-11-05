@@ -1,38 +1,463 @@
 {
   "schema_version": 1,
-  "purpose": "S2 installation facts and measurement backlog; not a TF publisher or motion configuration",
+  "purpose": "S2 installed facts and remaining physical evidence; nominal geometry is pinned separately; not a motion configuration",
   "status": "measurements_incomplete",
   "hardware_enabled": false,
   "base_reference": {
     "frame": "base_link",
-    "physical_origin_definition": null
+    "physical_origin_definition": null,
+    "definition_status": "nominal frame selected; installed realization and calibration pending",
+    "nominal_origin_definition": "arithmetic mean of the three official Mini 1 wheel joint origins, at axle height",
+    "nominal_origin_cad_m": [
+      -6.846666666666728e-05,
+      0.00013466666666667182,
+      0.042199999999999994
+    ],
+    "axes": {
+      "x": "forward, toward the front antenna camera mounting face (CAD -Y)",
+      "y": "robot left (CAD +X)",
+      "z": "up (CAD +Z on a level base)"
+    },
+    "nominal_base_from_cad": [
+      [
+        0.0,
+        -1.0,
+        0.0,
+        0.00013466666666667182
+      ],
+      [
+        1.0,
+        0.0,
+        0.0,
+        6.846666666666728e-05
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        -0.042199999999999994
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "source_joint_names": [
+      "wheel1",
+      "wheel2",
+      "wheel3"
+    ],
+    "installed_verified": false,
+    "floor_reference": "base_footprint is the ground projection of base_link for navigation; not the axle-height base_link origin",
+    "integration_status": "nominal transform used by offline coordinate and lift endpoint viewers; accepted profiles retain their independently defined base frame; runtime installation calibration pending",
+    "floor_measurement": {
+      "datum": "floor_to_chassis_bottom_plate_underside",
+      "clearance_m": 0.028,
+      "underside_cad_z_m": 0.0,
+      "operator_confirmed": true,
+      "approximate": true,
+      "source": "operator physical measurement and datum confirmation 2026-11-05",
+      "wheel_and_motor_mounts_verified": false,
+      "scope": "floor height reference only; does not change nominal wheel/motor poses or accept runtime kinematic calibration"
+    }
   },
   "d415": {
     "mount_motion": "fixed_to_base_or_fixed_column",
+    "planned_mount_location": "front-facing sloped face of the front antenna on the base; camera rear against face, camera top aligned with its upper edge; operator clarified 2026-11-05",
+    "mount_installed_verified": true,
     "moves_with_lift": false,
     "proposed_parent_frame": "base_link",
     "translation_m": null,
     "rotation_xyzw": null,
     "extrinsic_calibrated": false,
-    "source": "operator confirmation 2026-11-01"
+    "source": "operator confirmation 2026-11-01",
+    "mount_confirmation": {
+      "source": "operator confirmation in conversation 2026-11-05",
+      "location": "front-facing sloped face of front antenna; camera top aligned to the upper edge of that face",
+      "verification_kind": "operator reported installation; RGB-D stream visually reviewed 2026-11-05, but mounting geometry not independently verified",
+      "final_fixed_confirmation": "operator confirmed camera fixed again on 2026-11-05, after LDS-01 inspection",
+      "post_fix_capture": {
+        "snapshot": "output/home-assistant/s2/camera/20261105T060734_462915Z",
+        "evidence": "output/home-assistant/s2/camera/20261105T060734_462915Z.evidence.json",
+        "evidence_sha256": "17c001b213881e978018e69fa0be0bb6671d88fee3e7cb88f2ca4a7b562be75c",
+        "captured_at_utc": "2026-11-05T06:07:34.462518+00:00",
+        "device_profile_calibration_matches_previous": true,
+        "framesets": 90,
+        "observed_fps": 28.411535987225708,
+        "valid_depth_percent": 86.109375,
+        "frame_number_gaps": {
+          "depth": 26,
+          "color": 4
+        },
+        "repeated_frames": {
+          "depth": 23,
+          "color": 0
+        },
+        "visual_review": "checkerboard visible on cabinet top; scissors and tape obscure corners; not suitable for accepted board calibration",
+        "timing_review": "depth repeats observed; static snapshot evidence only, synchronized dynamic use not validated"
+      }
+    },
+    "extrinsic_workflow": {
+      "status": "independent physical verification pending",
+      "printed_target_required": false,
+      "available_survey_tools": "operator confirmed ruler/tape available 2026-11-05; printed checkerboard visible in actual capture",
+      "next_step": "retain nominal camera model; proceed with lift session-origin investigation; arm Home alignment remains deferred",
+      "cad_camera_pose_accuracy": "official D415 peripheral mesh and nominal Xacro optical frames; device-calibrated extrinsics and installed mounting error still pending",
+      "device_evidence_tool": "python3 tools/diagnostics/s2_coordinates.py camera-evidence --snapshot <saved-capture> --output <new-evidence.json>",
+      "checkerboard": {
+        "square_size_m": [
+          0.025,
+          0.025
+        ],
+        "dimension_source": "operator measurement 2.5 x 2.5 cm, 2026-11-05",
+        "inner_corners_detected": [
+          8,
+          5
+        ],
+        "captured_at_utc": "2026-11-05T06:12:02.682069+00:00",
+        "observation_path": "output/home-assistant/s2/camera/20261105T061202_682440Z/board-observation.json",
+        "observation_sha256": "37506ae8bfb5031ca759ff743fca2c1ad0a053efe332493b1f64c682ce5a26e0",
+        "status": "camera_from_board_candidate_only",
+        "base_from_board_known": false,
+        "reprojection_rms_px": 0.5294804794845677,
+        "depth_check_median_abs_z_difference_m": 0.0023998104280509303,
+        "depth_check_max_abs_z_difference_m": 0.007659674938882255,
+        "height_survey": {
+          "support_surface_floor_height_m": 0.801,
+          "source": "operator measurement 80.1 cm, 2026-11-05",
+          "report": "output/home-assistant/s2/camera/20261105T061202_682440Z/board-height-comparison.json",
+          "report_sha256": "830d5612d34b28a14f3e34920ee8d58d44a50e18b91d07ccf8980448d360e322",
+          "estimated_camera_floor_height_m": 1.0818932732581006,
+          "assumption": "horizontal flat board and common level floor; not independently verified",
+          "full_extrinsic_calibrated": false
+        },
+        "latest_measurement_labels": {
+          "snapshot": "output/home-assistant/s2/camera/20261105T062152_791816Z",
+          "labels": "output/home-assistant/s2/camera/20261105T062152_791816Z/ab-labels.json",
+          "note": "use current A/B image; earlier camera-to-board observation is historical because relative scene pose changed"
+        },
+        "rough_comparison": {
+          "report": "output/home-assistant/s2/camera/20261105T063121_721356Z/rough-comparison.json",
+          "sha256": "8a0d1263ac878ef5db5fe8f5020c90949d6dac97d2ba1570425c6d6a16ce860d",
+          "status": "rough_comparison_completed_with_approximate_origin",
+          "origin": "main pillar/base center vicinity, approximate",
+          "note": "about 4 cm forward and 1.5 cm lateral difference; unknown origin offset included; nominal camera transform unchanged"
+        }
+      },
+      "operator_survey_scope": "operator requests rough discrepancy comparison only; not precision calibration or S2 acceptance",
+      "precision_validation_schedule": "deferred while retaining nominal model per operator; independent validation still required for full S2 acceptance"
+    },
+    "official_geometry": "config/home_assistant/d415_official_geometry.json",
+    "device_observation": {
+      "status": "recorded_metadata_validated",
+      "captured_at_utc": "2026-11-05T04:42:31.336588+00:00",
+      "report": "config/home_assistant/camera_device.observed.json",
+      "report_sha256": "82d0b8cbe70a28914e8f71d7fa25c185a8c58a7d5c0e33c1349706d98bb05fb2",
+      "scope": "historical bounded capture; not a current connection check or installed extrinsic acceptance",
+      "next_step": "S2 synchronized acquisition; precise extrinsic refinement during S3"
+    },
+    "development_transform_choice": {
+      "status": "nominal_model_retained_by_operator",
+      "source": "operator decision after rough checkerboard comparison, 2026-11-05",
+      "parent_frame": "base_link",
+      "child_frame": "color_camera_optical_frame",
+      "base_from_optical": [
+        [
+          -0.011929717012670982,
+          -0.707056462332393,
+          0.7070564623323932,
+          0.1007488922318314
+        ],
+        [
+          -0.9999288383940117,
+          0.008435583797296172,
+          -0.008435583797296173,
+          0.033217110981069504
+        ],
+        [
+          0.0,
+          -0.7071067811865476,
+          -0.7071067811865475,
+          1.0161999249838758
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "geometry_sha256": "873a16f87cfddafd79dcc880cae26862d13614218c7cf81accd5793b4e28fc81",
+      "source_model": "official Mini 1 nominal base + D415 nominal housing/optical geometry and confirmed mounting convention",
+      "use": "development reference and visualization; not accepted hardware coordinate profile",
+      "measured_extrinsic": false,
+      "coordinate_use_allowed": false,
+      "motion_authorized": false
+    },
+    "precision_validation_schedule": "deferred to S3 physical pick tests per operator; nominal model retained, not measured extrinsic"
   },
   "lift": {
     "geometry": "config/home_assistant/lift_geometry.measured.json",
     "platform_low_floor_height_m": 0.26,
-    "travel_m": 0.64,
+    "travel_m": null,
     "platform_frame_offset_m": null,
-    "live_origin_validated": false
+    "live_origin_validated": false,
+    "historical_approximate_travel_m": 0.64,
+    "nominal_m_per_turn": 0.084,
+    "scale_validated": false,
+    "endpoint_correspondence": {
+      "source": "operator confirmation 2026-11-05",
+      "low": "previous measured low position is the stock assembly mechanical lower endpoint",
+      "high": "previous measured high position is the stock assembly mechanical upper endpoint",
+      "repeat_endpoint_height_measurement_requested": false,
+      "cad_travel_derivation_status": "recomputed against complete connected base deck and antenna foot solids including thickness; installed validation pending",
+      "cad_contact_report": "tools/diagnostics/s2_viewer/lift-contacts.json",
+      "lower_stop_definition": "moving carriage bottom contacting the base deck upper face",
+      "upper_stop_definition": "vertical slider upper end contacting the thick bottom of the antenna mounting foot",
+      "note": "Endpoint identity does not make historical approximate heights exact or bind a live encoder origin.",
+      "visual_review": "Operator accepted the corrected lower and upper contact geometry on 2026-11-05. Both complete stop solids were checked; this confirms depicted contact identity, not measured heights, encoder scale, or a live origin.",
+      "height_consistency": "CAD endpoints referenced to confirmed approximately 28 mm floor-to-chassis-underside clearance: left 0.255591/0.899437 m, right 0.256291/0.900137 m. Consistent with operator reported 25.xx/about 90 cm; not independent metrology acceptance.",
+      "floor_referenced_report": "tools/diagnostics/s2_viewer/lift-floor-reference.json"
+    },
+    "height_datum": "floor to SO-ARM upper attachment plate mating face (operator clarification 2026-11-05)",
+    "platform_low_floor_height_basis": "historical approximate measurement; not a new acceptance default or the current CAD+floor-derived height",
+    "origin_observation": {
+      "status": "bottom_reference_rechecked_after_power_cycle",
+      "report": "config/home_assistant/lift_origin.observed.json",
+      "report_sha256": "34242217335e583e1707c8bb9a8e0bcc261b3fcb92aa825e6cf4fa074675ffeb",
+      "captured_at_utc": "2026-11-05T07:07:41.164013+00:00",
+      "candidate_modulo_raw": 3819,
+      "runtime_binding_valid": false,
+      "controller_fault_cleared": true,
+      "reader": "tools/diagnostics/observe_lift_origin.py",
+      "reader_release": "s2-lift-observer-d19c26ab31c5"
+    },
+    "commissioning_controller": {
+      "firmware": "lift-teleop-v5",
+      "firmware_release": "s2-lift-teleop-e4c0ed7cbb03",
+      "automatic_host_release": "s2-lift-auto-7777b8e65a5e",
+      "status": "up_down_and_hold_observed_heights_approximately_compared",
+      "link_responses": 200,
+      "motor_writes_during_link_check": 0,
+      "reference_reacquisition_required": true,
+      "up_direction_physically_verified": true,
+      "middle_height_verified": false,
+      "runtime_configuration": false,
+      "visible_up_check_rise_cm": 1.0,
+      "visible_up_check_host_deadline_s": 15,
+      "physical_motion_started": true,
+      "visible_up_result": {
+        "report": "output/home-assistant/s2/lift/visible-up-20261105-02/report.json",
+        "report_sha256": "5c6b229058995aa45b047a2c01c2a8d10de5c2824e09a96b87cea54c8ea6cedb",
+        "captured_at_utc": "2026-11-05T07:38:57.357162+00:00",
+        "reference_id": 3375744261,
+        "relative_counts": -500,
+        "calculated_height_above_bottom_m": 0.01025390625,
+        "stop_confirmed": true,
+        "torque_raw": 1,
+        "fault": false,
+        "operator_confirmation_pending": false,
+        "operator_observation": "올라갔고 멈춘 뒤 높이 유지됨",
+        "noise_or_vibration_explicitly_assessed": false
+      },
+      "first_attempt": {
+        "status": "rejected_before_motion",
+        "reason": "DIRECTION_START_NOT_STATIONARY",
+        "nonzero_speed_writes": 0,
+        "stop_confirmed": true,
+        "report": "output/home-assistant/s2/lift/visible-up-20261105-01/report.json"
+      },
+      "middle_height_result": {
+        "report": "output/home-assistant/s2/lift/mid-height-25cm-20261105-01/report.json",
+        "review": "output/home-assistant/s2/lift/mid-height-25cm-20261105-01/review.json",
+        "relative_counts": -12200,
+        "calculated_rise_m": 0.2501953125,
+        "reference_id": 3375744261,
+        "stop_confirmed": true,
+        "torque_raw": 1,
+        "physical_height_cm": 51.3,
+        "physical_height_approximate": true,
+        "historical_datum_error_mm": 2.8046875000000138,
+        "cad_datum_error_mm": {
+          "left": 7.214064540276899,
+          "right": 6.514032033902273
+        },
+        "scale_unchanged": true
+      },
+      "middle_height_approximately_compared": true,
+      "return_height_verified": false,
+      "return_height_result": {
+        "report": "output/home-assistant/s2/lift/return-height-1cm-20261105-01/report.json",
+        "review": "output/home-assistant/s2/lift/return-height-1cm-20261105-01/review.json",
+        "stop_confirmed": false,
+        "controller_fault": true,
+        "reference_id": 0,
+        "operator_motor_power_off_confirmed": true,
+        "physical_height_cm": null,
+        "operator_cable_disturbance_confirmed": true,
+        "operator_cable_statement": "선이 빠지거나 당겨졌음",
+        "affected_cable": "lift_power_cable"
+      },
+      "recovery_link_report": "output/home-assistant/s2/lift/return-height-1cm-20261105-01/recovery-link.json",
+      "recovery_reference": {
+        "id": 3698100886,
+        "raw": 3725,
+        "valid_at_last_check": false,
+        "survives_reset": false,
+        "report": "output/home-assistant/s2/lift/return-height-1cm-20261105-01/bottom-after-power-cable-20261105-01.json",
+        "idle_report": "output/home-assistant/s2/lift/return-height-1cm-20261105-01/idle-after-power-cable-20261105-01.json",
+        "motion_test_passed": false,
+        "invalidated_by": "2026-11-05 switch to arm reference firmware; recorded lift results preserved"
+      },
+      "upper_height_result": {
+        "review": "output/home-assistant/s2/lift/upper-height-61cm-20261105-01/review.json",
+        "target_rise_cm": 61,
+        "encoder_rise_cm": 61.035351562500004,
+        "stop_confirmed": true,
+        "physical_height_cm": null,
+        "physical_upper_end_reached": false,
+        "operator_height_statement": "87.xx인거같음 상당히 비슷해",
+        "physical_height_approximately_compared": true,
+        "precise_height_error_percent": null,
+        "scale_unchanged": true
+      },
+      "return_start_rejections": {
+        "reviews": [
+          "output/home-assistant/s2/lift/return-height-1cm-20261105-02/review.json",
+          "output/home-assistant/s2/lift/return-height-1cm-20261105-03/review.json"
+        ],
+        "nonzero_commands_added": 0,
+        "stop_confirmed": true,
+        "torque_raw": 1,
+        "reference_id": 3698100886,
+        "relative_counts": -29762,
+        "further_retry_started": false
+      },
+      "latest_return_height_result": {
+        "review": "output/home-assistant/s2/lift/return-height-1cm-20261105-04/review.json",
+        "stop_confirmed": true,
+        "hold_counts_range": [
+          -476,
+          -476
+        ],
+        "height_above_bottom_cm": 0.976171875,
+        "physical_height_cm": null,
+        "physical_height_verified": false,
+        "operator_height_statement": "최저점 기준 1cm정도인거같음 약",
+        "physical_height_above_bottom_cm_approx": 1.0,
+        "physical_height_approximately_compared": true,
+        "precise_error_percent": null
+      },
+      "host_release": "/home/hyper/robot/releases/s2-lift-auto-8b7ff88f6b2d",
+      "return_height_approximately_compared": true
+    },
+    "precision_validation_schedule": "no additional routine precision measurements per operator; revisit if observed task error increases"
   },
   "arms": {
     "left_mount_transform": null,
     "right_mount_transform": null,
     "home_2048_to_model_zero_verified": false,
-    "tcp_calibrated": false
+    "home_alignment_schedule": "both selected reference poses captured; software offsets derived using historical signs; independent model-axis check remains separate",
+    "direction_reuse": {
+      "policy": "reuse historical conventions; no separate direction recapture requested",
+      "source": "config/home_assistant/arm_ranges.development.json",
+      "joint_order": [
+        "base",
+        "shoulder",
+        "elbow",
+        "wrist_flex",
+        "wrist_roll",
+        "gripper"
+      ],
+      "left_positive_raw_direction": [
+        1,
+        1,
+        -1,
+        -1,
+        1,
+        -1
+      ],
+      "right_positive_raw_direction": [
+        1,
+        1,
+        -1,
+        -1,
+        1,
+        -1
+      ],
+      "right_basis": "historical convention copied from left by operator request; not independent right-arm measurement",
+      "official_model_axis_mapping_verified": false
+    },
+    "tcp_calibrated": false,
+    "internal_link_geometry": "pinned official SO101 new_calib; no remeasurement of stock link lengths",
+    "installation_fit": "official shared fixed-base mesh adapter derived; independent task-space fit deferred to S3",
+    "tcp_validation_schedule": "official FK after mounting/zero/direction mapping; gross visual check in S2, independent task accuracy checks in S3",
+    "reference_preparation": {
+      "status": "both_arms_selected_home_captured_torque_off",
+      "firmware": "arm-calibration-v1",
+      "release": "/home/hyper/robot/releases/s2-arm-reference-d943fbd1e2e8",
+      "motor_eeprom_changed": false,
+      "motion_commands_sent": false,
+      "left_raw": [
+        2002,
+        2005,
+        2143,
+        2041,
+        2046,
+        2081
+      ],
+      "right_raw": [
+        2038,
+        2050,
+        2174,
+        2022,
+        2049,
+        2052
+      ],
+      "reports": [
+        "output/home-assistant/s2/arms/left-before-model-reference-20261105-01.json",
+        "output/home-assistant/s2/arms/right-before-model-reference-20261105-01.json"
+      ],
+      "selected_home_reports": [
+        "output/home-assistant/s2/arms/left-selected-home-20261105-01.json",
+        "output/home-assistant/s2/arms/right-selected-home-20261105-01.json"
+      ]
+    },
+    "selected_home_pose": "config/home_assistant/arm_home_pose.development.json",
+    "model_alignment": "config/home_assistant/arm_model_alignment.development.json",
+    "home_reference_captured": true,
+    "nominal_mount_adapter": "config/home_assistant/arm_mounts.nominal.json",
+    "development_coordinate_status": "nominal mounts + captured reference offsets + historical direction signs connected"
   },
   "lidar": {
     "model": "LDS-01",
-    "connected_verified": false,
-    "mount_transform": null
+    "connected_verified": true,
+    "mount_transform": null,
+    "device_observation": {
+      "report": "config/home_assistant/lidar_device.observed.json",
+      "report_sha256": "699971cd910c0903c79fcc5c2ede68f81297404dabeb2fc125666ad3a3bef10e",
+      "captured_at_utc": "2026-11-05T05:04:34.683952+00:00",
+      "status": "basic_stream_verified_timing_issue_open",
+      "scope": "historical passive capture; mounting and navigation not verified"
+    }
   },
-  "simulation_model_is_hardware_description": false
+  "simulation_model_is_hardware_description": false,
+  "robot_model": "alohamini1",
+  "arm_model": "SO-ARM101",
+  "official_geometry": "config/home_assistant/official_geometry.json",
+  "commissioning_template": "config/home_assistant/s2_measurements.template.json",
+  "development_acceptance_policy": {
+    "operator_decision_date": "2026-11-05",
+    "lift": "retain current nominal scale using approximate physical evidence; additional precision measurement deferred unless meaningful errors appear",
+    "camera": "retain nominal installed model; refine extrinsics during S3 physical pick tests",
+    "arms": "both reference poses captured; preserve EEPROM, use derived software offsets and historical signs",
+    "tcp": "compute fixed TCP using official geometry, established arm mounting transform, software zero offsets and reused direction conventions; initial gross visual check, task accuracy validation deferred to S3",
+    "strict_acceptance_not_fabricated": true,
+    "s2_complete": false,
+    "software_connection_complete": true,
+    "live_combined_acquisition_verified": false,
+    "remaining_s2": "read-only integrated acquisition on S2 observer firmware; no further precision survey required"
+  }
 }

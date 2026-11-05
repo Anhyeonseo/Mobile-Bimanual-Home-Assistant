@@ -29,13 +29,22 @@ jobs:
     timeout-minutes: 15
     strategy:
       matrix:
-        profile: [legacy, resident, s1-inventory, s1-calibration, s1-ranges, lift-teleop, mobile-inspection, mobile-setup, mobile-pulse, mobile-teleop]
+        profile: [legacy, resident, s1-inventory, s1-calibration, s1-ranges, s2-observer, lift-teleop, s2-lift-teleop, mobile-inspection, mobile-setup, mobile-pulse, mobile-teleop]
     steps:
       - uses: actions/checkout@v4
       - name: Install ARM toolchain
+        timeout-minutes: 7
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
+          # Some hosted runners stall on the Azure mirror while downloading
+          # the toolchain. Keep Ubuntu signatures and use the upstream archive.
+          for source in /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$source" ]; then
+              sudo sed -i -E 's|https?://azure\.archive\.ubuntu\.com/ubuntu/?|https://archive.ubuntu.com/ubuntu/|g' "$source"
+            fi
+          done
+          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          timeout 120s sudo apt-get "${apt_options[@]}" update
+          timeout 240s sudo apt-get "${apt_options[@]}" install --no-install-recommends -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
       - name: Build firmware without flashing a board
         env:
           PROFILE: ${{ matrix.profile }}
@@ -47,6 +56,8 @@ jobs:
             s1-inventory) options+=(-DBIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE=ON -DHOME_ASSISTANT_INVENTORY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
             s1-ranges) options+=(-DBIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE=ON -DACTUATOR_MOBILE_FIRST_ID=7 -DS1_ARM_RANGE_PROFILE_HEADER="$GITHUB_WORKSPACE/firmware/stm32_g474_single_arm/Core/Inc/generated_s1_arm_ranges.h") ;;
             s1-calibration) options+=(-DBIMANUAL_CALIBRATION_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
+            s2-observer) options+=(-DS2_COORDINATE_OBSERVER_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
+            s2-lift-teleop) options+=(-DLIFT_TELEOP_ONLY=ON -DLIFT_TELEOP_BIDIRECTIONAL=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
             lift-teleop) options+=(-DLIFT_TELEOP_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
             mobile-inspection) options+=(-DMOBILE_BUS_INSPECTION_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
             mobile-setup) options+=(-DMOBILE_WHEEL_SETUP_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;

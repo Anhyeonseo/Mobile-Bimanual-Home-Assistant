@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "stage": "S2",
+  "status": "development_integration_verified",
+  "acceptance_scope": "operator-agreed nominal geometry and read-only stationary integration; precision task calibration deferred to S3",
+  "development_s2_complete": true,
+  "strict_commissioning_passed": false,
+  "motion_authorized": false,
+  "profile_id": "s2-dev-6c0ff78084c0ba3fdc5e6c41",
+  "host_release": "s2-coordinates-b19a1295753b",
+  "flashed_release": "s2-coordinates-b1656ccfd291",
+  "firmware": "s2-observer-v1",
+  "source_report": "output/home-assistant/s2/coordinates/integrated-20261105-04.json",
+  "source_report_sha256": "8f7ae262536dfc80949945986013187e401769ac4cca2b955c6bb30ed14f7279",
+  "source_report_remote": "/home/hyper/robot/shared/diagnostics/s2/observer/integrated-20261105-04.json",
+  "operator_confirmed": {
+    "arms_at_saved_home": true,
+    "lift_at_bottom": true
+  },
+  "motor_sample_count": 61,
+  "synchronized_coordinate_count": 60,
+  "duration_s": 5.058694318999187,
+  "maximum_motor_span_s": 0.048418531005154364,
+  "maximum_rgbd_motor_span_s": 0.048418531005154364,
+  "motor_speed_values": [
+    0
+  ],
+  "motor_torque_values": [
+    0
+  ],
+  "motor_write_commands": 0,
+  "camera_timestamp_basis": "SDK global_time mapped to host monotonic; physical hardware sync accuracy not measured",
+  "camera_identity_equivalence": {
+    "method": "exact identity/intrinsics/rotation/scale; translation roundoff <= 2e-9 m",
+    "maximum_translation_difference_m": 9.313225746154785e-10,
+    "observed_camera_device": {
+      "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+      "stream_profile_id": "rgbd-v1-52b8cdab670d4770de886ec17c375dcb131a4d7ad72ae0ea92774aa5ea0916da",
+      "factory_calibration_sha256": "12ce5d4f0c292758b16632e484672fcee655436d57741f4e6b0fabc8147f5643"
+    },
+    "reference_camera_device": {
+      "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+      "stream_profile_id": "rgbd-v1-52b8cdab670d4770de886ec17c375dcb131a4d7ad72ae0ea92774aa5ea0916da",
+      "factory_calibration_sha256": "4213fcd9d40419ceb64ea3a403f670bc44bfbcf6223a52aa4c20b3f930ab7591"
+    }
+  },
+  "session_origin_valid_after_close": false,
+  "strict_measured_calibration_accepted": false,
+  "last_observed_tcp_base_xyz_m": {
+    "left": [
+      0.18382184570898064,
+      0.14635799521217735,
+      0.23355086167991695
+    ],
+    "right": [
+      0.1800230933620537,
+      -0.1673282652143529,
+      0.23445038211930944
+    ]
+  },
+  "remaining_s2": [],
+  "deferred_s3": [
+    "camera extrinsic task accuracy",
+    "multi-pose TCP and historical direction verification",
+    "object-specific grasp contact and approach planning"
+  ],
+  "runtime_followup": [
+    "persistent observation service with continuous encoder tracking",
+    "lift automatic homing/reference sensor strategy",
+    "arm startup branch identification within validated ranges"
+  ]
+}

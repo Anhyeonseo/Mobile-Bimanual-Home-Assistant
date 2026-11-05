@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "status": "basic_stream_verified_timing_issue_open",
+  "captured_at_utc": "2026-11-05T05:04:34.683952+00:00",
+  "model_expected": "LDS-01",
+  "protocol_verified": "HLS-LFCD 42-byte sectors, 60 sectors per 360-sample scan",
+  "usb_adapter": "CP2102 10c4:ea60",
+  "port_observed": "/dev/ttyUSB0",
+  "baud": 230400,
+  "serial_command_bytes_sent": 0,
+  "robot_motion_commands": 0,
+  "first_capture_summary": {
+    "port": "/dev/ttyUSB0",
+    "usb_adapter": "CP2102 10c4:ea60",
+    "baud": 230400,
+    "duration_s": 10.001292923000165,
+    "bytes": 114115,
+    "packets": 2717,
+    "checksum_valid_packets": 2717,
+    "checksum_failed_packets": 0,
+    "packet_sequence_errors": 1,
+    "discarded_boundary_bytes": 0,
+    "trailing_boundary_bytes": 1,
+    "complete_scans": 44,
+    "scan_hz": 4.4621597170840275,
+    "reported_rpm": {
+      "min": 291.0,
+      "median": 298.9,
+      "max": 303.8
+    },
+    "in_spec_range_points_per_scan": {
+      "min": 206,
+      "median": 223.0,
+      "max": 254
+    },
+    "observed_in_spec_range_m": [
+      0.12,
+      3.5
+    ],
+    "zero_points_last_scan": 106
+  },
+  "repeat_capture_summary": {
+    "captured_at_utc": "2026-11-05T05:04:34.683952+00:00",
+    "mode": "passive_serial_read_only",
+    "serial_command_bytes_sent": 0,
+    "robot_motion_commands": 0,
+    "duration_s": 15.00236474999997,
+    "bytes": 173167,
+    "raw_sha256": "8a5c2119929b96aca67233b357653bd8b82d31dd84d26570879e16418919f1b3",
+    "packets": 4123,
+    "checksum_failed_packets": 0,
+    "packet_sequence_errors": 1,
+    "gaps": [
+      {
+        "packet": 48,
+        "previous": 58,
+        "next": 0,
+        "time_s": 0.16559273100006067
+      }
+    ],
+    "discarded_boundary_bytes": 0,
+    "trailing_boundary_bytes": 1,
+    "complete_scans": 67,
+    "observed_scan_hz": 4.566513910925203,
+    "scan_interval_s": {
+      "min": 0.1993878980001682,
+      "median": 0.20096056599993517,
+      "max": 0.4006338669998968
+    },
+    "reported_rpm": {
+      "min": 291.5,
+      "median": 298.9,
+      "max": 303.4
+    },
+    "in_spec_range_points_per_scan": {
+      "min": 236,
+      "median": 248,
+      "max": 279
+    },
+    "range_policy_m": [
+      0.12,
+      3.5
+    ]
+  },
+  "receive_pauses_over_100ms_in_repeat": 6,
+  "max_receive_pause_s": 0.20398347599984845,
+  "known_issue": {
+    "id": "LDS01-SCAN-CADENCE",
+    "observation": "intermittent approximately 0.2 s receive pauses; scan-start intervals up to 0.401 s; one missing sector in each capture",
+    "cause": "unresolved; sensor, adapter, USB/power and host scheduling not isolated",
+    "required_before": "live navigation integration"
+  },
+  "range_accuracy_validated": false,
+  "mount_calibrated": false,
+  "ros_scan_publisher_tested": false,
+  "slam_tested": false,
+  "sources": [
+    "https://github.com/ROBOTIS-GIT/hls_lfcd_lds_driver/blob/main/src/hlds_laser_publisher.cpp",
+    "https://emanual.robotis.com/assets/docs/LDS_Basic_Specification.pdf"
+  ],
+  "local_evidence": [
+    "output/home-assistant/lidar/20261105T050344Z",
+    "output/home-assistant/lidar/20261105T050419Z"
+  ]
+}

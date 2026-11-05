@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "status": "camera_metadata_validated",
+  "source_metadata_sha256": "a97a689cda6d5d4c7e7a779830512fc951447255721c7a9bb9ac03ed1dc60e57",
+  "camera_device": {
+    "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+    "stream_profile_id": "rgbd-v1-52b8cdab670d4770de886ec17c375dcb131a4d7ad72ae0ea92774aa5ea0916da",
+    "factory_calibration_sha256": "4213fcd9d40419ceb64ea3a403f670bc44bfbcf6223a52aa4c20b3f930ab7591"
+  },
+  "device": {
+    "name": "RealSense D415",
+    "firmware": "5.17.0.10",
+    "usb": "3.2"
+  },
+  "profiles": {
+    "color": {
+      "width": 640,
+      "height": 480,
+      "fps": 30,
+      "format": "bgr8"
+    },
+    "depth": {
+      "width": 1280,
+      "height": 720,
+      "fps": 30,
+      "format": "z16"
+    },
+    "alignment": "depth_to_color",
+    "source_frame": "color_camera_optical_frame"
+  },
+  "sdk_calibration": {
+    "native_depth_intrinsics": {
+      "width": 1280,
+      "height": 720,
+      "fx": 896.2822875976562,
+      "fy": 896.2822875976562,
+      "ppx": 629.3273315429688,
+      "ppy": 359.8057556152344,
+      "coeffs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "model": "distortion.brown_conrady"
+    },
+    "color_intrinsics": {
+      "width": 640,
+      "height": 480,
+      "fx": 617.6232299804688,
+      "fy": 617.08984375,
+      "ppx": 319.24639892578125,
+      "ppy": 233.9661102294922,
+      "coeffs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "model": "distortion.inverse_brown_conrady"
+    },
+    "aligned_depth_intrinsics": {
+      "width": 640,
+      "height": 480,
+      "fx": 617.6232299804688,
+      "fy": 617.08984375,
+      "ppx": 319.24639892578125,
+      "ppy": 233.9661102294922,
+      "coeffs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "model": "distortion.inverse_brown_conrady"
+    },
+    "depth_scale_m": 0.0010000000474974513,
+    "color_optical_from_depth_optical": [
+      [
+        0.9999894499778748,
+        -0.0010051240678876638,
+        0.00448458269238472,
+        0.014780142344534397
+      ],
+      [
+        0.0009868999477475882,
+        0.999991238117218,
+        0.004064093343913555,
+        -6.43906241748482e-05
+      ],
+      [
+        -0.0044886283576488495,
+        -0.00405962485820055,
+        0.999981701374054,
+        3.310992906335741e-05
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "calibration_hash_scope": "SDK-reported intrinsics, depth scale and depth-to-color extrinsics; not full EEPROM",
+  "captured_at_utc": "2026-11-05T04:42:31.336588+00:00",
+  "frame_evidence": {
+    "color": {
+      "number": 125,
+      "timestamp_ms": 1793853751287.5166,
+      "timestamp_domain": "timestamp_domain.global_time"
+    },
+    "depth": {
+      "number": 123,
+      "timestamp_ms": 1793853751287.1797,
+      "timestamp_domain": "timestamp_domain.global_time"
+    }
+  },
+  "image_quality_validated": false,
+  "timestamps_synchronized_to_robot": false,
+  "camera_mount_calibrated": false,
+  "coordinate_use_allowed": false,
+  "s2_complete": false,
+  "motion_authorized": false,
+  "source_files_sha256": {
+    "metadata.json": "fb2e92de78bcbe6cdb2e49d8c36278506042c4f343313a8df29fb448b1c8b0d3",
+    "color.png": "74eebc25f163277b09f1e8f521193424384c7454244cadf0dcae48ab7911203d",
+    "depth_aligned.png": "fe35b628dbc62781af1ebed87b9ca0cae435875832f06c5b28ca12706babfdaf",
+    "depth_native.png": "bfe947172c170b9d588ad3e49c6e628fa48faa4eeff763e1e53a631fb4a2f355"
+  },
+  "source_capture_local": "output/home-assistant/s2/camera/20261105T044231_337093Z",
+  "source_capture_jetson": "/home/hyper/robot/shared/diagnostics/s2/camera/20261105T044231_337093Z",
+  "capture_release": "s2-camera-cd98b17216f6",
+  "capture_summary": {
+    "observed_fps": 29.089799743462134,
+    "valid_depth_percent": 90.35416666666667,
+    "frame_number_gaps": {
+      "depth": 2,
+      "color": 2
+    },
+    "repeated_frames": {
+      "depth": 0,
+      "color": 0
+    },
+    "framesets": 90
+  },
+  "visual_review": {
+    "scope": "single saved RGB and raw-depth preview; not geometric accuracy acceptance",
+    "visible": "table/cabinet, calculator, cup and marker; upper cup cropped",
+    "depth_observation": "missing depth visible around left table edge and some object boundaries",
+    "independent_base_reference_visible": false
+  }
+}
