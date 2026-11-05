@@ -293,7 +293,7 @@ static HAL_StatusTypeDef RightServo_WriteData(
     return status;
 }
 
-#if HOST_BIMANUAL_CALIBRATION_ONLY
+#if HOST_BIMANUAL_CALIBRATION_ONLY || HOST_S2_OBSERVER_ONLY
 HAL_StatusTypeDef RightServoBus_CalibrationRead(uint8_t id, uint8_t address,
                                                uint8_t length, uint8_t *data)
 {

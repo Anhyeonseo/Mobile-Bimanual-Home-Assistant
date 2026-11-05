@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 15
     strategy:
       matrix:
-        profile: [legacy, resident, s1-inventory, s1-calibration, s1-ranges, lift-teleop, mobile-inspection, mobile-setup, mobile-pulse, mobile-teleop]
+        profile: [legacy, resident, s1-inventory, s1-calibration, s1-ranges, s2-observer, lift-teleop, s2-lift-teleop, mobile-inspection, mobile-setup, mobile-pulse, mobile-teleop]
     steps:
       - uses: actions/checkout@v4
       - name: Install ARM toolchain
@@ -47,6 +47,8 @@ jobs:
             s1-inventory) options+=(-DBIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE=ON -DHOME_ASSISTANT_INVENTORY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
             s1-ranges) options+=(-DBIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE=ON -DACTUATOR_MOBILE_FIRST_ID=7 -DS1_ARM_RANGE_PROFILE_HEADER="$GITHUB_WORKSPACE/firmware/stm32_g474_single_arm/Core/Inc/generated_s1_arm_ranges.h") ;;
             s1-calibration) options+=(-DBIMANUAL_CALIBRATION_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
+            s2-observer) options+=(-DS2_COORDINATE_OBSERVER_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
+            s2-lift-teleop) options+=(-DLIFT_TELEOP_ONLY=ON -DLIFT_TELEOP_BIDIRECTIONAL=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
             lift-teleop) options+=(-DLIFT_TELEOP_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
             mobile-inspection) options+=(-DMOBILE_BUS_INSPECTION_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;
             mobile-setup) options+=(-DMOBILE_WHEEL_SETUP_ONLY=ON -DACTUATOR_MOBILE_FIRST_ID=7) ;;

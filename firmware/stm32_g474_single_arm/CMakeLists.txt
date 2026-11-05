@@ -97,7 +97,12 @@ option(MOBILE_WHEEL_SETUP_ONLY "Wheel mode setup only; no torque enable or motio
 
 option(MOBILE_WHEEL_PULSE_ONLY "Raised-wheel single bounded pulse; no arm/lift or EEPROM writes" OFF)
 
-option(LIFT_TELEOP_ONLY "Isolated ID 10 downward lift commissioning with watchdog" OFF)
+option(S2_COORDINATE_OBSERVER_ONLY "Read-only two-arm and lift acquisition; no motor writes" OFF)
+option(LIFT_TELEOP_ONLY "Isolated ID 10 lift commissioning with watchdog" OFF)
+option(LIFT_TELEOP_BIDIRECTIONAL "Lift v5 with explicit bottom reference and guarded up/down" OFF)
+if(LIFT_TELEOP_BIDIRECTIONAL AND NOT LIFT_TELEOP_ONLY)
+    message(FATAL_ERROR "LIFT_TELEOP_BIDIRECTIONAL requires LIFT_TELEOP_ONLY")
+endif()
 
 option(MOBILE_BASE_TELEOP_ONLY "Manual base keyboard teleop with watchdog; no arm/lift writes" OFF)
 
@@ -108,6 +113,7 @@ endif()
 
 set(VALIDATION_CANDIDATE_COUNT 0)
 foreach(CANDIDATE_OPTION
+    S2_COORDINATE_OBSERVER_ONLY
     BIMANUAL_CALIBRATION_ONLY
     LEFT_ONLY_CALIBRATION_ONLY
     LEFT_ONLY_FILMING_CANDIDATE
@@ -185,6 +191,11 @@ set(CORE_SOURCES
 )
 if(HOME_ASSISTANT_INVENTORY)
     list(APPEND CORE_SOURCES "${CORE_DIR}/Src/device_inventory.c")
+endif()
+
+if(S2_COORDINATE_OBSERVER_ONLY)
+    list(REMOVE_ITEM CORE_SOURCES "${CORE_DIR}/Src/single_arm_app.c")
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/s2_observer_app.c")
 endif()
 
 if(LEFT_ONLY_CALIBRATION_ONLY OR BIMANUAL_CALIBRATION_ONLY)
@@ -290,8 +301,16 @@ target_compile_definitions(
         STM32G474xx
 )
 
+if(S2_COORDINATE_OBSERVER_ONLY)
+    target_compile_definitions(${TARGET_NAME} PRIVATE HOST_S2_OBSERVER_ONLY=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
+
 if(LIFT_TELEOP_ONLY)
     target_compile_definitions(${TARGET_NAME} PRIVATE HOST_LIFT_TELEOP_ONLY=1 HOST_LEFT_ONLY_BUILD=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
+
+if(LIFT_TELEOP_BIDIRECTIONAL)
+    target_compile_definitions(${TARGET_NAME} PRIVATE HOST_LIFT_BIDIRECTIONAL=1)
 endif()
 
 if(MOBILE_BASE_TELEOP_ONLY)

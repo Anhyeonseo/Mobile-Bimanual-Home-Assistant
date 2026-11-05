@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "source_contact_report_sha256": "8ac67f511149c2c892e2e1d0a0e46cc50e3a92bc87682f71d610bd0f4712fa1c",
+  "datum": "floor to chassis bottom plate underside",
+  "underside_clearance_m": 0.028,
+  "underside_cad_z_m": 0.0,
+  "nominal_ground_cad_z_m": -0.007295521932840346,
+  "referenced_ground_cad_z_m": -0.028,
+  "height_correction_m": 0.020704478067159655,
+  "endpoints": {
+    "low": {
+      "left": {
+        "floor_height_m": 0.2555906229597231,
+        "cad_point_m": [
+          0.15621500000000002,
+          -0.041426863325587225,
+          0.2275906229597231
+        ]
+      },
+      "right": {
+        "floor_height_m": 0.25629065546609775,
+        "cad_point_m": [
+          -0.157620640990368,
+          -0.03768260888252142,
+          0.22829065546609772
+        ]
+      }
+    },
+    "high": {
+      "left": {
+        "floor_height_m": 0.8994374402741986,
+        "cad_point_m": [
+          0.15621500000000002,
+          -0.0414147583615749,
+          0.8714374402741986
+        ]
+      },
+      "right": {
+        "floor_height_m": 0.9001374727805732,
+        "cad_point_m": [
+          -0.157620640990368,
+          -0.037670503918509096,
+          0.8721374727805732
+        ]
+      }
+    }
+  },
+  "travel_m": 0.6438468174282681,
+  "wheel_and_motor_mounts_inferred": false,
+  "full_kinematic_calibration_verified": false,
+  "mechanical_contacts_physically_verified": false,
+  "motion_authorized": false,
+  "measurement_evidence": {
+    "datum": "floor_to_chassis_bottom_plate_underside",
+    "clearance_m": 0.028,
+    "underside_cad_z_m": 0.0,
+    "operator_confirmed": true,
+    "approximate": true,
+    "source": "operator physical measurement and datum confirmation 2026-11-05",
+    "wheel_and_motor_mounts_verified": false,
+    "scope": "floor height reference only; does not change nominal wheel/motor poses or accept runtime kinematic calibration"
+  }
+}

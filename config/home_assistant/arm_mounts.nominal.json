@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "status": "official_shared_mesh_frame_adapter",
+  "geometry_sha256": "873a16f87cfddafd79dcc880cae26862d13614218c7cf81accd5793b4e28fc81",
+  "source_mesh_sha256": {
+    "left_base.STL": "d9d81d3df21305adc748346e5d5ea6700c70a6d433f1ff8b6e08ce423cd6ac17",
+    "right_base.STL": "7992f74647898d037d94c1b41d084904986992c1dac75e867a09007f60b6448d",
+    "base_so101_v2.stl": "bb12b7026575e1f70ccc7240051f9d943553bf34e5128537de6cd86fae33924d"
+  },
+  "method": "shared vertices in identical mesh coordinates; invert SO101 base visual origin, preserve Mini1 base visual origin",
+  "physical_mount_verified": false,
+  "motion_authorized": false,
+  "arms": {
+    "left": {
+      "cad_arm_from_model_root": [
+        [
+          -3.6732051034160666e-06,
+          0.9999999999932538,
+          3.231174267807063e-27,
+          -1.4402315253823829e-08
+        ],
+        [
+          3.6732051033912867e-06,
+          1.349243573176184e-11,
+          0.9999999999932538,
+          0.0024000233788690627
+        ],
+        [
+          0.9999999999865077,
+          3.673205103391287e-06,
+          -3.673205103416067e-06,
+          0.00636470118425485
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "shared_vertex_count": 1933,
+      "shared_span_m": [
+        0.110925,
+        0.072,
+        0.087
+      ],
+      "maximum_shared_residual_m": 6.301587101672521e-07,
+      "shared_examples_m": [
+        [
+          -0.0554625,
+          0.0,
+          0.02179589
+        ],
+        [
+          -0.0235265,
+          0.0175,
+          0.04202147
+        ],
+        [
+          -0.00168232,
+          0.0352,
+          -0.00627852
+        ],
+        [
+          0.02314736,
+          0.0175,
+          0.06100571
+        ],
+        [
+          0.0554625,
+          0.01449999,
+          0.02981181
+        ]
+      ],
+      "first_joint_center_difference_m": [
+        9.926097109259354e-05,
+        -0.0005868339715297544,
+        -0.00029522802430055617
+      ],
+      "first_joint_center_distance_m": 0.0006643692022181936,
+      "note": "Meshes are not identical; shared fixed-base geometry establishes a nominal frame, not installed accuracy."
+    },
+    "right": {
+      "cad_arm_from_model_root": [
+        [
+          -3.6732051034160666e-06,
+          0.9999999999932538,
+          3.231174267807063e-27,
+          -1.4402315253823829e-08
+        ],
+        [
+          3.6732051033912867e-06,
+          1.349243573176184e-11,
+          0.9999999999932538,
+          0.0024000233788690627
+        ],
+        [
+          0.9999999999865077,
+          3.673205103391287e-06,
+          -3.673205103416067e-06,
+          0.00636470118425485
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "shared_vertex_count": 1933,
+      "shared_span_m": [
+        0.110925,
+        0.072,
+        0.087
+      ],
+      "maximum_shared_residual_m": 6.301587101672521e-07,
+      "shared_examples_m": [
+        [
+          -0.0554625,
+          0.0,
+          0.02179589
+        ],
+        [
+          -0.0235265,
+          0.0175,
+          0.04202147
+        ],
+        [
+          -0.00168232,
+          0.0352,
+          -0.00627852
+        ],
+        [
+          0.02314736,
+          0.0175,
+          0.06100571
+        ],
+        [
+          0.0554625,
+          0.01449999,
+          0.02981181
+        ]
+      ],
+      "first_joint_center_difference_m": [
+        9.926083322164195e-05,
+        -0.0005869318058109585,
+        -0.0002948553770305562
+      ],
+      "first_joint_center_distance_m": 0.0006642901106054483,
+      "note": "Meshes are not identical; shared fixed-base geometry establishes a nominal frame, not installed accuracy."
+    }
+  }
+}

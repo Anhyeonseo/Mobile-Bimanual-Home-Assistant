@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "status": "bottom_reference_rechecked_after_power_cycle",
+  "initial_observation": {
+    "schema_version": 1,
+    "status": "stationary_candidate_only_controller_fault",
+    "source": "output/home-assistant/s2/lift/20261105T064850Z/low-reference.json",
+    "source_sha256": "7e19e8968abbd14bdd38538d70312e06ae9dd98f10b1992542513b388d275102",
+    "captured_at_utc": "2026-11-05T06:48:49.386420+00:00",
+    "operator_reported_position": "mechanical low endpoint",
+    "firmware": "lift-teleop-v4",
+    "motor_id": 10,
+    "sample_count": 5,
+    "position_raw_values": [
+      3819,
+      3819,
+      3820,
+      3820,
+      3820
+    ],
+    "candidate_origin_modulo_raw": 3820,
+    "position_span_counts": 1,
+    "speed_raw_values": [
+      50,
+      32818,
+      32818,
+      32818,
+      0
+    ],
+    "torque_raw_values": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "motor_status_raw_values": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "motor_register_writes_during_check": 0,
+    "controller_fault": "HOST_RX_ERROR",
+    "controller_fault_cleared": false,
+    "origin_raw_unwrapped": null,
+    "origin_id": null,
+    "session_id": null,
+    "origin_bound_for_runtime": false,
+    "live_origin_validated": false,
+    "continuous_unwrap_verified": false,
+    "power_cycle_persistence_verified": false,
+    "motion_authorized": false,
+    "s2_complete": false,
+    "limitations": [
+      "Single-turn readings at operator-reported bottom only; not a multi-turn or persistent origin.",
+      "Current firmware remains fault-latched; no drive or fault-clear commands were sent.",
+      "Some speed samples were nonzero despite a one-count position span; stationarity not accepted from speed.",
+      "Reference must be reacquired if moved, reset, power cycled or continuity lost."
+    ]
+  },
+  "latest_verification": {
+    "source": "output/home-assistant/s2/lift/post-reset-bottom-20261105-01.json",
+    "source_sha256": "c757fbe79cd77e609a9675af780a06ad14e051bd47c7fa7c0ef1720fa539c02c",
+    "captured_at_utc": "2026-11-05T07:07:41.164013+00:00",
+    "status": "bottom_observation_passed",
+    "sample_count": 100,
+    "position_min_raw": 3819,
+    "position_max_raw": 3820,
+    "candidate_origin_raw": 3819,
+    "maximum_sample_gap_ms": 53,
+    "speed_raw_histogram": {
+      "0": 92,
+      "50": 6,
+      "32818": 2
+    },
+    "torque_raw_values": [
+      0
+    ],
+    "controller_fault_after": false,
+    "motor_writes_during_check": 0,
+    "link_check_source": "output/home-assistant/s2/lift/20261105T070625Z/post-reset-link.json",
+    "link_check_sha256": "89ea8e9ed60f31b0556d8d1e80359e040ef4089c12002e9db0d2c8cbb2fa7836",
+    "link_check_responses": 200,
+    "session_id": "c412c3a7-8024-4182-806e-dd8f6327cd43",
+    "origin_id": "e6ddb0f2-3ec2-45d6-a630-d1fbdb9d1a7f",
+    "session_closed": true
+  },
+  "historical_endpoint_comparison": {
+    "source": "output/home-assistant/s1/lift-teleop-range-20261101T103707Z-8079.json",
+    "previous_bottom_raw": 3807,
+    "current_bottom_raw_range": [
+      3819,
+      3820
+    ],
+    "difference_counts": [
+      12,
+      13
+    ],
+    "historical_scale_difference_mm": [
+      0.25002441644691864,
+      0.2708597844841619
+    ],
+    "operator_confirmed_same_mechanical_endpoint": true
+  },
+  "controller_fault_cleared": true,
+  "origin_bound_for_runtime": false,
+  "live_origin_validated": false,
+  "continuous_unwrap_verified": false,
+  "power_cycle_endpoint_consistency_observed": true,
+  "motion_authorized": false,
+  "s2_complete": false,
+  "limitations": [
+    "100 stationary-position samples and one operator-confirmed power cycle; no moving or full-travel validation.",
+    "Five quiet zero-speed samples established an observation origin; other samples still reported speed raw 50/32818 with a one-count position span.",
+    "Legacy firmware has no boot identity. This reader session is closed and its origin cannot be reused as a live runtime origin.",
+    "Official 84 mm/turn is used for development. Scale and common camera/joint clock remain unvalidated."
+  ]
+}

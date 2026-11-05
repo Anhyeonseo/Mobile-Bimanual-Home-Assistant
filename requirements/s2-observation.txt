@@ -1,0 +1,4 @@
+# Hardware-free S2 math / serial observer. Reuse the Jetson's existing RealSense
+# environment for --rgbd; do not replace its platform-specific pyrealsense2 build.
+numpy==1.26.4
+pyserial==3.5

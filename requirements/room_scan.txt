@@ -1,0 +1,5 @@
+# Isolated recorder environment: legacy RealSense .bag output required by the dataset consumer.
+# Do not replace the SDK in the existing perception environment.
+pyrealsense2==2.57.7.10387
+numpy==1.26.4
+opencv-python-headless==4.10.0.84

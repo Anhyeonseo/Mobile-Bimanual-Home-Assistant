@@ -67,7 +67,12 @@ HAL_StatusTypeDef Servo_WriteData(uint8_t id,uint8_t addr,const uint8_t *v,uint8
     else if(addr==55){assert(n==1&&v[0]<=1);}
     else if(addr==40){assert(n==1&&v[0]<=1);if(v[0])assert(regs[33]==1&&regs[46]==0&&regs[47]==0);}
     else {
-        assert(addr==46&&n==2&&v[1]==0&&(v[0]==0||v[0]==100));
+        assert(addr==46&&n==2&&
+            ((v[1]==0&&(v[0]==0||v[0]==100))
+#if HOST_LIFT_BIDIRECTIONAL
+             || (v[1]==128&&v[0]==100)
+#endif
+            ));
         assert(regs[33]==1); /* never write a position-mode goal */
         if(v[0]){assert(regs[40]==1);nonzero++;}
         regs[40]=1; /* observed zero-speed write torque side effect */

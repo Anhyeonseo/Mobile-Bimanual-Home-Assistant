@@ -1,0 +1,593 @@
+{
+  "schema_version": 1,
+  "robot_model": "alohamini1",
+  "arm_model": "SO-ARM101",
+  "sources": [
+    {
+      "file": "alohamini1.urdf",
+      "repository": "liyiteng/AlohaMini",
+      "commit": "17c6a98d79881a45ab869c1f392ed89c0723a298",
+      "path": "AlohaMini1/simulation/src/Aloha/urdf/Aloha.urdf",
+      "sha256": "92175fefa161717d4e7f845096fde9513e5ad27e24d06beca5af4799abacae79",
+      "url": "https://github.com/liyiteng/AlohaMini/blob/17c6a98d79881a45ab869c1f392ed89c0723a298/AlohaMini1/simulation/src/Aloha/urdf/Aloha.urdf"
+    },
+    {
+      "file": "so101_new_calib.urdf",
+      "repository": "TheRobotStudio/SO-ARM100",
+      "commit": "a758567c3978dfeefe282ede0500085a48fe8f78",
+      "path": "Simulation/SO101/so101_new_calib.urdf",
+      "sha256": "3a65d2d35e68a8d2f0c2cc176d19b884506543c93ba72980145b80abe276022c",
+      "url": "https://github.com/TheRobotStudio/SO-ARM100/blob/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/so101_new_calib.urdf"
+    },
+    {
+      "file": "alohamini_config.py.txt",
+      "repository": "liyiteng/lerobot_alohamini",
+      "commit": "ec65318f4cc3d830242f6e987d43f46e6b61f0a5",
+      "path": "src/lerobot/robots/alohamini/config_alohamini.py",
+      "sha256": "bdc2bd478d860f16428d02eb02bcab205bb0680c3fe8d533cab580dbb62d077d",
+      "url": "https://github.com/liyiteng/lerobot_alohamini/blob/ec65318f4cc3d830242f6e987d43f46e6b61f0a5/src/lerobot/robots/alohamini/config_alohamini.py"
+    }
+  ],
+  "arm_joints": [
+    {
+      "name": "gripper_frame_joint",
+      "type": "fixed",
+      "parent": {
+        "link": "gripper_link"
+      },
+      "child": {
+        "link": "gripper_frame_link"
+      },
+      "origin": {
+        "xyz": "-0.0079 -0.000218121 -0.0981274",
+        "rpy": "0 3.14159 0"
+      },
+      "axis": {
+        "xyz": "0 0 0"
+      }
+    },
+    {
+      "name": "gripper",
+      "type": "revolute",
+      "parent": {
+        "link": "gripper_link"
+      },
+      "child": {
+        "link": "moving_jaw_so101_v1_link"
+      },
+      "origin": {
+        "xyz": "0.0202 0.0188 -0.0234",
+        "rpy": "1.5708 -5.24284e-08 -1.41553e-15"
+      },
+      "axis": {
+        "xyz": "0 0 1"
+      },
+      "limit": {
+        "effort": "10",
+        "velocity": "10",
+        "lower": "-0.174533",
+        "upper": "1.74533"
+      }
+    },
+    {
+      "name": "wrist_roll",
+      "type": "revolute",
+      "parent": {
+        "link": "wrist_link"
+      },
+      "child": {
+        "link": "gripper_link"
+      },
+      "origin": {
+        "xyz": "5.55112e-17 -0.0611 0.0181",
+        "rpy": "1.5708 0.0486795 3.14159"
+      },
+      "axis": {
+        "xyz": "0 0 1"
+      },
+      "limit": {
+        "effort": "10",
+        "velocity": "10",
+        "lower": "-2.74385",
+        "upper": "2.84121"
+      }
+    },
+    {
+      "name": "wrist_flex",
+      "type": "revolute",
+      "parent": {
+        "link": "lower_arm_link"
+      },
+      "child": {
+        "link": "wrist_link"
+      },
+      "origin": {
+        "xyz": "-0.1349 0.0052 3.62355e-17",
+        "rpy": "4.02456e-15 8.67362e-16 -1.5708"
+      },
+      "axis": {
+        "xyz": "0 0 1"
+      },
+      "limit": {
+        "effort": "10",
+        "velocity": "10",
+        "lower": "-1.65806",
+        "upper": "1.65806"
+      }
+    },
+    {
+      "name": "elbow_flex",
+      "type": "revolute",
+      "parent": {
+        "link": "upper_arm_link"
+      },
+      "child": {
+        "link": "lower_arm_link"
+      },
+      "origin": {
+        "xyz": "-0.11257 -0.028 1.73763e-16",
+        "rpy": "-3.63608e-16 8.74301e-16 1.5708"
+      },
+      "axis": {
+        "xyz": "0 0 1"
+      },
+      "limit": {
+        "effort": "10",
+        "velocity": "10",
+        "lower": "-1.69",
+        "upper": "1.69"
+      }
+    },
+    {
+      "name": "shoulder_lift",
+      "type": "revolute",
+      "parent": {
+        "link": "shoulder_link"
+      },
+      "child": {
+        "link": "upper_arm_link"
+      },
+      "origin": {
+        "xyz": "-0.0303992 -0.0182778 -0.0542",
+        "rpy": "-1.5708 -1.5708 0"
+      },
+      "axis": {
+        "xyz": "0 0 1"
+      },
+      "limit": {
+        "effort": "10",
+        "velocity": "10",
+        "lower": "-1.74533",
+        "upper": "1.74533"
+      }
+    },
+    {
+      "name": "shoulder_pan",
+      "type": "revolute",
+      "parent": {
+        "link": "base_link"
+      },
+      "child": {
+        "link": "shoulder_link"
+      },
+      "origin": {
+        "xyz": "0.0388353 -8.97657e-09 0.0624",
+        "rpy": "3.14159 4.18253e-17 -3.14159"
+      },
+      "axis": {
+        "xyz": "0 0 1"
+      },
+      "limit": {
+        "effort": "10",
+        "velocity": "10",
+        "lower": "-1.91986",
+        "upper": "1.91986"
+      }
+    }
+  ],
+  "mobile_reference_joints": [
+    {
+      "name": "wheel1",
+      "type": "continuous",
+      "parent": {
+        "link": "base_link"
+      },
+      "child": {
+        "link": "wheel1"
+      },
+      "origin": {
+        "xyz": "-0.1538 0.091161 0.0422",
+        "rpy": "0 0 -2.1099"
+      },
+      "axis": {
+        "xyz": "0 -1 0"
+      }
+    },
+    {
+      "name": "wheel2",
+      "type": "continuous",
+      "parent": {
+        "link": "base_link"
+      },
+      "child": {
+        "link": "wheel2"
+      },
+      "origin": {
+        "xyz": "0.15563 0.087993 0.0422",
+        "rpy": "0 0 2.086"
+      },
+      "axis": {
+        "xyz": "0 -1 0"
+      }
+    },
+    {
+      "name": "wheel3",
+      "type": "continuous",
+      "parent": {
+        "link": "base_link"
+      },
+      "child": {
+        "link": "wheel3"
+      },
+      "origin": {
+        "xyz": "-0.0020354 -0.17875 0.0422",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "-0.015476 -0.99988 0"
+      }
+    },
+    {
+      "name": "vertical_move",
+      "type": "prismatic",
+      "parent": {
+        "link": "base_link"
+      },
+      "child": {
+        "link": "vertical_link"
+      },
+      "origin": {
+        "xyz": "-0.001045 -0.067891 0.064",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "0 1.8801E-05 1"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "left_base",
+      "type": "fixed",
+      "parent": {
+        "link": "vertical_link"
+      },
+      "child": {
+        "link": "left_base"
+      },
+      "origin": {
+        "xyz": "0.15726 0.026474 0.68821",
+        "rpy": "1.5721 0 -0.01193"
+      },
+      "axis": {
+        "xyz": "0 0 0"
+      }
+    },
+    {
+      "name": "left_joint1",
+      "type": "revolute",
+      "parent": {
+        "link": "left_base"
+      },
+      "child": {
+        "link": "left_link1"
+      },
+      "origin": {
+        "xyz": "-9.9427E-05 0.065387 0.045495",
+        "rpy": "-1.5721 0.01193 -1.5058E-05"
+      },
+      "axis": {
+        "xyz": "0.00011908 0.0099879 -0.99995"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "left_joint2",
+      "type": "revolute",
+      "parent": {
+        "link": "left_link1"
+      },
+      "child": {
+        "link": "left_link2"
+      },
+      "origin": {
+        "xyz": "-0.0172799395963306 -0.0311811002780606 0.0539361523404946",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "0.999994864047587 -0.00320379392081127 8.70801950002401E-05"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "left_joint3",
+      "type": "revolute",
+      "parent": {
+        "link": "left_link2"
+      },
+      "child": {
+        "link": "left_link3"
+      },
+      "origin": {
+        "xyz": "0.0028523 0.11238 0.028829",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "0.99996 -0.0032908 0.0088132"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "left_joint4",
+      "type": "revolute",
+      "parent": {
+        "link": "left_link3"
+      },
+      "child": {
+        "link": "left_link4"
+      },
+      "origin": {
+        "xyz": "0.00048209729405399 -0.134148581563103 0.00362381075655138",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "0.999774464019127 -0.0121028846500289 0.0174511110940406"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "left_joint5",
+      "type": "revolute",
+      "parent": {
+        "link": "left_link4"
+      },
+      "child": {
+        "link": "left_link5"
+      },
+      "origin": {
+        "xyz": "0.0197383915384675 -0.0617903364033804 -0.000262136225517406",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "0.0119284594940202 0.999878198776736 0.0100647635386641"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "left_joint6",
+      "type": "revolute",
+      "parent": {
+        "link": "left_link5"
+      },
+      "child": {
+        "link": "left_link6"
+      },
+      "origin": {
+        "xyz": "0.0187720220742788 -0.0238281541937461 0.0200035092438084",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "-0.999889727846743 0.0120164296808642 -0.00872568417324989"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "right_base",
+      "type": "fixed",
+      "parent": {
+        "link": "vertical_link"
+      },
+      "child": {
+        "link": "right_base"
+      },
+      "origin": {
+        "xyz": "-0.156575640990368 0.0302182544430658 0.688907726663402",
+        "rpy": "1.5720584644847 0 -0.0119300103453133"
+      },
+      "axis": {
+        "xyz": "0 0 0"
+      }
+    },
+    {
+      "name": "right_joint1",
+      "type": "revolute",
+      "parent": {
+        "link": "right_base"
+      },
+      "child": {
+        "link": "right_link1"
+      },
+      "origin": {
+        "xyz": "-9.94268621290484E-05 0.0653870978342812 0.04549462735273",
+        "rpy": "-1.5720585543069 0.0119300008426609 -1.50580260816763E-05"
+      },
+      "axis": {
+        "xyz": "0.000119075661457425 0.00998790806073686 -0.999950112512398"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "right_joint2",
+      "type": "revolute",
+      "parent": {
+        "link": "right_link1"
+      },
+      "child": {
+        "link": "right_link2"
+      },
+      "origin": {
+        "xyz": "-0.0172799395963307 -0.0311811002780605 0.0539361523404946",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "0.999994864047587 -0.00320379392081127 8.70801950002401E-05"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "right_joint3",
+      "type": "revolute",
+      "parent": {
+        "link": "right_link2"
+      },
+      "child": {
+        "link": "right_link3"
+      },
+      "origin": {
+        "xyz": "0.00285228244048635 0.112379078107107 0.0288286304493108",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "0.999955748189333 -0.00329083176439995 0.0088131770326472"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "right_joint4",
+      "type": "revolute",
+      "parent": {
+        "link": "right_link3"
+      },
+      "child": {
+        "link": "right_link4"
+      },
+      "origin": {
+        "xyz": "0.000482097294054018 -0.134148581563103 0.00362381075655149",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "0.999774464019126 -0.0121028846500287 0.0174511110940404"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "right_joint5",
+      "type": "revolute",
+      "parent": {
+        "link": "right_link4"
+      },
+      "child": {
+        "link": "right_link5"
+      },
+      "origin": {
+        "xyz": "0.0197383915384675 -0.0617903364033804 -0.000262136225517295",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "0.0119284594940119 0.999878198776736 0.0100647635386643"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    },
+    {
+      "name": "right_joint6",
+      "type": "revolute",
+      "parent": {
+        "link": "right_link5"
+      },
+      "child": {
+        "link": "right_link6"
+      },
+      "origin": {
+        "xyz": "0.0187720220742787 -0.023828154193746 0.0200035092438087",
+        "rpy": "0 0 0"
+      },
+      "axis": {
+        "xyz": "-0.999889727846743 0.0120164296808642 -0.00872568417324984"
+      },
+      "limit": {
+        "lower": "0",
+        "upper": "0",
+        "effort": "0",
+        "velocity": "0"
+      }
+    }
+  ],
+  "lift_nominal_m_per_turn": 0.084,
+  "encoder_counts_per_turn": 4096,
+  "adoption": {
+    "arm_link_geometry": "official_so101_new_calib_without_legacy_home_offsets",
+    "mobile_mount_geometry": "official CAD datum; not interchangeable with SO101 base_link",
+    "joint_limits": "upstream nominal references only; not installed operational limits",
+    "lift_zero": "official CAD prismatic zero is not physical bottom"
+  },
+  "coordinate_convention": {
+    "base_link": "X forward, Y left, Z up; physical origin recorded in commissioning",
+    "camera_optical": "X right, Y down, Z forward",
+    "so101_zero": "upstream new_calib; installation offsets remain to be established"
+  },
+  "notes": [
+    "Official Mini1 prismatic and arm joint limits are all zero: not usable as operational ranges.",
+    "Home encoder 2048 does not imply upstream URDF angle zero.",
+    "The original Mini1 CAD arm root differs from the SO101 URDF root. Fit installed roots using reference-point observations instead of equating link names.",
+    "84mm/rev is nominal; prior approximate-endpoint estimate 85.341667mm/rev is preserved and checked independently."
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "record_kind": "operator_selected_development_home_pose",
+  "status": "both_arms_reference_captured_model_offsets_derived",
+  "operator_statement": "이거 기본 자세 ㄱㄱ",
+  "robot_model": "alohamini1",
+  "arm_model": "SO-ARM101",
+  "geometry": "config/home_assistant/official_geometry.json",
+  "urdf_sha256": "3a65d2d35e68a8d2f0c2cc176d19b884506543c93ba72980145b80abe276022c",
+  "joint_order": [
+    "base",
+    "shoulder",
+    "elbow",
+    "wrist_flex",
+    "wrist_roll",
+    "gripper"
+  ],
+  "model_angles_deg": {
+    "base": 0,
+    "shoulder": -90,
+    "elbow": 70,
+    "wrist_flex": 90,
+    "wrist_roll": 90,
+    "gripper": 0
+  },
+  "model_angles_rad": {
+    "base": 0.0,
+    "shoulder": -1.5707963267948966,
+    "elbow": 1.2217304763960306,
+    "wrist_flex": 1.5707963267948966,
+    "wrist_roll": 1.5707963267948966,
+    "gripper": 0.0
+  },
+  "capture_order": [
+    "left",
+    "right"
+  ],
+  "encoder_reference_raw": {
+    "left": {
+      "base": 2034,
+      "shoulder": 2071,
+      "elbow": 2051,
+      "wrist_flex": 2102,
+      "wrist_roll": 2041,
+      "gripper": 2081
+    },
+    "right": {
+      "base": 2046,
+      "shoulder": 2090,
+      "elbow": 2061,
+      "wrist_flex": 2084,
+      "wrist_roll": 2084,
+      "gripper": 2052
+    }
+  },
+  "existing_eeprom_home_preserved": true,
+  "direction_source": "config/home_assistant/arm_ranges.development.json",
+  "direction_mapping_verified": false,
+  "physical_reference_pose_confirmed": {
+    "left": true,
+    "right": true
+  },
+  "matching_accuracy": "operator visual reference; no independent angle measurement",
+  "mount_orientation_verified": false,
+  "runtime_motion_authorized": false,
+  "s2_complete": false,
+  "moving_jaw_orientation": "model +Y side (left when +X forward is screen up)",
+  "visualization": "/home/an-hyeonseo/.codex/visualizations/2026/11/05/01a1a949-ca73-7343-beb3-1a6c53669d56/so101-elbow-forward-70.html",
+  "operator_physical_pose_statement": "ㄱㄱ 같은 자세로 양팔 다 수정했으",
+  "alignment_record": "config/home_assistant/arm_model_alignment.development.json"
+}

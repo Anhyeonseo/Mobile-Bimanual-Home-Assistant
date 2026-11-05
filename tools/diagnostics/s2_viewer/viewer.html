@@ -1,0 +1,66 @@
+<div id="s2-coordinate-inspector">
+  <style>
+    #s2-coordinate-inspector {--s2-lift-moving:var(--yellow);}
+    #s2-coordinate-inspector .s2-head { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+    #s2-coordinate-inspector .s2-stage { position:relative; height:540px; }
+    #s2-coordinate-inspector .s2-scene { position:absolute; inset:0; display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+    #s2-coordinate-inspector canvas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+    #s2-coordinate-inspector .s2-scene:active { cursor:grabbing; }
+    #s2-coordinate-inspector .s2-scene text { fill:var(--foreground); font-size:12px; paint-order:stroke; stroke:var(--background); stroke-width:3px; stroke-linejoin:round; }
+    #s2-coordinate-inspector .s2-readout { font-variant-numeric:tabular-nums; min-height:2.5em; margin:8px 0; overflow-wrap:anywhere; }
+    #s2-coordinate-inspector .s2-legend { display:flex; flex-wrap:wrap; gap:12px; margin:8px 0; }
+    #s2-coordinate-inspector .s2-swatch { display:inline-block; width:16px; height:3px; vertical-align:middle; margin-right:4px; }
+    #s2-coordinate-inspector .s2-axis-x { background:var(--red); }
+    #s2-coordinate-inspector .s2-axis-y { background:var(--green); }
+    #s2-coordinate-inspector .s2-axis-z { background:var(--blue); }
+    #s2-coordinate-inspector .s2-extra { margin-top:12px; }
+    @media(max-width:480px) { #s2-coordinate-inspector .s2-stage { height:470px; } }
+  </style>
+  <div class="s2-head"><strong>ALOHA Mini 1 · SO-ARM101 좌표</strong><span class="viz-badge" data-role="status"></span></div>
+  <div class="text-small" data-role="mode"></div>
+  <div class="s2-legend text-small">
+    <span><i class="s2-swatch s2-axis-x"></i>X</span><span><i class="s2-swatch s2-axis-y"></i>Y</span><span><i class="s2-swatch s2-axis-z"></i>Z</span>
+    <span>베이스: X 앞 · Y 왼쪽 · Z 위</span><span>좌/우는 로봇 기준</span>
+  </div>
+  <div class="viz-controls" aria-label="시점 선택">
+    <button type="button" class="btn" data-view="iso" aria-pressed="true">입체</button>
+    <button type="button" class="btn" data-view="base" aria-pressed="false">베이스 확대</button>
+    <button type="button" class="btn" data-view="camera" aria-pressed="false">카메라 확대</button>
+    <button type="button" class="btn" data-view="arms" aria-pressed="false">팔 확대</button>
+    <button type="button" class="btn" data-view="front" aria-pressed="false">정면</button>
+    <button type="button" class="btn" data-view="side" aria-pressed="false">측면</button>
+    <button type="button" class="btn" data-view="top" aria-pressed="false">위에서</button>
+    <label class="form-check"><input type="checkbox" class="form-check-input" data-role="all-axes"><span class="form-check-label">관절 축</span></label>
+  </div>
+  <div class="s2-stage"><canvas data-role="robot-mesh" aria-hidden="true"></canvas>
+  <svg class="s2-scene" role="img" aria-label="베이스·고정 카메라·리프트·양팔·TCP의 회전 가능한 3차원 좌표와 실제 부품 형상"><title>ALOHA Mini 1 좌표계</title><desc>마우스로 회전하거나 정면·측면·위에서 버튼으로 확인합니다. 리프트를 올리면 팔만 올라가고 카메라와 베이스는 유지됩니다.</desc></svg></div>
+  <div class="viz-controls">
+    <label class="form-label">확인할 기준
+      <select class="form-select" data-role="frame"><option value="base">베이스 원점</option><option value="camera">고정 D415</option><option value="left_root">왼팔 장착 원점</option><option value="right_root">오른팔 장착 원점</option><option value="left_tcp">왼팔 집게 끝 (TCP)</option><option value="right_tcp">오른팔 집게 끝 (TCP)</option><option value="object">관측 표면점</option></select>
+    </label>
+    <label class="form-label">리프트 상대 높이 <output data-role="lift-value"></output>
+      <input class="form-range" data-role="lift" type="range" min="0" max="0.64" step="any" aria-label="최저 기준점에서 리프트 상대 높이">
+    </label>
+    <button type="button" class="btn" data-lift-end="low">최저점</button>
+    <button type="button" class="btn" data-lift-end="high">최고점</button>
+  </div>
+  <div class="text-small tabular-nums" data-role="plate-height" aria-live="polite"></div>
+  <div class="s2-readout" aria-live="polite" data-role="readout"></div>
+  <div class="viz-controls">
+    <label class="form-label">팔 <select class="form-select" data-role="arm"><option value="left">왼팔</option><option value="right">오른팔</option></select></label>
+    <label class="form-label">관절 <select class="form-select" data-role="joint"><option value="base">몸통 회전</option><option value="shoulder">어깨</option><option value="elbow">팔꿈치</option><option value="wrist_flex">손목 굽힘</option><option value="wrist_roll">손목 회전</option><option value="gripper">집게</option></select></label>
+    <label class="form-label">공식 모델 각도 <output data-role="angle-value"></output><input class="form-range" data-role="angle" type="range" min="-110" max="110" step="1" aria-label="선택 관절의 공식 모델 기준 각도"></label>
+  </div>
+  <div class="text-small" data-role="pose-status"></div>
+  <details class="s2-extra"><summary>카메라 점·기준축 수치</summary>
+    <div class="viz-controls">
+      <label class="form-label">카메라 X <output data-role="point-x-value"></output><input class="form-range" data-role="point-x" type="range" min="-0.3" max="0.3" step="0.01" value="0" aria-label="카메라 optical X 미터"></label>
+      <label class="form-label">카메라 Y <output data-role="point-y-value"></output><input class="form-range" data-role="point-y" type="range" min="-0.3" max="0.3" step="0.01" value="0.05" aria-label="카메라 optical Y 미터"></label>
+      <label class="form-label">카메라 Z <output data-role="point-z-value"></output><input class="form-range" data-role="point-z" type="range" min="0.2" max="1.2" step="0.01" value="0.6" aria-label="카메라 optical Z 미터"></label>
+    </div>
+    <div class="table-responsive"><table class="table table-sm"><thead><tr><th>기준축</th><th>X 성분</th><th>Y 성분</th><th>Z 성분</th></tr></thead><tbody data-role="axes-table"></tbody></table></div>
+    <div class="text-small" data-role="revision"></div>
+  </details>
+  <script type="application/json" data-role="data">/*__S2_DATA__*/</script>
+  <script>/*__S2_SCRIPT__*/</script>
+</div>

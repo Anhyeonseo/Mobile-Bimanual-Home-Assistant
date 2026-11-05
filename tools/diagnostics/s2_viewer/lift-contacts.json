@@ -1,0 +1,372 @@
+{
+  "schema_version": 4,
+  "height_datum": {
+    "name": "left SO-ARM mounting plate upper face",
+    "seed_triangle": 19718,
+    "local_point_m": [
+      0.15726,
+      0.026474,
+      0.688207695839842
+    ],
+    "local_vertices_m": [
+      [
+        0.1967557668685913,
+        -0.0042654844000935555,
+        0.6881694793701172
+      ],
+      [
+        0.1979556530714035,
+        -0.00441078282892704,
+        0.6881693005561829
+      ],
+      [
+        0.19932574033737183,
+        0.007919495925307274,
+        0.688184916973114
+      ]
+    ],
+    "plane_normal_local": [
+      -1.4939070783576688e-05,
+      -0.0012620889212603546,
+      0.9999992034538723
+    ],
+    "plane_center_local_m": [
+      0.15471023764638675,
+      0.009693297582478928,
+      0.6881864789932494
+    ],
+    "plane_triangle_count": 252,
+    "definition": "floor to upper mounting face at official arm attachment XY"
+  },
+  "arm_height_datums": {
+    "left": {
+      "name": "left SO-ARM mounting plate upper face",
+      "seed_triangle": 19718,
+      "local_point_m": [
+        0.15726,
+        0.026474,
+        0.688207695839842
+      ],
+      "local_vertices_m": [
+        [
+          0.1967557668685913,
+          -0.0042654844000935555,
+          0.6881694793701172
+        ],
+        [
+          0.1979556530714035,
+          -0.00441078282892704,
+          0.6881693005561829
+        ],
+        [
+          0.19932574033737183,
+          0.007919495925307274,
+          0.688184916973114
+        ]
+      ],
+      "plane_normal_local": [
+        -1.4939070783576688e-05,
+        -0.0012620889212603546,
+        0.9999992034538723
+      ],
+      "plane_center_local_m": [
+        0.15471023764638675,
+        0.009693297582478928,
+        0.6881864789932494
+      ],
+      "plane_triangle_count": 252,
+      "definition": "floor to upper mounting face at official arm attachment XY"
+    },
+    "right": {
+      "name": "right SO-ARM mounting plate upper face",
+      "seed_triangle": 17518,
+      "local_point_m": [
+        -0.156575640990368,
+        0.0302182544430658,
+        0.6889077283462167
+      ],
+      "local_vertices_m": [
+        [
+          -0.19575367867946625,
+          0.03025687113404274,
+          0.6889072060585022
+        ],
+        [
+          -0.19489963352680206,
+          0.02973160892724991,
+          0.6889064908027649
+        ],
+        [
+          -0.19439244270324707,
+          0.03573005273938179,
+          0.6889140605926514
+        ]
+      ],
+      "plane_normal_local": [
+        -1.5236347163705995e-05,
+        -0.00126172452543603,
+        0.9999992039092209
+      ],
+      "plane_center_local_m": [
+        -0.19764391088946945,
+        0.014215385128409253,
+        0.6888869113865352
+      ],
+      "plane_triangle_count": 112,
+      "definition": "floor to upper mounting face at official arm attachment XY"
+    }
+  },
+  "primary_height_side": "left",
+  "geometry_sha256": "873a16f87cfddafd79dcc880cae26862d13614218c7cf81accd5793b4e28fc81",
+  "source_mesh_sha256": {
+    "base_link.STL": "801f95dc79f24b8e3b157b53d8a880560132c4bc01d0f8f731e86e05e0a5fff1",
+    "vertical_link.STL": "1e9162535c796635d404919d9612e684e5c711d3fa405e28c1e9c5326b5134c6"
+  },
+  "method": "exact triangle projection intersection and affine gap extrema on selected stop surfaces",
+  "scope": "complete base deck and antenna foot solids versus the complete moving carriage; not global collision clearance or hardware operating limits",
+  "lower_surface_selection": {
+    "seed_triangle": 62420,
+    "triangle_count": 9866,
+    "source_triangle_indices_sha256": "4f9b23c202562ed3704d950b406539bc48dd9d0850020cf5da9043cfb18cf7e3",
+    "bounds_min_m": [
+      -0.19171401858329773,
+      -0.19750860333442688,
+      3.608224830031759e-16
+    ],
+    "bounds_max_m": [
+      0.19270208477973938,
+      0.14834363758563995,
+      0.06400000303983688
+    ],
+    "selection": "entire vertex-connected component; 1 micrometre seam matching, original coordinates"
+  },
+  "upper_surface_selection": {
+    "seed_triangle": 22082,
+    "triangle_count": 7194,
+    "source_triangle_indices_sha256": "1175df31b416618cc7a044c6c0321f2c64c84dce82024365188369cec72eafc1",
+    "bounds_min_m": [
+      -0.045169975608587265,
+      -0.10132479667663574,
+      0.835575520992279
+    ],
+    "bounds_max_m": [
+      0.04398932680487633,
+      0.1542111337184906,
+      1.08355712890625
+    ],
+    "selection": "entire vertex-connected component; 1 micrometre seam matching, original coordinates"
+  },
+  "axis_cad": [
+    0.0,
+    1.8800999996677136e-05,
+    0.9999999998232613
+  ],
+  "ground_cad_z_m": -0.007295521932840346,
+  "contacts": {
+    "low": {
+      "q_m": -0.5246170729728391,
+      "fixed_triangle": 61697,
+      "moving_triangle": 5999,
+      "contact_cad_m": [
+        0.04191325912082643,
+        -0.06884943304588478,
+        0.06400000304029163
+      ],
+      "fixed_vertices": [
+        [
+          0.04105692356824875,
+          -0.06615450978279114,
+          0.06400000303983688
+        ],
+        [
+          0.04340669512748718,
+          -0.07354933768510818,
+          0.06400000303983688
+        ],
+        [
+          0.04105692356824875,
+          -0.06615450978279114,
+          0.05700000002980232
+        ]
+      ],
+      "moving_vertices_at_zero": [
+        [
+          0.04375908132076264,
+          -0.0850171951327324,
+          0.5886173739433289
+        ],
+        [
+          -0.04604179803848266,
+          -0.0677902085311329,
+          0.588617075920105
+        ],
+        [
+          0.04395179803848267,
+          -0.06886389081895725,
+          0.588617075920105
+        ]
+      ],
+      "moving_envelope_top_cad_z_m": 0.22831087559476515,
+      "platform_top_cad_z_m": 0.2275906229597231,
+      "platform_top_cad_point_m": [
+        0.15621500000000002,
+        -0.041426863325587225,
+        0.2275906229597231
+      ],
+      "floor_to_platform_top_m": 0.23488614489256343,
+      "arm_mounting_plates": {
+        "left": {
+          "cad_point_m": [
+            0.15621500000000002,
+            -0.041426863325587225,
+            0.2275906229597231
+          ],
+          "floor_height_m": 0.23488614489256343
+        },
+        "right": {
+          "cad_point_m": [
+            -0.157620640990368,
+            -0.03768260888252142,
+            0.22829065546609772
+          ],
+          "floor_height_m": 0.23558617739893806
+        }
+      },
+      "moving_vertices_at_contact": [
+        [
+          0.04375908132076264,
+          -0.08502705845831962,
+          0.06400030106320997
+        ],
+        [
+          -0.04604179803848266,
+          -0.06780007185672013,
+          0.0640000030399861
+        ],
+        [
+          0.04395179803848267,
+          -0.06887375414454447,
+          0.0640000030399861
+        ]
+      ]
+    },
+    "high": {
+      "q_m": 0.11922974445542904,
+      "fixed_triangle": 21607,
+      "moving_triangle": 6553,
+      "contact_cad_m": [
+        0.005789082771092653,
+        -0.05469086881005455,
+        0.8650930523872375
+      ],
+      "fixed_vertices": [
+        [
+          0.006316262762993574,
+          -0.057063255459070206,
+          0.8650930523872375
+        ],
+        [
+          -0.0013347724452614784,
+          -0.05397159606218338,
+          0.8650930523872375
+        ],
+        [
+          0.013832543045282364,
+          -0.05415305495262146,
+          0.8650930523872375
+        ]
+      ],
+      "moving_vertices_at_zero": [
+        [
+          0.005063337547630072,
+          -0.05313256771600247,
+          0.7458632483482361
+        ],
+        [
+          0.004869620123803616,
+          -0.05283736733084918,
+          0.7445045008659363
+        ],
+        [
+          0.005789082771092653,
+          -0.05469311044847966,
+          0.7458633079528809
+        ]
+      ],
+      "moving_envelope_top_cad_z_m": 0.8721576929092406,
+      "platform_top_cad_z_m": 0.8714374402741986,
+      "platform_top_cad_point_m": [
+        0.15621500000000002,
+        -0.0414147583615749,
+        0.8714374402741986
+      ],
+      "floor_to_platform_top_m": 0.8787329622070389,
+      "arm_mounting_plates": {
+        "left": {
+          "cad_point_m": [
+            0.15621500000000002,
+            -0.0414147583615749,
+            0.8714374402741986
+          ],
+          "floor_height_m": 0.8787329622070389
+        },
+        "right": {
+          "cad_point_m": [
+            -0.157620640990368,
+            -0.037670503918509096,
+            0.8721374727805732
+          ],
+          "floor_height_m": 0.8794329947134135
+        }
+      },
+      "moving_vertices_at_contact": [
+        [
+          0.005063337547630072,
+          -0.05313032607757736,
+          0.8650929927825927
+        ],
+        [
+          0.004869620123803616,
+          -0.052835125692424066,
+          0.8637342453002929
+        ],
+        [
+          0.005789082771092653,
+          -0.05469086881005455,
+          0.8650930523872374
+        ]
+      ]
+    }
+  },
+  "assembly_origin_cad_m": [
+    -0.001045,
+    -0.067891,
+    0.064
+  ],
+  "lower_base_clearance_audit": {
+    "selection": "all complete fixed components with max CAD Z below 0.12 m",
+    "triangle_count": 73568,
+    "q_m": -0.5246170729728391,
+    "agrees_with_deck": true
+  },
+  "assembly_reference": "https://github.com/liyiteng/AlohaMini/blob/17c6a98d79881a45ab869c1f392ed89c0723a298/AlohaMini1/docs/hardware_assembly.md",
+  "historical_height_residual_m": {
+    "low": -0.025113855107436578,
+    "high": -0.02126703779296113
+  },
+  "height_consistency_verified": false,
+  "historical_arm_height_residual_m": {
+    "low": {
+      "left": -0.025113855107436578,
+      "right": -0.024413822601061952
+    },
+    "high": {
+      "left": -0.02126703779296113,
+      "right": -0.020567005286586504
+    }
+  },
+  "travel_m": 0.6438468174282681,
+  "historical_heights_used": false,
+  "physical_verified": false,
+  "motion_authorized": false
+}

@@ -70,6 +70,28 @@
         "ACTUATOR_MOBILE_FIRST_ID": "7",
         "MOBILE_BOARD_PROFILE_HEADER": ""
       }
+    },
+    {
+      "name": "home-assistant-s2-lift-teleop",
+      "inherits": "home-assistant-s1-lift-teleop",
+      "displayName": "S2 referenced bidirectional lift teleop",
+      "binaryDir": "${sourceDir}/../../build/s2-lift-teleop",
+      "cacheVariables": {
+        "LIFT_TELEOP_BIDIRECTIONAL": "ON"
+      }
+    },
+    {
+      "name": "home-assistant-s2-observer",
+      "displayName": "S2 read-only synchronized arm/lift observer",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/../../build/s2-observer",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/arm-none-eabi.cmake",
+        "CMAKE_BUILD_TYPE": "Release",
+        "S2_COORDINATE_OBSERVER_ONLY": "ON",
+        "ACTUATOR_MOBILE_FIRST_ID": "7",
+        "MOBILE_BOARD_PROFILE_HEADER": ""
+      }
     }
   ],
   "buildPresets": [
@@ -101,6 +123,16 @@
     {
       "name": "home-assistant-s1-lift-teleop",
       "configurePreset": "home-assistant-s1-lift-teleop",
+      "jobs": 4
+    },
+    {
+      "name": "home-assistant-s2-lift-teleop",
+      "configurePreset": "home-assistant-s2-lift-teleop",
+      "jobs": 4
+    },
+    {
+      "name": "home-assistant-s2-observer",
+      "configurePreset": "home-assistant-s2-observer",
       "jobs": 4
     }
   ]

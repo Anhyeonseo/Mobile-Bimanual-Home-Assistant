@@ -99,7 +99,7 @@ def test_backup_is_durable_and_never_overwritten(tmp_path):
 
 def test_prepare_backup_failure_sends_no_writes(monkeypatch, tmp_path):
     before=dict(torque=0)
-    monkeypatch.setattr(m,"inspect",lambda p: m.INFO)
+    monkeypatch.setattr(m,"inspect",lambda p, *args: m.INFO)
     monkeypatch.setattr(m,"snapshot",lambda p: before)
     p=Port([]);file=tmp_path/"backup.json";file.write_text("existing")
     with pytest.raises(FileExistsError): m.prepare(p,file)
@@ -142,7 +142,7 @@ def test_interactive_recording_cleanup_and_invalidating_failures(monkeypatch, tm
                 reply=dict(type="stopped",armed=False,stop_confirmed=failure!="stop",fault=failure in ("fault", "stop_latched"))
             self.data.extend(json.dumps(reply).encode()+b"\n");return len(data)
     restored=[]
-    monkeypatch.setattr(m,"inspect",lambda p: m.INFO)
+    monkeypatch.setattr(m,"inspect",lambda p, *args: m.INFO)
     eeprom=[0]*40;eeprom[33]=1
     monkeypatch.setattr(m,"snapshot",lambda p: dict(eeprom=eeprom,goal=0))
     monkeypatch.setattr(m.os,"isatty",lambda fd: True)
@@ -206,7 +206,7 @@ def test_motor_free_link_check(monkeypatch,tmp_path):
                     reply=dict(type="echo",nonce=int(line.split()[1],16),motor_write_count=0)
                 self.data.extend(json.dumps(reply).encode()+b"\n")
             return len(data)
-    monkeypatch.setattr(m,"inspect",lambda p: m.INFO)
+    monkeypatch.setattr(m,"inspect",lambda p, *args: m.INFO)
     p=LinkPort(); result=m.link_check(p,tmp_path/"link.json")
     assert result["responses"]==200
     assert all(w.startswith((b"STATUS",b"ECHO")) for w in p.writes)
@@ -229,7 +229,7 @@ def test_powered_idle_check_never_requests_descent_and_always_stops(monkeypatch,
                 assert parts[0]=="STOP"
                 reply=dict(type="stopped",armed=False,fault=False,stop_confirmed=True)
             self.data.extend(json.dumps(reply).encode()+b"\n");return len(data)
-    monkeypatch.setattr(m,"inspect",lambda p: m.INFO)
+    monkeypatch.setattr(m,"inspect",lambda p, *args: m.INFO)
     eeprom=[0]*40;eeprom[33]=1
     monkeypatch.setattr(m,"snapshot",lambda p: dict(eeprom=eeprom,goal=0))
     monkeypatch.setattr(m.secrets,"randbelow",lambda n:122)
@@ -354,3 +354,47 @@ def test_startup_reply_timeout_is_not_retried(monkeypatch):
     with pytest.raises(RuntimeError,match='reply timeout'):
         m.arm_when_stationary(p,123,False,lambda r:None)
     assert len(p.writes)==2
+
+
+def holding_startup_baseline():
+    return dict(type='status', armed=False, fault=False, motor_write_count=12,
+                stop_confirmed=True, torque_raw=1, goal_raw=0, reference_id=77,
+                session=99, nonzero_speed_writes=1, relative_counts=-29762,
+                telemetry_valid=True)
+
+
+def holding_startup_reject():
+    return holding_startup_baseline() | dict(type='error', reason='ARM_NOT_STATIONARY',
+                                           relative_counts=-29761)
+
+
+def test_holding_retry_is_opt_in_and_preserves_reference(monkeypatch):
+    monkeypatch.setattr(m.time,'sleep',lambda dt:None)
+    p=Port([holding_startup_baseline(),holding_startup_reject(),
+            dict(type='armed',armed=True,fault=False,session=123,sequence=0)])
+    m.arm_when_stationary(p,123,False,lambda r:None,allow_holding_retry=True)
+    assert len(p.writes)==3
+    assert all(w.startswith(b'ARM ') for w in p.writes[1:])
+
+
+@pytest.mark.parametrize('changes',[
+    dict(reference_id=78),dict(session=100),dict(nonzero_speed_writes=2),
+    dict(relative_counts=-29759),dict(telemetry_valid=False),dict(torque_raw=2),
+    dict(motor_write_count=13),dict(goal_raw=100),dict(fault=True)])
+def test_holding_retry_rejects_changed_or_uncertain_state(monkeypatch,changes):
+    monkeypatch.setattr(m.time,'sleep',lambda dt:pytest.fail('unsafe retry'))
+    p=Port([holding_startup_baseline(),holding_startup_reject() | changes])
+    with pytest.raises(RuntimeError):
+        m.arm_when_stationary(p,123,False,lambda r:None,allow_holding_retry=True)
+    assert len(p.writes)==2
+
+
+def test_holding_retry_still_bounded(monkeypatch):
+    now=[0.]
+    monkeypatch.setattr(m.time,'monotonic',lambda:now[0])
+    monkeypatch.setattr(m.time,'sleep',lambda dt:now.__setitem__(0,now[0]+dt))
+    p=Port([holding_startup_baseline()]+[holding_startup_reject()]*20)
+    with pytest.raises(m.StartupNotStationary):
+        m.arm_when_stationary(p,123,False,lambda r:None,allow_holding_retry=True)
+    assert len(p.writes)==21
+    assert not any(w.startswith(b'D ') for w in p.writes)
