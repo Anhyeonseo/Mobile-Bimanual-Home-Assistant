@@ -1,0 +1,14 @@
+{
+  "index": 9,
+  "category": "misc_objects",
+  "objects": [
+    "cup",
+    "remote control",
+    "marker pen",
+    "utility knife"
+  ],
+  "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T112140_342653Z",
+  "captured_at_utc": "2026-11-01T11:21:40.284742+00:00",
+  "visual_check": "Four objects separated within RGB frame: cup center-left, remote center-right, marker right, utility knife foreground. Calculator not present. Raw depth has missing pixels on dark objects.",
+  "status": "captured"
+}

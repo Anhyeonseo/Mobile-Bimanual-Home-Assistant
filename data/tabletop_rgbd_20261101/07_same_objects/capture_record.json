@@ -1,0 +1,12 @@
+{
+  "index": 7,
+  "category": "same_objects",
+  "objects": [
+    "cup",
+    "cup"
+  ],
+  "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T111929_719268Z",
+  "captured_at_utc": "2026-11-01T11:19:29.692986+00:00",
+  "visual_check": "Two black cups separated left and right, fully within RGB frame; raw depth has missing pixels on cups.",
+  "status": "captured"
+}

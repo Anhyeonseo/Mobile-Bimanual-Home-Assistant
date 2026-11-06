@@ -1,0 +1,13 @@
+{
+  "index": 1,
+  "category": "mixed_objects",
+  "objects": [
+    "cup",
+    "remote control",
+    "calculator"
+  ],
+  "source": "hyper@192.168.35.2:/home/hyper/realsense-grounding/tmp/realsense-web/20261101T105957_680371Z",
+  "captured_at_utc": "2026-11-01T10:59:57.538976+00:00",
+  "visual_check": "Three objects fully visible; raw depth contains missing pixels on the dark cup.",
+  "status": "captured"
+}
