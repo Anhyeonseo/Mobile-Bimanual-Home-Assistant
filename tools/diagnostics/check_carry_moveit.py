@@ -96,9 +96,10 @@ def main():
             scene.scene.world.collision_objects=[floor]
             if not call('apply_planning_scene',scene).success: raise RuntimeError('floor scene failed')
             backend = MoveItCarryPlanner(arm,state,call)
-            # These seeds represent reachable planner fixtures; not captured objects.
+            # Absolute official model angles keep these synthetic fixtures
+            # independent of the installation's recalibrated Home reference.
             for roll in (0., 30.):
-                pre=arm.anchor+np.deg2rad([0.,30.,-40.,-30.,roll])
+                pre=np.deg2rad([0.,-45.,45.,60.,90.+roll])
                 pose=arm.fk(pre)[0]
                 pose[:3,3] += .006*pose[:3,2]
                 attachment=np.eye(4); attachment[:3,3]=[-.018,0.,0.]
