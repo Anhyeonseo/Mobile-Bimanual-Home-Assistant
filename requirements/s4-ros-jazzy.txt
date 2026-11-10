@@ -1,0 +1,22 @@
+# Ubuntu 24.04 / ROS Jazzy local integration. Target OS must be checked first.
+# Debian/apt package names, not pip requirements. No installation is automatic.
+ros-jazzy-ros-base
+ros-jazzy-slam-toolbox
+ros-jazzy-hls-lfcd-lds-driver
+ros-jazzy-nav2-amcl
+ros-jazzy-nav2-planner
+ros-jazzy-nav2-navfn-planner
+ros-jazzy-nav2-controller
+ros-jazzy-nav2-dwb-controller
+ros-jazzy-nav2-bt-navigator
+ros-jazzy-moveit-ros-move-group
+ros-jazzy-moveit-kinematics
+ros-jazzy-moveit-planners-ompl
+ros-jazzy-moveit-simple-controller-manager
+ros-jazzy-robot-state-publisher
+ros-jazzy-xacro
+python3-colcon-common-extensions
+python3-numpy
+python3-scipy
+python3-yaml
+python3-serial

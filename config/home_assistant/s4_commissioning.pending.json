@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "stage": "S4",
+  "mode": "local_preparation",
+  "hardware_enabled": false,
+  "jetson_connected": false,
+  "local_ros_distribution": "jazzy",
+  "target_os": null,
+  "target_ros_distribution": null,
+  "last_known_s3": {
+    "accepted": true,
+    "release": "s3-stationary-9d2fd662e718",
+    "firmware": "0x00024911",
+    "height_correction_m": -0.0091,
+    "close_allowance_m": 0.005,
+    "close_allowance_physically_tested_m": 0.004,
+    "residual_contact_offset_m": 0.008,
+    "residual_direction": "operator described below intended contact; axis and cause unmeasured",
+    "new_residual_compensation_applied": false
+  },
+  "measurement_inputs": {
+    "wheel_geometry_and_raw_speed_scale": null,
+    "lidar_base_extrinsics": null,
+    "lidar_range_and_cadence": null,
+    "transport_body_payload_envelope": null,
+    "braking_and_floor_traction": null,
+    "depth_visibility_during_travel": null,
+    "shared_bus_timing_and_stop": null,
+    "payload_hold_and_release_evidence": null,
+    "target_runtime_and_compute_load": null
+  },
+  "local_acceptance": [
+    "python_contract_regressions",
+    "native_c_shared_controller_regressions",
+    "real_slam_graph_restart_and_depth_map_archive",
+    "real_nav2_arrival_cancel_scan_loss_tf_loss",
+    "real_moveit_stock_stl_pick_carry_place_release_retreat",
+    "joint_base_lift_placement_fetch_and_faults",
+    "portable_source_release_hashes"
+  ],
+  "physical_acceptance": [
+    "read_only_inventory_and_target_environment",
+    "wheel_feedback_odometry_and_bounded_stop",
+    "lidar_range_mount_cadence_and_time_tf",
+    "native_depth_full_height_coverage",
+    "map_save_reload_and_relocalization_in_room",
+    "unloaded_navigation_then_payload_navigation",
+    "post_arrival_reobservation_pick_and_place",
+    "repeated_source_destination_runs_and_failure_recovery"
+  ],
+  "notes": [
+    "This document is a pending measurement inventory, never a runtime enable token.",
+    "S3 acceptance is preserved. The 5 mm closing setting is not calibrated force.",
+    "A successful local simulation does not satisfy a physical acceptance item.",
+    "No device, SSH, upload, flash, power change or motor action is performed by local preparation."
+  ]
+}

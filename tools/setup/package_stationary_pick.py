@@ -52,6 +52,56 @@ exec "$python" tools/run/stationary_pick.py "$@" --output "$logs/$(date -u +%Y%m
     return folder
 
 
+def package_s4(destination):
+    """Portable source release for later deployment; no compiled PC libraries.
+
+    Shares the existing content-addressed packaging entry point. S4 deliberately
+    contains no active service, automatic SSH, firmware flash or controller reset.
+    """
+    destination=Path(destination)
+    if destination.exists():raise ValueError('new release output directory required')
+    roots=('ros2_ws/src','tools','home_perception','protocol','hardware','config','requirements','tests')
+    allowed={'.py','.json','.yaml','.yml','.xml','.urdf','.xacro','.srdf','.stl','.STL',
+             '.rviz','.ini','.msg','.srv','.action','.c','.h','.html','.css','.js','.txt','.cfg','.sh','.md'}
+    paths=[]
+    for root in roots:
+        paths.extend(p for p in (ROOT/root).rglob('*') if p.is_file()
+            and '.local.' not in p.name and not p.name.startswith('.env')
+            and not any(part in ('__pycache__','node_modules','.git','build','install','log') for part in p.relative_to(ROOT/root).parts)
+            and (p.suffix in allowed or p.name in ('CMakeLists.txt','setup.cfg') or p.parent.name=='resource'))
+    paths.extend(p for p in (ROOT/'docs').glob('*.md'))
+    paths.extend(p for name in ('LICENSE','README.md') if (p:=ROOT/name).is_file())
+    # Retain the established controller sources for a later measured-profile
+    # build, but do not present an uncommissioned binary as installed firmware.
+    for root in ('firmware/stm32_actuator','firmware/stm32_g474_single_arm'):
+        paths.extend(p for p in (ROOT/root).rglob('*') if p.is_file()
+            and '.local.' not in p.name and not p.name.startswith('.env')
+            and not any(part in ('build','__pycache__','.git') for part in p.relative_to(ROOT/root).parts)
+            and (p.suffix in {'.c','.h','.s','.S','.ld','.cmake','.json','.py','.md','.txt','.ioc'} or p.name=='CMakeLists.txt'))
+    files={str(p.relative_to(ROOT)):p.read_bytes() for p in paths
+           if not p.is_symlink() and p.resolve().is_relative_to(ROOT.resolve())}
+    checksum=lambda value:hashlib.sha256(value).hexdigest()
+    fingerprints={name:checksum(raw) for name,raw in sorted(files.items())}
+    name='s4-local-'+checksum(json.dumps(fingerprints,sort_keys=True).encode())[:12]
+    manifest=dict(schema_version=1,release=name,stage='S4',status='local_candidate_not_commissioned',
+        hardware_enabled=False,physical_task_completed=False,jetson_deployed=False,
+        target_runtime='build from source on target after OS/ROS/dependency verification',
+        no_firmware_binary=True,files_sha256=fingerprints,
+        commissioning_profile='config/home_assistant/s4_commissioning.pending.json',
+        instructions='docs/S4_LOCAL_PREPARATION.md')
+    files['release.json']=(json.dumps(manifest,indent=2)+'\n').encode()
+    files['SHA256SUMS']=''.join(f'{checksum(raw)}  {key}\n' for key,raw in sorted(files.items())).encode()
+    destination.mkdir(parents=True)
+    folder=destination/name
+    for key,raw in files.items():
+        target=folder/key;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(raw)
+    with tarfile.open(destination/(name+'.tar.gz'),'w:gz') as archive:
+        archive.add(folder,arcname=name)
+    return folder
+
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--preview-bundle',type=Path);a=p.parse_args();print(package(a.output,a.preview_bundle))
+    p.add_argument('--preview-bundle',type=Path)
+    p.add_argument('--stage',choices=('s3','s4'),default='s3');a=p.parse_args()
+    if a.stage=='s4' and a.preview_bundle:p.error('S4 source package does not take a stationary preview')
+    print(package_s4(a.output) if a.stage=='s4' else package(a.output,a.preview_bundle))

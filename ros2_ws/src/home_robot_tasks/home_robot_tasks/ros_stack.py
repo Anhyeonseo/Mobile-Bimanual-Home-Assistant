@@ -59,7 +59,7 @@ def build_ros_runtime(*,node,tf_buffer,world,navigation_map,catalog_document,sta
                       clock,scene_revision,surface_observer,rgbd_topics,depth_scale_m,
                       navigation_action='/offline_nav2/navigate_to_pose',planning_service='/offline_moveit/plan_kinematic_path',
                       manipulation_factory=None, manipulation_bindings=None, surface_sampler=None,
-                      navigation_port=None, navigation_maintenance=(), navigation_observations=()):
+                      navigation_port=None, navigation_maintenance=(), navigation_observations=(), placement_policy=None):
     if manipulation_bindings is not None:
         if manipulation_factory is not None:raise InvalidTask('select one manipulation composition')
         manipulation_factory=manipulation_bindings.factory
@@ -76,7 +76,7 @@ def build_ros_runtime(*,node,tf_buffer,world,navigation_map,catalog_document,sta
             stop_client=stop_client,clock=clock,scene_revision=scene_revision,
             maintenance=(lambda:holder['arm'].maintain(),)+tuple(navigation_maintenance),
             observations=(EvidencePublisher(state,payload,evidence_client,clock),)+tuple(navigation_observations),
-            manipulation_factory=manipulation_factory,surface_sampler=surface_sampler)
+            manipulation_factory=manipulation_factory,surface_sampler=surface_sampler,placement_policy=placement_policy)
     except Exception:
         detector.close();raise
     assembly.ros_source=source;assembly.inference=detector

@@ -59,7 +59,7 @@ function buttons() {
   $('scan-demo').disabled = busy || s !== 'SCANNING'; $('pause-scan').disabled = busy || s !== 'SCANNING';
   $('resume-scan').disabled = busy || s !== 'PAUSED'; $('review-scan').disabled = busy || !['SCANNING', 'PAUSED'].includes(s) || !scan?.map_document;
   $('save-scan').disabled = busy || s !== 'REVIEW'; $('discard-scan').disabled = busy || !['SCANNING', 'PAUSED', 'REVIEW'].includes(s);
-  $('map-file').disabled = busy || s !== 'SCANNING'; $('observation-file').disabled = busy || s !== 'SCANNING';
+  $('map-file').disabled = busy || s !== 'SCANNING' || !!scan?.autonomous; $('observation-file').disabled = busy || s !== 'SCANNING' || !!scan?.autonomous;
 }
 async function action(fn) { if (busy) return; busy = true; buttons(); try { await fn(); message(null); await refresh(); } catch (e) { message(e); } finally { busy = false; buttons(); } }
 async function refresh() {
@@ -123,7 +123,8 @@ function render() {
   if (scan) {
     let description = `${scan.name} · ${labels[scan.status] || scan.status}`;
     if (scan.coverage) description += ` · 지도 범위 내 ${Math.round(scan.coverage.known_grid_fraction * 100)}% 관측`;
-    if (scan.map_document) description += scan.navigation_ready ? ' · 높이 장애물 반영 지도 포함' : ' · 높이 관측 대기 — 주행용 지도 미완성';
+    if (scan.autonomous) description += ` · ${scan.survey_state === 'STOPPING' ? '정지 확인 중' : scan.survey_state === 'RETURNING' ? '출발점으로 돌아가는 중' : '자동 탐색 ' + scan.survey_legs + '구간'} (가상 집)`;
+    if (scan.map_document && !scan.autonomous) description += scan.navigation_ready ? ' · 높이 장애물 반영 지도 포함' : ' · 높이 관측 대기 — 주행용 지도 미완성';
     $('scan-status').textContent = description;
     $('scan-hints').replaceChildren(...scan.hints.map(h => el('div', h, 'hint')));
     if (scan.coverage) $('scan-hints').append(el('div', scan.coverage.note, 'hint'));
@@ -173,7 +174,7 @@ function drawMap() {
   for (const value of plotted) { const [x, y] = position(value.position_m); ctx.fillStyle = value.kind === 'surface' ? '#367866' : '#d89740'; ctx.beginPath(); ctx.arc(x, y, value.kind === 'surface' ? 8 : 4, 0, Math.PI * 2); ctx.fill(); if (value.kind === 'surface') { ctx.font = '11px system-ui'; ctx.fillStyle = '#234c3e'; ctx.textAlign = 'center'; ctx.fillText(value.label, x, y - 13); } }
 }
 function clarify(selection) { action(async () => { request = await api(`/v1/assistant/requests/${request.request_id}/clarify`, {selection}); preview = null; $('plan').hidden = true; }); }
-function scanAction(name) { action(() => api(`/v1/assistant/scans/${scanId}/${name}`, {})); }
+function scanAction(name) { action(async () => { const permit = name === 'resume' && selectedScan()?.autonomous ? (await api('/v1/permit')).permit : null; return api(`/v1/assistant/scans/${scanId}/${name}`, {}, permit); }); }
 async function poll() { const epoch = generation; try { if (!busy) await refresh(); } catch (_) { if (epoch === generation) { $('connection-text').textContent = '연결 확인 중'; $('connection-dot').style.background = '#ba8149'; } } finally { if (token && epoch === generation) timer = setTimeout(poll, 1000); } }
 $('login-form').onsubmit = async event => { event.preventDefault(); if (busy) return; token = $('token').value.trim(); busy = true; try { await refresh(); $('token').value = ''; $('login-panel').hidden = true; $('workspace').hidden = false; $('disconnect').hidden = false; drawMap(); message(null); timer = setTimeout(poll, 1000); } catch (e) { message(e); token = ''; } finally { busy = false; buttons(); } };
 $('disconnect').onclick = () => { generation++; clearTimeout(timer); token = ''; state = null; request = null; preview = null; scanId = null; lastRegions = ''; $('workspace').hidden = true; $('login-panel').hidden = false; $('disconnect').hidden = true; $('plan').hidden = true; $('token').value = ''; $('error').textContent = '연결 해제는 작업 취소가 아닙니다. 다시 연결하면 진행 상태를 확인합니다.'; };
@@ -190,7 +191,7 @@ $('cancel').onclick = () => action(async () => { if (state.active_request) await
 $('refresh-demo').onclick = () => action(async () => { await api('/v1/assistant/demo/observe', {}); preview = null; $('plan').hidden = true; });
 $('localize-demo').onclick = () => action(async () => { await api('/v1/assistant/localize-simulation', {xy_m: [1.5, 1.5]}); preview = null; $('plan').hidden = true; });
 for (const tab of ['task', 'scan']) $(tab + '-tab').onclick = () => { for (const other of ['task', 'scan']) { $(other + '-panel').hidden = other !== tab; $(other + '-tab').classList.toggle('selected', other === tab); $(other + '-tab').setAttribute('aria-selected', String(other === tab)); } drawMap(); };
-$('scan-form').onsubmit = event => { event.preventDefault(); action(async () => { const result = await api('/v1/assistant/scans', {session_id: 'scan-' + crypto.randomUUID(), name: $('scan-name').value, mode: 'simulation'}); scanId = result.session_id; }); };
+$('scan-form').onsubmit = event => { event.preventDefault(); action(async () => { const permit = (await api('/v1/permit')).permit; const result = await api('/v1/assistant/surveys', {session_id: 'scan-' + crypto.randomUUID(), name: $('scan-name').value}, permit); scanId = result.session_id; }); };
 for (const [id, name] of [['scan-demo', 'demo'], ['pause-scan', 'pause'], ['resume-scan', 'resume'], ['review-scan', 'review'], ['save-scan', 'save'], ['discard-scan', 'discard']]) $(id).onclick = () => scanAction(name);
 for (const [id, endpoint, key] of [['map-file', 'map', 'map_document'], ['observation-file', 'observe', 'observation']]) $(id).onchange = event => action(async () => { const file = event.target.files[0]; if (!file) return; if (file.size > 120000) throw new Error('file_too_large'); const data = JSON.parse(await file.text()); await api(`/v1/assistant/scans/${scanId}/${endpoint}`, {[key]: data}); event.target.value = ''; });
 new ResizeObserver(drawMap).observe($('home-map'));

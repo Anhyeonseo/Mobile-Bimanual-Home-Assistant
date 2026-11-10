@@ -19,6 +19,7 @@ from .furniture import FurnitureMemory
 from .placement import PlacementPlanner, PlacementProfile
 from .scanning import ScanManager
 from .simulation import SyntheticFeasibility, seed_demo
+from ..home_survey import SimulatedHomeSurvey
 
 
 class AssistantService:
@@ -30,8 +31,9 @@ class AssistantService:
         self.furniture = FurnitureMemory(store, context)
         self.store.add_map(app.map._document)
         self.scan = ScanManager(store, context, busy=lambda: app.lease.owner is not None)
+        self.survey = SimulatedHomeSurvey(self)
         old_admission = app.admission
-        app.admission = lambda: not self.scan.active() and (old_admission is None or old_admission())
+        app.admission = lambda: (not self.scan.active() or self.survey.submitting) and (old_admission is None or old_admission())
         for record in store.records('intent'):
             if record.get('task_request_id') and record['status'] not in {
                     'SUCCEEDED', 'FAILED', 'CANCELLED', 'INTERRUPTED'}:
@@ -48,6 +50,7 @@ class AssistantService:
                         'text_input': True, 'voice_input': False, 'scan_replay': True,
                         'external_meaning_input': True, 'semantic_api_connected': False,
                         'furniture_replay_mapping': True, 'live_furniture_mapping': False,
+                        'autonomous_survey_simulation': True, 'autonomous_survey_hardware': False,
                         'live_slam': False, 'camera_extrinsics_verified': False,
                         'physical_manipulation': False, 'synthetic_workflow': True},
                     pending=['실제 설치·센서 사양 확인', '공통 펌웨어 실물 검증',

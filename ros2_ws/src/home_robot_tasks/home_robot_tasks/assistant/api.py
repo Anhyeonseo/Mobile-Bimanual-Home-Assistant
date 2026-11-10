@@ -42,6 +42,14 @@ def dispatch(gateway, method, path, body, authorization, permit):
     if method == 'POST' and path == '/v1/assistant/scans':
         fields(body, ('session_id', 'name', 'mode'))
         return 201, service.scan.start(**body)
+    if method == 'POST' and path == '/v1/assistant/surveys':
+        fields(body, ('session_id', 'name'))
+        previous = service.store.record('scan', body['session_id'])
+        if previous is None:
+            if not isinstance(permit, str) or gateway.permits.get(permit, 0) <= gateway.now():
+                raise InvalidTask('fresh_request_permit_required')
+            gateway.permits.pop(permit)
+        return 201, service.survey.start(body['session_id'], body['name'], gateway.now())
     parts = path.strip('/').split('/')
     if len(parts) == 5 and parts[:3] == ['v1', 'assistant', 'requests'] and method == 'POST':
         request_id, action = parts[3:]
@@ -87,6 +95,16 @@ def dispatch(gateway, method, path, body, authorization, permit):
             return 200, value
     if len(parts) == 5 and parts[:3] == ['v1', 'assistant', 'scans'] and method == 'POST':
         session_id, action = parts[3:]
+        scan = service.scan.get(session_id)
+        if scan.get('autonomous') and action in {'pause', 'resume', 'review', 'discard'}:
+            fields(body, ())
+            if action == 'resume':
+                if not isinstance(permit, str) or gateway.permits.get(permit, 0) <= gateway.now():
+                    raise InvalidTask('fresh_request_permit_required')
+                gateway.permits.pop(permit)
+            return 200, service.survey.action(session_id, action, gateway.now())
+        if scan.get('autonomous') and action in {'map', 'observe', 'demo', 'activate'}:
+            raise InvalidTask('autonomous_scan_owns_observations')
         if action in {'pause', 'resume', 'review', 'save', 'discard'}:
             fields(body, ())
             return 200, getattr(service.scan, action)(session_id)

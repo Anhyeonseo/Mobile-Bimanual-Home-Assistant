@@ -106,6 +106,10 @@ class Gateway:
         with self.lock:
             self.faulted = True
             self.permits.clear()
+            if self.assistant is not None:
+                survey = self.assistant.survey
+                if survey.session_id and self.assistant.scan.get(survey.session_id)['status'] == 'SCANNING':
+                    survey.action(survey.session_id, 'pause', self.now())
             if self.app.lease.owner:
                 self.app.cancel(self.app.lease.owner, self.now())
 
@@ -122,6 +126,8 @@ class Gateway:
             self.store.save(self.app.requests[result["request_id"]], result)
             if self.assistant is not None:
                 self.assistant.on_tick(result)
+        if self.assistant is not None and (not self.faulted or self.assistant.survey.pending):
+            self.assistant.survey.tick(self.now())
 
     def dispatch(self, method, path, authorization, body, permit=None):
         with self.lock:

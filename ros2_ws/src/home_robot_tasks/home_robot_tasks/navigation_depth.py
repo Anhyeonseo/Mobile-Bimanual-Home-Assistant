@@ -50,6 +50,7 @@ class DepthProfile:
 class DepthVolume:
     def __init__(self, profile):
         self.p = profile
+        self.historical = False
         self.cells = {}  # cell -> (occupied, original observation time)
         self.last_stamp = None
         self.epoch = None
@@ -59,6 +60,7 @@ class DepthVolume:
         if not isinstance(epoch, str) or not epoch or epoch==self.epoch:
             raise InvalidTask('navigation epoch required')
         self.epoch = epoch
+        self.historical = False
         self.cells.clear()
         self.last_stamp = None
         self.error = 'awaiting new travel observation'
@@ -92,6 +94,8 @@ class DepthVolume:
     def integrate(self, depth_m, intrinsics, camera_to_world, *, observed_s,
                   now_s, frame, calibration, epoch, motion_qualified):
         try:
+            if self.historical:
+                raise InvalidTask('archived depth requires a new live epoch')
             p = self.p
             stamp, now = number(observed_s, 'depth time'), number(now_s, 'clock')
             if (frame != p.frame or calibration != p.calibration or epoch != self.epoch
@@ -159,7 +163,7 @@ class DepthVolume:
             raise
 
     def fresh(self, now):
-        return (self.error is None and self.last_stamp is not None
+        return (not self.historical and self.error is None and self.last_stamp is not None
                 and 0 <= now-self.last_stamp <= self.p.maximum_age_s)
 
     def projected_obstacles(self):
@@ -167,7 +171,7 @@ class DepthVolume:
 
     def free(self, cell, now):
         value = self.cells.get(cell)
-        return (value is not None and not value[0]
+        return (not self.historical and value is not None and not value[0]
                 and 0 <= now-value[1] <= self.p.maximum_age_s)
 
 

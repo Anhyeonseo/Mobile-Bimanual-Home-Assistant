@@ -200,3 +200,93 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
         selection['policy']='near_best_feasible_balance_then_tabletop_ease_and_carry_cost'
     return PickCarryPlan('OFFLINE_ROUTE_FOUND', candidate.candidate_id, paths, goal, failures,
                         resolved_grasp=candidate,carry_quality=quality,selection=selection)
+
+
+@dataclass
+class PlaceCarryPlan:
+    status: str
+    stages: list = field(default_factory=list)
+    released_grasp: object = None
+    failures: list = field(default_factory=list)
+    motion_authorized: bool = False
+    physical_task_completed: bool = False
+    support_observation_id: str = ''
+    runtime_release_verification_required: bool = True
+
+
+def plan_place_carry(arm, planner, start_model_rad, held, *, scene_id,
+                     base_from_object, support_bounds_m, support_observation_id,
+                     support_observed_s, now_s, empty_transport_model_rad,
+                     clearance_m=.03, maximum_age_s=2.):
+    """Carry -> above support -> vertical lower -> release -> rise -> transport.
+
+    Reuses the pick planner's full STL/payload collision checks. The rectangular
+    horizontal support is a fresh observation, not a configured furniture name.
+    A 0..2 mm bottom gap is a geometric proposal; only the runtime's independent
+    release/support observation may claim that the object was actually placed.
+    """
+    import itertools
+    from scipy.spatial.transform import Rotation
+    from .carry_cartesian import validate_vertical_descent
+    from .navigation import identifier, number
+    result = PlaceCarryPlan('NO_COMPLETE_ROUTE')
+    stage = 'binding'
+    try:
+        identifier(support_observation_id, 'support observation')
+        now, observed = number(now_s, 'clock'), number(support_observed_s, 'support time')
+        if (not 0 < number(maximum_age_s, 'support age limit') <= 5
+                or not 0 <= now-observed <= maximum_age_s
+                or held.scene_id != scene_id or held.calibration_id != arm.profile['calibration_id']):
+            raise PlanRejected('stale support, scene or calibration')
+        if not .01 <= number(clearance_m, 'place clearance') <= .05:
+            raise PlanRejected('bounded vertical placement clearance required')
+        support = np.asarray(support_bounds_m, dtype=float)
+        if (support.shape != (2,3) or not np.isfinite(support).all()
+                or np.any(support[1,:2] <= support[0,:2])
+                or abs(support[1,2]-support[0,2]) > 1e-8):
+            raise PlanRejected('horizontal observed support bounds required')
+        desired = rigid(base_from_object)
+        vertices = (np.asarray(held.payload_mesh['vertices']) if held.payload_mesh is not None else
+                    np.asarray(list(itertools.product(*[(-v/2,v/2) for v in held.object_size_m]))))
+        world = vertices@desired[:3,:3].T+desired[:3,3]
+        if (np.any(world[:,:2].min(axis=0) < support[0,:2]+.003)
+                or np.any(world[:,:2].max(axis=0) > support[1,:2]-.003)
+                or not 0 <= float(world[:,2].min()-support[0,2]) <= .002):
+            raise PlanRejected('payload outside support or bottom gap exceeds 2 mm')
+        start = checked_joints(arm,start_model_rad)
+        empty_transport = checked_joints(arm,empty_transport_model_rad)
+        contact = desired@np.linalg.inv(rigid(held.tcp_from_object))
+        preplace = contact.copy(); preplace[2,3] += clearance_m
+        stage = 'preplace_ik'
+        q, _, _ = arm.solve(preplace,start)
+        actual = arm.fk(q)[0]
+        if (np.linalg.norm(actual[:3,3]-preplace[:3,3]) > .001
+                or Rotation.from_matrix(actual[:3,:3].T@preplace[:3,:3]).magnitude() > np.deg2rad(2)):
+            raise PlanRejected('preplace IK exceeds Cartesian handoff tolerance')
+        stage = 'preplace'
+        paths = [planner.connect(start,q,held,attached=True,label='place_preplace')]
+        stage = 'lower'
+        lower = planner.cartesian(paths[-1].end,contact,held,attached=True,label='place_lower')
+        validate_vertical_descent([arm.fk(q)[0] for q in lower.joints])
+        paths.append(lower)
+        # Keep the object at the actual release pose; never teleport to the
+        # ideal target while checking the open jaw and retreat collision sweep.
+        released = replace(held,base_from_grasp_tcp=arm.fk(lower.end)[0])
+        actual_object = released.base_from_grasp_tcp@released.tcp_from_object
+        actual_vertices=vertices@actual_object[:3,:3].T+actual_object[:3,3]
+        if (np.any(actual_vertices[:,:2].min(axis=0) < support[0,:2])
+                or np.any(actual_vertices[:,:2].max(axis=0) > support[1,:2])
+                or not -.0001 <= float(actual_vertices[:,2].min()-support[0,2]) <= .003):
+            raise PlanRejected('actual release misses observed support')
+        stage = 'release_geometry'
+        paths.append(planner.release(paths[-1].end,released))
+        stage = 'retreat'
+        retreat = released.base_from_grasp_tcp.copy();retreat[2,3] += clearance_m
+        paths.append(planner.cartesian(paths[-1].end,retreat,released,attached=False,label='place_retreat'))
+        stage = 'empty_transport'
+        paths.append(planner.connect(paths[-1].end,empty_transport,released,attached=False,label='empty_transport'))
+        return PlaceCarryPlan('OFFLINE_ROUTE_FOUND',paths,released,
+                              support_observation_id=support_observation_id)
+    except (ValueError, PlanRejected) as error:
+        result.failures.append(dict(stage=stage,reason=str(error),diagnostics=getattr(error,'diagnostics',None)))
+        return result

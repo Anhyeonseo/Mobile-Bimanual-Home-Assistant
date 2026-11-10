@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT/'ros2_ws/src/home_robot_tasks'), str(ROOT/'ros2_ws/src/so101_arm_bridge'), str(ROOT)]
 from home_robot_tasks import s2_geometry as geo
 from home_robot_tasks.carry_model import parameters
-from home_robot_tasks.carry_planning import GraspRouteCandidate, plan_pick_carry, PlanRejected
+from home_robot_tasks.carry_planning import GraspRouteCandidate, plan_pick_carry, plan_place_carry, PlanRejected
 from home_robot_tasks.carry_posture import ObjectAxisConstraint,CarryPolicy
 from home_robot_tasks.carry_moveit import MoveItCarryPlanner
 from home_robot_tasks.stationary_pick_sim import StationaryArm
@@ -35,6 +35,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mobile-mesh-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, default=ROOT/'output/home-assistant/s3/carry-moveit')
+    parser.add_argument('--include-place', action='store_true', help='also plan payload lowering, release sweep and retreat')
     args = parser.parse_args()
     from moveit_msgs.msg import RobotState, CollisionObject
     from moveit_msgs.srv import GetPositionFK, GetStateValidity, ApplyPlanningScene
@@ -107,6 +108,38 @@ def main():
                     pose,attachment,(.01,.012,.012),.5,.3)
                 plan=plan_pick_carry(arm,backend,arm.anchor,[candidate],scene_id='fixture-scene')
                 report['routes'].append(asdict(plan))
+            if args.include_place:
+                successful = plan
+                if successful.status != 'OFFLINE_ROUTE_FOUND':
+                    raise RuntimeError('pick/carry prerequisite failed')
+                held = successful.resolved_grasp
+                object_pose = held.base_from_grasp_tcp@held.tcp_from_object
+                # A synthetic narrow support beneath the payload leaves the
+                # stock fingertip sweep visible to the real collision checker.
+                from itertools import product
+                vertices = np.array(list(product(*[(-v/2,v/2) for v in held.object_size_m])))
+                world = vertices@object_pose[:3,:3].T+object_pose[:3,3]
+                top = float(world[:,2].min()-.0015)
+                lo, hi = world[:,:2].min(axis=0)-.004, world[:,:2].max(axis=0)+.004
+                support = CollisionObject(id='place_support',operation=CollisionObject.ADD)
+                support.header.frame_id='base_link'
+                support.primitives=[SolidPrimitive(type=SolidPrimitive.BOX, dimensions=[float(hi[0]-lo[0]),float(hi[1]-lo[1]),.01])]
+                support_pose=np.eye(4);support_pose[:3,3]=[(lo[0]+hi[0])/2,(lo[1]+hi[1])/2,top-.005]
+                support.primitive_poses=[backend.pose(support_pose)]
+                scene.scene.world.collision_objects=[support]
+                if not call('apply_planning_scene',scene).success: raise RuntimeError('place support scene failed')
+                place=plan_place_carry(arm,backend,successful.stages[-1].end,held,
+                    scene_id='fixture-scene',base_from_object=object_pose,
+                    support_bounds_m=[[float(lo[0]),float(lo[1]),top],[float(hi[0]),float(hi[1]),top]],
+                    support_observation_id='synthetic-support',support_observed_s=1.,now_s=1.1,
+                    empty_transport_model_rad=arm.anchor,clearance_m=.02)
+                report['place_route']=asdict(place)
+                if place.status != 'OFFLINE_ROUTE_FOUND':
+                    raise RuntimeError('place route failed: '+str(place.failures))
+                report['checks'].append('place_lower_release_retreat_full_mesh_checked')
+                support.operation=CollisionObject.REMOVE
+                scene.scene.world.collision_objects=[support]
+                if not call('apply_planning_scene',scene).success: raise RuntimeError('support cleanup failed')
             # Explicit upright task: the object stays upright although the TCP is tilted.
             upright_attachment=attachment.copy()
             upright_attachment[:3,:3]=pose[:3,:3].T
@@ -144,7 +177,7 @@ def main():
     except Exception as exc:
         report['passed']=False; report['error']=str(exc)
     (args.output/'report.json').write_text(json.dumps(report,default=serial,indent=2)+'\n')
-    print(json.dumps({k:v for k,v in report.items() if k not in ('routes',)},default=serial))
+    print(json.dumps({k:v for k,v in report.items() if k not in ('routes','place_route')},default=serial))
     for route in report['routes']:
         print(route['status'], route['failures'])
     return 0 if report['passed'] else 1
