@@ -14,7 +14,7 @@ def encode_batch_v2(batch):return encode_stream_batch_v2(batch,BatchKindV2.APPEN
 def runtime(tmp_path_factory):
     out=tmp_path_factory.mktemp('taught-executor');h=out/'profile.h';h.write_text(header(P))
     src=(BOARD/'Src/binary_control.c').read_text();i=src.index('static actuator_v2_stream_hard_caps_t Host_V2HardCaps(void)');j=src.index('\n}\n',i)+3
-    begin=src.index('static void Host_ServiceV2TrackingFeedback(void)');anchor_start=src.index('            memcpy(\n                host_v2_shadow_executor_anchor_urad,',begin);anchor_end=src.index('            host_v2_shadow_anchor_ready = 1U;',anchor_start)
+    begin=src.index('static void Host_ServiceV2TrackingFeedback(bool allow_start)');anchor_start=src.index('            memcpy(\n                host_v2_shadow_executor_anchor_urad,',begin);anchor_end=src.index('            host_v2_shadow_anchor_ready = 1U;',anchor_start)
     anchor_code=src[anchor_start:anchor_end]
     wrapper='''#include "single_arm_config.h"
 #include "bimanual_operational_limits.h"

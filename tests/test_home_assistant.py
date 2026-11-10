@@ -58,6 +58,8 @@ def test_korean_sentence_resolves_source_object_destination_without_motion(envir
         service.prepare('컵 찾아줘', 'request-1')
     preview = service.preview('request-1')
     assert preview['placement']['status'] == 'CANDIDATES_READY'
+    assert preview['placement']['evaluated'] == 12  # three distances × four azimuths × one lift height
+    assert {c['lift_height_m'] for c in preview['placement']['candidates']} == {.4}
     assert not preview['executable'] and preview['hardware_commands'] == 0
     assert not service.app.tasks
 

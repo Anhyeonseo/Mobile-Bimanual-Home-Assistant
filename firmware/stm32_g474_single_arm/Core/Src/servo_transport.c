@@ -1,9 +1,13 @@
 #include "servo_transport.h"
 #include <stddef.h>
+#include "gripper_bench_limits.h"
 #include <limits.h>
 #include "timebase.h"
 #include "single_arm_config.h"
 #include "actuator_core/mobile_ids.h"
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+#include "wheel_hold_setup.h"
+#endif
 
 typedef struct {
     UART_HandleTypeDef *uart;
@@ -140,13 +144,39 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
 {
     ServoTransportOwner *bus = find_bus(uart);
     if (!owns(bus, token) || !bus->transmit_allowed || data == NULL || !length) return false;
-#if HOST_S2_OBSERVER_ONLY
+#if HOST_S3_LEFT_GRIP_BENCH
+    extern UART_HandleTypeDef huart1;
+    if (bus->read_sent || uart != &huart1 || length < 8 || data[0] != 255 || data[1] != 255 ||
+        data[2] != GRIP_ID || data[3] != length-4) return false;
+    unsigned grip_sum = 0;
+    for (unsigned i = 2; i < length; ++i) grip_sum += data[i];
+    if ((grip_sum & 255U) != 255U) return false;
+    bool read = data[4] == 2 && length == 8 &&
+        ((data[5] == 3 && data[6] == 4) || (data[5] == 31 && data[6] == 3) || (data[5] == 40 && data[6] == 1) ||
+         (data[5] == 42 && (data[6] == 2 || data[6] == 8)) ||
+         ((data[5] == 44 || data[5] == 46 || data[5] == 48) && data[6] == 2) || (data[5] == 56 && data[6] == 15));
+    bool write = false;
+    if (!bus->read_only && data[4] == 3) {
+        if (data[5] == 40 && length == 8) write = data[6] <= 1;
+        if (length == 9) {
+            unsigned value = data[6] | (unsigned)data[7]<<8;
+            write = (data[5] == 42 && value >= GRIP_LOW && value <= GRIP_HIGH) ||
+                    (data[5] == 44 && value == 0) || (data[5] == 46 && value == GRIP_SPEED) ||
+                    (data[5] == 48 && value >= 1 && value <= GRIP_CAP);
+        }
+    }
+    if (!read && !write) return false;
+    bus->read_sent = true;
+    return true;
+#elif HOST_S2_OBSERVER_ONLY
     extern UART_HandleTypeDef huart1;
     /* Read-only observation: never any write, broadcast, wheel ID or other address. */
     if (bus->read_sent || length != 8 || data[0] != 255 || data[1] != 255 ||
         data[3] != 4 || data[4] != 2 ||
         !((data[2] >= 1 && data[2] <= 6) || (uart == &huart1 && data[2] == 10)) ||
-        !((data[5] == 56 && data[6] == 4) || (data[5] == 40 && data[6] == 1))) return false;
+        !((data[5] == 56 && data[6] == 4) || (data[5] == 40 && data[6] == 1)
+          || (uart == &huart1 && data[2] == 6 && data[5] == 56 && data[6] == 15)
+          || (data[2] >= 1 && data[2] <= 6 && ((data[5] == 3 && data[6] == 4) || (data[5] == 31 && data[6] == 3))))) return false;
     unsigned observer_sum = 0;
     for (unsigned i=2; i<length; ++i) observer_sum += data[i];
     if ((observer_sum & 255U) != 255U) return false;
@@ -200,6 +230,37 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
     for (unsigned i = 2; i < length; ++i) calibration_sum += data[i];
     if ((!read && !write) || (calibration_sum & 255u) != 255u) return false;
     bus->read_sent = true;
+    return true;
+#elif HOST_MOBILE_BASE_PRESERVE_HOLD
+    extern UART_HandleTypeDef huart1,huart4;
+    if(bus->read_sent || length<8 || length>9 || data[0]!=255 || data[1]!=255 || data[3]!=length-4)
+        return false;
+    bool left=uart==&huart1,right=uart==&huart4;
+    bool wheel=left && data[2]>=ACTUATOR_WHEEL_0_ID && data[2]<=ACTUATOR_WHEEL_2_ID;
+    bool held=((left||right) && data[2]>=1 && data[2]<=6) || (left && data[2]==ACTUATOR_LIFT_ID);
+    bool read=data[4]==2 && length==8 &&
+        ((held && ((data[5]==33 && data[6]==1) || (data[5]==40 && data[6]==8) ||
+                   ((data[5]==3 || data[5]==56) && data[6]==4) ||
+                   (left && data[2]==ACTUATOR_LIFT_ID &&
+                    ((data[5]==9 && data[6]==4) ||
+                     ((data[5]==40 || data[5]==55) && data[6]==1) ||
+                     (data[5]==42 && data[6]==2))))) ||
+         (wheel && ((data[5]==3 && data[6]==4) ||
+                    ((data[5]==33 || data[5]==40 || data[5]==55) && data[6]==1) ||
+                    ((data[5]==46 || data[5]==58 || data[5]==56) && data[6]==2))));
+    unsigned hold_sum=0;for(unsigned i=2;i<length;i++)hold_sum+=data[i];
+    if((hold_sum&255u)!=255u)return false;
+    /* Held-axis writes need a one-use, exact-packet capability issued only
+     * by the explicit stationary setup. Driving/cleanup have no capability. */
+    bool write=!bus->read_only && wheel && data[4]==3 &&
+        ((length==8 && data[5]==40 && data[6]<=1) ||
+         (length==9 && data[5]==46 &&
+          ((data[6]==0 && data[7]==0) ||
+           ((data[6]==100 || data[6]==200) && (data[7]==0 || data[7]==128)))));
+    if(!bus->read_only && held && data[4]==3)
+        write=WheelSetup_ConsumeWrite(uart,data[2],data[5],data+6,(uint8_t)(length-7));
+    if(!read && !write)return false;
+    bus->read_sent=true;
     return true;
 #elif HOST_MOBILE_WHEEL_PULSE_ONLY || HOST_MOBILE_BASE_TELEOP_ONLY
     /* Bench-only fixed pulse: no EEPROM, arm, lift, broadcast, or arbitrary

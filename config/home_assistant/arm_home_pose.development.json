@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "record_kind": "operator_selected_development_home_pose",
-  "status": "both_arms_reference_captured_model_offsets_derived",
-  "operator_statement": "이거 기본 자세 ㄱㄱ",
+  "status": "official_stl_zero_centered_and_persistence_verified",
+  "operator_statement": "공식 Home 자세로 한 팔씩 정렬; 집게는 패드 실측 대신 STL 기준",
   "robot_model": "alohamini1",
   "arm_model": "SO-ARM101",
   "geometry": "config/home_assistant/official_geometry.json",
@@ -17,18 +17,18 @@
   ],
   "model_angles_deg": {
     "base": 0,
-    "shoulder": -90,
-    "elbow": 70,
-    "wrist_flex": 90,
-    "wrist_roll": 90,
+    "shoulder": 0,
+    "elbow": 0,
+    "wrist_flex": 0,
+    "wrist_roll": 0,
     "gripper": 0
   },
   "model_angles_rad": {
     "base": 0.0,
-    "shoulder": -1.5707963267948966,
-    "elbow": 1.2217304763960306,
-    "wrist_flex": 1.5707963267948966,
-    "wrist_roll": 1.5707963267948966,
+    "shoulder": 0.0,
+    "elbow": 0.0,
+    "wrist_flex": 0.0,
+    "wrist_roll": 0.0,
     "gripper": 0.0
   },
   "capture_order": [
@@ -37,23 +37,23 @@
   ],
   "encoder_reference_raw": {
     "left": {
-      "base": 2034,
-      "shoulder": 2071,
-      "elbow": 2051,
-      "wrist_flex": 2102,
-      "wrist_roll": 2041,
-      "gripper": 2081
+      "base": 2048,
+      "shoulder": 2048,
+      "elbow": 2048,
+      "wrist_flex": 2048,
+      "wrist_roll": 2048,
+      "gripper": 2047
     },
     "right": {
-      "base": 2046,
-      "shoulder": 2090,
-      "elbow": 2061,
-      "wrist_flex": 2084,
-      "wrist_roll": 2084,
-      "gripper": 2052
+      "base": 2048,
+      "shoulder": 2048,
+      "elbow": 2048,
+      "wrist_flex": 2048,
+      "wrist_roll": 2047,
+      "gripper": 2048
     }
   },
-  "existing_eeprom_home_preserved": true,
+  "existing_eeprom_home_preserved": false,
   "direction_source": "config/home_assistant/arm_ranges.development.json",
   "direction_mapping_verified": false,
   "physical_reference_pose_confirmed": {
@@ -64,8 +64,8 @@
   "mount_orientation_verified": false,
   "runtime_motion_authorized": false,
   "s2_complete": false,
-  "moving_jaw_orientation": "model +Y side (left when +X forward is screen up)",
-  "visualization": "/home/an-hyeonseo/.codex/visualizations/2026/11/05/01a1a949-ca73-7343-beb3-1a6c53669d56/so101-elbow-forward-70.html",
-  "operator_physical_pose_statement": "ㄱㄱ 같은 자세로 양팔 다 수정했으",
+  "moving_jaw_orientation": "official STL/URDF at all six model angles zero",
+  "visualization": "output/home-reference-20261109/official-home-reference.png",
+  "operator_physical_pose_statement": "left and right separately confirmed by operator",
   "alignment_record": "config/home_assistant/arm_model_alignment.development.json"
 }

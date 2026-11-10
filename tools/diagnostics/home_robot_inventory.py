@@ -19,7 +19,7 @@ import sys
 def read_metadata(path):
     try:
         return {"status": "read", "value": path.read_text().replace("\x00", "").strip()}
-    except OSError as error:
+    except (OSError, UnicodeError) as error:
         return {"status": "unavailable", "reason": type(error).__name__}
 
 
@@ -39,11 +39,8 @@ def command(argv):
         return {"status": "unavailable", "reason": type(error).__name__}
 
 
-def collect(root=Path("/")):
-    def at(path):
-        return root / path.lstrip("/")
-
-    usb_paths, usb_error = entries(at("/sys/bus/usb/devices"))
+def usb_inventory(directory):
+    usb_paths, usb_error = entries(directory)
     usb = []
     for path in usb_paths:
         if not (path / "idVendor").is_file():
@@ -52,10 +49,13 @@ def collect(root=Path("/")):
             field: read_metadata(path / field) for field in
             ("idVendor", "idProduct", "manufacturer", "product", "serial", "speed")
         }})
+    return {"entries": usb, "error": usb_error}
 
+
+def serial_inventory(root):
     serial_links = {}
     for directory in ("/dev/serial/by-id", "/dev/serial/by-path"):
-        paths, error = entries(at(directory))
+        paths, error = entries(root / directory.lstrip("/"))
         links = []
         for path in paths:
             try:
@@ -63,10 +63,10 @@ def collect(root=Path("/")):
             except OSError as link_error:
                 links.append({"name": path.name, "error": type(link_error).__name__})
         serial_links[directory] = {"entries": links, "error": error}
+    return serial_links
 
-    tty_paths, tty_error = entries(at("/sys/class/tty"))
-    tty_names = [p.name for p in tty_paths if p.name.startswith(("ttyUSB", "ttyACM", "ttyTHS"))]
-    ros_paths, ros_error = entries(at("/opt/ros"))
+
+def package_versions():
     packages = {}
     for name in ("numpy", "torch", "torchvision", "transformers", "pyrealsense2",
                  "opencv-python", "opencv-python-headless", "pyserial"):
@@ -75,6 +75,16 @@ def collect(root=Path("/")):
         except importlib.metadata.PackageNotFoundError:
             packages[name] = None
 
+    return packages
+
+
+def collect(root=Path("/")):
+    def at(path):
+        return root / path.lstrip("/")
+
+    tty_paths, tty_error = entries(at("/sys/class/tty"))
+    tty_names = [p.name for p in tty_paths if p.name.startswith(("ttyUSB", "ttyACM", "ttyTHS"))]
+    ros_paths, ros_error = entries(at("/opt/ros"))
     return {
         "schema_version": 1,
         "collected_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -89,9 +99,9 @@ def collect(root=Path("/")):
                 "directory_error": ros_error,
                 "environment": {key: os.environ.get(key) for key in (
                     "ROS_DISTRO", "ROS_VERSION", "ROS_DOMAIN_ID", "RMW_IMPLEMENTATION")}},
-        "python_packages_in_this_interpreter": packages,
-        "usb": {"entries": usb, "error": usb_error},
-        "serial_links": serial_links,
+        "python_packages_in_this_interpreter": package_versions(),
+        "usb": usb_inventory(at("/sys/bus/usb/devices")),
+        "serial_links": serial_inventory(root),
         "serial_node_names": {"entries": tty_names, "error": tty_error},
         "verification": {
             "device_ports_opened": False, "camera_stream_started": False,

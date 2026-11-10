@@ -55,15 +55,15 @@ int main(void){
  /* Two complete six-axis sweeps allow finite completion with right absent. */
  tracking.active=1;tracking.completed_pairs=12;next_result=BIMANUAL_TRACKING_IDLE;
  host_v2_terminal_settle_active=1;host_v2_terminal_settle_started_ms=100;
- Host_ServiceV2TrackingFeedback();assert(!host_v2_terminal_settle_active&&!tracking.active&&stop_count==0);
+ Host_ServiceV2TrackingFeedback(true);assert(!host_v2_terminal_settle_active&&!tracking.active&&stop_count==0);
  /* Missing LEFT feedback must still stop; do not relax the completeness check. */
  tracking.active=1;host_v2_terminal_settle_active=1;BimanualFeedbackSnapshot_InvalidatePair(1);
- Host_ServiceV2TrackingFeedback();assert(stop_count==1);
+ Host_ServiceV2TrackingFeedback(true);assert(stop_count==1);
  /* Right values never get checked as physical feedback. Left error resets settle. */
  tracking.active=1;next_result=BIMANUAL_TRACKING_SAMPLE_READY;
  next_sample.joint_index=0;next_sample.left_position_raw=60000;next_sample.left_commanded_urad=0;
  next_sample.right_commanded_urad=999999;next_sample.right_position_raw=0;
- Host_ServiceV2TrackingFeedback();assert(host_v2_terminal_settle_baseline_completed_pairs==12);
+ Host_ServiceV2TrackingFeedback(true);assert(host_v2_terminal_settle_baseline_completed_pairs==12);
  disable_fails=1;Host_SendV2ShadowSnapshot(&request);assert(response.payload[0]==2&&fault_count==1);
  disable_fails=0;read_fails=1;Host_SendV2ShadowSnapshot(&request);assert(response.payload[0]==4&&fault_count==2);
  return 0;

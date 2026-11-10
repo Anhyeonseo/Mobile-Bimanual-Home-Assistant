@@ -4,7 +4,7 @@
 #include <assert.h>
 static unsigned pending,fail_read,fail_end,wait_read;
 static ServoInMotionTelemetrySnapshot measured;
-void Servo_InMotionTelemetryBegin(void){}
+HAL_StatusTypeDef Servo_InMotionTelemetryBegin(void){return HAL_OK;}
 void Servo_InMotionTelemetryEnd(void){if(!fail_end)pending=0;}
 uint8_t Servo_InMotionTelemetryReleased(void){return !pending;}
 uint8_t Servo_InMotionTelemetryCanStart(void){return !pending;}

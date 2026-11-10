@@ -25,6 +25,13 @@ from so101_arm_bridge.serial_port import open_exclusive_serial
 KEYS = {"w": "F", "s": "B", "a": "L", "d": "R", "q": "A", "e": "D"}
 INPUT_LEASE = .3
 PERIOD = .05
+PRESERVE_HOLD = False
+
+
+def response_timeout():
+    # Allow an already-started bounded wheel STOP + hold readback to finish.
+    # No new motion/lease refresh is sent while waiting for this response.
+    return 3.0 if PRESERVE_HOLD else .3
 
 
 def frame(prefix):
@@ -34,15 +41,19 @@ def frame(prefix):
 
 def receive(port, seconds):
     deadline = time.monotonic() + seconds
-    data = bytearray()
+    data = getattr(port, '_base_reply_buffer', None)
+    if data is None:
+        data = bytearray()
+        port._base_reply_buffer = data
     while time.monotonic() < deadline:
         part = port.read(1)
         if part == b"\n":
-            value = json.loads(data.decode("ascii"))
+            raw = bytes(data); data.clear()
+            value = json.loads(raw.decode("ascii"))
             if not isinstance(value, dict): raise RuntimeError("invalid response")
             return value
         data.extend(part)
-        if len(data) > 2048: raise RuntimeError("oversized response")
+        if len(data) > 3072: raise RuntimeError("oversized response")
     raise RuntimeError("firmware reply timeout")
 
 
@@ -51,10 +62,13 @@ def send(port, data):
 
 
 def inspect(port):
-    port.reset_input_buffer(); send(port, b"INFO\n")
+    port.reset_input_buffer(); port._base_reply_buffer = bytearray(); send(port, b"INFO\n")
     info = receive(port, 2)
     expected = dict(firmware="mobile-base-teleop-v4", host_baud=921600, servo_baud=1000000,
                     ids=[7, 8, 9, 10], max_raw=200, watchdog_ms=400)
+    if PRESERVE_HOLD:
+        expected.update(firmware='mobile-base-hold-teleop-v7',hold_monitor=True,held_axes=13,
+                        arm_lift_writes='explicit_setup_only',hold_setup=True)
     if info != expected: raise RuntimeError("unexpected firmware; wheels not enabled")
     return info
 
@@ -64,6 +78,8 @@ def validate(reply, kind, nonce, seq):
             reply.get("sequence") != seq or reply.get("armed") is not True or
             reply.get("fault") is not False):
         raise RuntimeError("controller rejected command: " + json.dumps(reply))
+    if PRESERVE_HOLD and reply.get('hold_confirmed') is not True:
+        raise RuntimeError('arm/gripper/lift hold not confirmed: ' + json.dumps(reply))
 
 
 def stop(port):
@@ -74,8 +90,57 @@ def stop(port):
         if reply.get("type") == "stopped":
             if reply.get("armed") is not False or reply.get("stop_confirmed") is not True:
                 raise RuntimeError("stop unconfirmed: " + json.dumps(reply))
+            if PRESERVE_HOLD and reply.get('hold_confirmed') is not True:
+                raise RuntimeError('wheels stopped, but arm/gripper/lift hold unconfirmed: ' + json.dumps(reply))
             return reply
     raise RuntimeError("stop unconfirmed")
+
+
+def check_hold(port):
+    """Read current hold registers on the candidate; no ARM, D, or STOP."""
+    if not PRESERVE_HOLD: raise RuntimeError('hold-check requires hold-monitor firmware')
+    info = inspect(port)
+    send(port, b'HOLD\n')
+    reply = receive(port, 3.0)
+    if (reply.get('type') != 'hold' or reply.get('armed') is not False or
+            reply.get('fault') is not False or reply.get('hold_confirmed') is not True):
+        raise RuntimeError('hold preflight failed: ' + json.dumps(reply))
+    return dict(info=info, hold=reply, motor_write_commands=0)
+
+
+def prepare_hold(port, execute=False):
+    """Plan only by default; explicit execute fixes OFF axes at current pose.
+
+    This does not restore a previous grasp force or command any wheel motion.
+    No retries/automatic torque release on an uncertain or partial result.
+    """
+    if not PRESERVE_HOLD: raise RuntimeError('hold setup requires hold firmware')
+    inspect(port)
+    settled=settle_wheels(port) if execute else None
+    nonce=secrets.randbelow(0xffffffff)+1
+    send(port,frame(f'PREP {nonce:08X}'))
+    plan=receive(port,6)
+    if (plan.get('type')!='setup' or plan.get('ok') is not True or
+            plan.get('pending') is not True or plan.get('token')!=nonce):
+        raise RuntimeError('hold setup plan rejected: '+json.dumps(plan))
+    if not execute:return dict(plan=plan,executed=False)
+    # Single explicit activation. Never re-send HSET after a lost reply.
+    send(port,frame(f'HSET {nonce:08X}'))
+    result=receive(port,6)
+    if (result.get('type')!='setup' or result.get('ok') is not True or
+            result.get('pending') is not False or result.get('reason')!='SETUP_HOLD_READY'):
+        raise RuntimeError('hold setup incomplete; support load; do not drive: '+json.dumps(result))
+    return dict(wheels=settled,plan=plan,result=result,verification=check_hold(port),executed=True)
+
+
+def settle_wheels(port):
+    """Explicit zero/OFF for wheels before hold setup; never certifies arm hold."""
+    send(port,b'STOP\n')
+    reply=receive(port,6)
+    if (reply.get('type')!='stopped' or reply.get('armed') is not False or
+            reply.get('stop_confirmed') is not True or reply.get('fault') is not False):
+        raise RuntimeError('wheel preparation failed; do not activate hold: '+json.dumps(reply))
+    return reply
 
 
 def command_for(keys, now, current, last_key):
@@ -120,7 +185,7 @@ def run(port, input_fd):
             seq += 1
             if seq > 0xffffffff: raise RuntimeError("sequence exhausted")
             send(port, frame(f"D {nonce:08X} {seq:08X} {current}"))
-            validate(receive(port, .3), "ack", nonce, seq)
+            validate(receive(port, response_timeout()), "ack", nonce, seq)
             remaining = PERIOD - (time.monotonic() - tick)
             if remaining > 0: time.sleep(remaining)
     except BaseException as error:
@@ -159,26 +224,42 @@ def stopping_signals():
 
 
 def main():
+    global PRESERVE_HOLD
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", required=True)
     parser.add_argument("--web", action="store_true", help="Browser key-down/key-up control; enables wheels")
     parser.add_argument("--bind", default="127.0.0.1", help="Browser listener IP, e.g. Pi LAN address")
     parser.add_argument("--web-port", type=int, default=8765)
     parser.add_argument("--run", action="store_true", help="Enable wheels and start keyboard teleop")
+    parser.add_argument('--preserve-hold', action='store_true',
+        help='Require hold-monitor firmware; never write arm/gripper/lift targets or torque')
+    parser.add_argument('--check-hold', action='store_true', help='Read hold registers only; never enable wheels')
+    parser.add_argument('--prepare-hold',action='store_true',help='Read-only current-pose hold plan; --execute activates OFF axes')
+    parser.add_argument('--execute',action='store_true',help='With --prepare-hold, explicitly enable current-pose holding; no wheel motion')
+    parser.add_argument('--stop-wheels',action='store_true',help='Explicit wheel zero/OFF before hold setup; does not change arm/lift torque')
     args = parser.parse_args()
+    PRESERVE_HOLD = args.preserve_hold or args.check_hold or args.prepare_hold or args.stop_wheels
     if args.web and args.run: parser.error("choose --web or --run")
+    if args.check_hold and (args.web or args.run): parser.error('--check-hold cannot enable wheels')
+    if args.prepare_hold and (args.web or args.run or args.check_hold):parser.error('--prepare-hold is a separate stationary step')
+    if args.execute and not args.prepare_hold:parser.error('--execute requires --prepare-hold')
+    if args.stop_wheels and (args.prepare_hold or args.web or args.run or args.check_hold):parser.error('--stop-wheels is a separate step')
     try:
         import serial
         with stopping_signals(), acquire_backend_lease("stm32", 0):
             with open_exclusive_serial(serial, args.port, 921600, .01) as port:
-                if args.web:
+                if args.stop_wheels:
+                    inspect(port);print(json.dumps(settle_wheels(port),indent=2))
+                elif args.prepare_hold:print(json.dumps(prepare_hold(port,args.execute),indent=2))
+                elif args.check_hold: print(json.dumps(check_hold(port), indent=2))
+                elif args.web:
                     from base_teleop_web import run_web
                     run_web(port, args.bind, args.web_port)
                 elif args.run: run(port, sys.stdin.fileno())
                 else: print(json.dumps(inspect(port), indent=2))
         return 0
     except (ImportError, OSError, RuntimeError, ValueError) as error:
-        print(json.dumps({"error": str(error), "next_action": "If wheels do not stop, cut motor 12 V power. A latched firmware fault requires motor power off and MCU reset."}), file=sys.stderr)
+        print(json.dumps({"error": str(error), "next_action": "No automatic retry. Check the reported state; a rejected read-only plan alone does not require MCU reset. Support the load before recovery."}), file=sys.stderr)
         return 2
 
 

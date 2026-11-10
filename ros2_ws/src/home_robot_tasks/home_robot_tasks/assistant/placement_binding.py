@@ -5,6 +5,7 @@ coarse candidate is used only for alignment/lift; the existing fresh capture,
 ManipulationPort and independent outcome monitor still gate the arm.
 """
 from copy import deepcopy
+from dataclasses import replace
 import math
 
 from ..fetch import InvalidTask
@@ -17,8 +18,10 @@ class TaskPlacementPolicy:
     def __init__(self, *, profile, feasibility_factory, target_to_map, context,
                  current_configuration, scene_revision, clock, grasp_ids,
                  fresh_grasp_task, maximum_target_age_s=2, maximum_alignment_s=30,
-                 arrival_tolerance_m=.03, arrival_tolerance_rad=.1, height_tolerance_m=.005):
+                 arrival_tolerance_m=.03, arrival_tolerance_rad=.1, height_tolerance_m=.003,
+                 pick_height_for=None):
         self.profile, self.feasibility_factory = profile, feasibility_factory
+        self.pick_height_for = pick_height_for
         self.target_to_map, self.context = target_to_map, context
         self.current, self.scene, self.clock, self.grasps = current_configuration, scene_revision, clock, grasp_ids
         self.target_age = finite(maximum_target_age_s, 'target age', .01, 5)
@@ -38,6 +41,7 @@ class TaskPlacementPolicy:
         operation = 'place' if skill == 'place' or skill.endswith('_place') else 'pick'
         key = (operation, parameters['object_id'])
         if skill.startswith('align_'):
+            self.selected.pop(key, None)
             target = catalog.checked_target(operation == 'place')
             xyz, stamp = self.target_to_map(target)
             if not isinstance(stamp, Stamp):
@@ -46,8 +50,16 @@ class TaskPlacementPolicy:
             if context.frame_id != catalog.map.frame_id or (context.map_id, context.map_revision) != (catalog.map.map_id, catalog.map.revision):
                 raise InvalidTask('placement_navigation_context_mismatch')
             current_xy_yaw, height = self.current()
+            profile = self.profile
+            if operation == 'pick':
+                if self.pick_height_for is not None:
+                    fixed_height = finite(self.pick_height_for(target), 'selected lift height',
+                                          profile.lift_min_m, profile.lift_max_m)
+                    profile = replace(profile, heights_m=(fixed_height,))
+                elif len(profile.heights_m) != 1:
+                    raise InvalidTask('single_pick_lift_setting_required')
             backend = self.feasibility_factory(xyz, operation, target)
-            plan = PlacementPlanner(self.profile, backend).plan(target_m=xyz, stamp=stamp, context=context,
+            plan = PlacementPlanner(profile, backend).plan(target_m=xyz, stamp=stamp, context=context,
                 now_s=now_s, scene_revision=self.scene(), grasp_ids=self.grasps(target, operation),
                 current_xy_yaw=current_xy_yaw, current_height_m=height, operation=operation,
                 maximum_age_s=self.target_age)

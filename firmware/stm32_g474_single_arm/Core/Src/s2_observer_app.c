@@ -15,29 +15,53 @@ static void send(const char *s) {
     (void)HAL_UART_Transmit(host,(const uint8_t *)s,(uint16_t)strlen(s),100);
 }
 static void info(void) {
-    char out[180];
-    snprintf(out,sizeof(out),"{\"firmware\":\"s2-observer-v1\",\"epoch\":%lu,\"sequence\":%lu,\"tick_ms\":%lu,\"motor_writes\":0}\r\n",(unsigned long)epoch,(unsigned long)sequence,(unsigned long)HAL_GetTick());
+    char out[220];
+    snprintf(out,sizeof(out),"{\"firmware\":\"s2-observer-v1\",\"epoch\":%lu,\"sequence\":%lu,\"tick_ms\":%lu,\"motor_writes\":0,\"left_grip_feedback\":true,\"arm_calibration\":true}\r\n",(unsigned long)epoch,(unsigned long)sequence,(unsigned long)HAL_GetTick());
     send(out);
 }
 static HAL_StatusTypeDef read_data(unsigned bus,uint8_t id,uint8_t address,uint8_t n,uint8_t *data) {
     return bus ? RightServoBus_CalibrationRead(id,address,n,data) : Servo_ReadData(id,address,n,data);
 }
-static void sample(void) {
+static void calibration(void) {
     if (!epoch || sequence==UINT32_MAX) {send("{\"error\":\"bind_required\"}\r\n");return;}
     sequence++;
-    char out[230];
-    for(unsigned index=0;index<13;index++) {
-        unsigned bus=index>=7;uint8_t id=index<6?(uint8_t)(index+1):index==6?10:(uint8_t)(index-6);
-        uint8_t data[4]={0},torque=0;
+    char out[340];
+    for(unsigned index=0;index<12;index++) {
+        unsigned bus=index/6;uint8_t id=(uint8_t)(index%6+1);
+        uint8_t identity[4]={0},settings[3]={0};
         uint32_t start=HAL_GetTick();
-        int ok=read_data(bus,id,56,4,data)==HAL_OK;
+        int ok=read_data(bus,id,3,4,identity)==HAL_OK && read_data(bus,id,31,3,settings)==HAL_OK;
+        uint32_t end=HAL_GetTick();
+        snprintf(out,sizeof(out),"{\"epoch\":%lu,\"sequence\":%lu,\"bus\":%u,\"id\":%u,\"start_ms\":%lu,\"end_ms\":%lu,\"model_high\":%u,\"model_low\":%u,\"stored_id\":%u,\"baud\":%u,\"offset_raw\":%u,\"mode\":%u,\"ok\":%s}\r\n",
+            (unsigned long)epoch,(unsigned long)sequence,bus,id,(unsigned long)start,(unsigned long)end,
+            identity[0],identity[1],identity[2],identity[3],(unsigned)(settings[0]|settings[1]<<8),settings[2],ok?"true":"false");
+        send(out);
+        if(!ok){send("{\"error\":\"calibration_read_failed\"}\r\n");epoch=0;return;}
+    }
+    snprintf(out,sizeof(out),"{\"sample_end\":true,\"epoch\":%lu,\"sequence\":%lu,\"tick_ms\":%lu}\r\n",(unsigned long)epoch,(unsigned long)sequence,(unsigned long)HAL_GetTick());
+    send(out);
+}
+static void sample(int left_grip_only) {
+    if (!epoch || sequence==UINT32_MAX) {send("{\"error\":\"bind_required\"}\r\n");return;}
+    sequence++;
+    char out[320];
+    for(unsigned index=left_grip_only?5U:0U; index<(left_grip_only?6U:13U); index++) {
+        unsigned bus=index>=7;uint8_t id=index<6?(uint8_t)(index+1):index==6?10:(uint8_t)(index-6);
+        uint8_t data[15]={0},torque=0;
+        uint32_t start=HAL_GetTick();
+        int ok=read_data(bus,id,56,left_grip_only?15:4,data)==HAL_OK;
         uint32_t end=HAL_GetTick();
         if(ok)ok=read_data(bus,id,40,1,&torque)==HAL_OK;
+        if(left_grip_only)end=HAL_GetTick();
         int position=ok?(data[0]|data[1]<<8):-1;
         if(position>4095||torque>1)ok=0;
-        snprintf(out,sizeof(out),"{\"epoch\":%lu,\"sequence\":%lu,\"bus\":%u,\"id\":%u,\"start_ms\":%lu,\"end_ms\":%lu,\"position\":%d,\"speed\":%d,\"torque\":%d,\"ok\":%s}\r\n",
+        char extra[100]="";
+        if(left_grip_only)
+            snprintf(extra,sizeof(extra),",\"load_raw\":%u,\"current_raw\":%u,\"motor_status_raw\":%u",
+                (unsigned)(data[4]|data[5]<<8),(unsigned)(data[13]|data[14]<<8),(unsigned)data[9]);
+        snprintf(out,sizeof(out),"{\"epoch\":%lu,\"sequence\":%lu,\"bus\":%u,\"id\":%u,\"start_ms\":%lu,\"end_ms\":%lu,\"position\":%d,\"speed\":%d,\"torque\":%d,\"ok\":%s%s}\r\n",
           (unsigned long)epoch,(unsigned long)sequence,bus,id,(unsigned long)start,(unsigned long)end,
-          position,ok?(data[2]|data[3]<<8):-1,ok?torque:-1,ok?"true":"false");
+          position,ok?(data[2]|data[3]<<8):-1,ok?torque:-1,ok?"true":"false",extra);
         send(out);
         if(!ok) {send("{\"error\":\"motor_read_failed\"}\r\n");epoch=0;return;}
     }
@@ -60,7 +84,9 @@ void SingleArmApp_Process(void) {
         if(!discard&&!strcmp(input,"INFO"))info();
         else if(!discard&&sscanf(input,"BIND %lu%n",&token,&end)==1&&end==(int)strlen(input)&&token>0&&token<=UINT32_MAX&&input[5]>='0'&&input[5]<='9') {
             epoch=(uint32_t)token;sequence=0;info();
-        } else if(!discard&&!strcmp(input,"SAMPLE"))sample();
+        } else if(!discard&&!strcmp(input,"SAMPLE"))sample(0);
+        else if(!discard&&!strcmp(input,"GRIP"))sample(1);
+        else if(!discard&&!strcmp(input,"CALIB"))calibration();
         else send("{\"error\":\"unsupported_command\"}\r\n");
         used=discard=0;
     } else if(c<32||c>126||used+1>=sizeof(input)){discard=1;used=0;}

@@ -13,6 +13,7 @@ from ..navigation import identifier
 from .contracts import Context, Stamp, finite, vector
 
 REQUIRED_PHASES = {'approach', 'contact', 'lift', 'retreat', 'transport'}
+PICK_LIFT_PHASES = {'approach', 'contact', 'lift', 'hold'}
 PLACE_PHASES = {'approach', 'support', 'release', 'retreat', 'transport'}
 
 
@@ -97,11 +98,13 @@ class PlacementPlanner:
             raise InvalidTask('stamped target required')
         stamp.check(context, now_s, maximum_age_s)
         identifier(scene_revision, 'scene_revision')
-        if operation not in {'pick', 'place'}:
+        if operation not in {'pick', 'pick_lift', 'place'}:
             raise InvalidTask('unsupported manipulation operation')
         target = vector(target_m, 3, 'target')
         current = vector(current_xy_yaw, 3, 'current base pose')
         profile = self.profile
+        if operation == 'pick_lift' and len(profile.heights_m) != 1:
+            raise InvalidTask('single_pick_lift_setting_required')
         height = finite(current_height_m, 'current height', profile.lift_min_m, profile.lift_max_m)
         if not isinstance(grasp_ids, (list, tuple)) or not 1 <= len(grasp_ids) <= 16 or len(set(grasp_ids)) != len(grasp_ids):
             raise InvalidTask('bounded unique grasp hypotheses required')
@@ -111,7 +114,7 @@ class PlacementPlanner:
         if total > profile.maximum_candidates:
             raise InvalidTask('candidate_budget_exceeded')
         accepted, rejected, evaluations = [], Counter(), 0
-        phases = REQUIRED_PHASES if operation == 'pick' else PLACE_PHASES
+        phases = {'pick': REQUIRED_PHASES, 'pick_lift': PICK_LIFT_PHASES, 'place': PLACE_PHASES}[operation]
         for distance in profile.distances_m:
             for azimuth in profile.azimuths_rad:
                 x, y = target[0]+distance*math.cos(azimuth), target[1]+distance*math.sin(azimuth)

@@ -97,6 +97,13 @@ option(MOBILE_WHEEL_SETUP_ONLY "Wheel mode setup only; no torque enable or motio
 
 option(MOBILE_WHEEL_PULSE_ONLY "Raised-wheel single bounded pulse; no arm/lift or EEPROM writes" OFF)
 
+option(S3_LEFT_GRIP_BENCH_ONLY "Bounded low-speed left ID6 closing test" OFF)
+option(S3_STATIONARY_PICK_CANDIDATE "Resident stationary pick candidate with measured ranges and bounded gripper output" OFF)
+if(S3_STATIONARY_PICK_CANDIDATE AND
+   (NOT BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE OR NOT S1_ARM_RANGE_PROFILE_HEADER OR
+    S3_LEFT_GRIP_BENCH_ONLY OR HOME_ASSISTANT_INVENTORY))
+    message(FATAL_ERROR "S3 stationary pick requires the resident candidate and generated measured ranges")
+endif()
 option(S2_COORDINATE_OBSERVER_ONLY "Read-only two-arm and lift acquisition; no motor writes" OFF)
 option(LIFT_TELEOP_ONLY "Isolated ID 10 lift commissioning with watchdog" OFF)
 option(LIFT_TELEOP_BIDIRECTIONAL "Lift v5 with explicit bottom reference and guarded up/down" OFF)
@@ -105,6 +112,10 @@ if(LIFT_TELEOP_BIDIRECTIONAL AND NOT LIFT_TELEOP_ONLY)
 endif()
 
 option(MOBILE_BASE_TELEOP_ONLY "Manual base keyboard teleop with watchdog; no arm/lift writes" OFF)
+option(MOBILE_BASE_PRESERVE_HOLD "Wheel teleop with read-only arm/gripper/lift hold verification" OFF)
+if(MOBILE_BASE_PRESERVE_HOLD AND NOT MOBILE_BASE_TELEOP_ONLY)
+    message(FATAL_ERROR "MOBILE_BASE_PRESERVE_HOLD requires MOBILE_BASE_TELEOP_ONLY")
+endif()
 
 option(HOME_ASSISTANT_INVENTORY "Read-only S1 inventory on dual-arm resident firmware" OFF)
 if(HOME_ASSISTANT_INVENTORY AND NOT BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE)
@@ -113,6 +124,7 @@ endif()
 
 set(VALIDATION_CANDIDATE_COUNT 0)
 foreach(CANDIDATE_OPTION
+    S3_LEFT_GRIP_BENCH_ONLY
     S2_COORDINATE_OBSERVER_ONLY
     BIMANUAL_CALIBRATION_ONLY
     LEFT_ONLY_CALIBRATION_ONLY
@@ -189,8 +201,16 @@ set(CORE_SOURCES
     "${CORE_DIR}/Src/timebase.c"
     "${CORE_DIR}/Startup/startup_stm32g474retx.s"
 )
-if(HOME_ASSISTANT_INVENTORY)
+if(S3_STATIONARY_PICK_CANDIDATE)
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/s3_platform_snapshot.c")
+endif()
+if(HOME_ASSISTANT_INVENTORY OR S3_STATIONARY_PICK_CANDIDATE)
     list(APPEND CORE_SOURCES "${CORE_DIR}/Src/device_inventory.c")
+endif()
+
+if(S3_LEFT_GRIP_BENCH_ONLY)
+    list(REMOVE_ITEM CORE_SOURCES "${CORE_DIR}/Src/single_arm_app.c")
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/gripper_bench_app.c")
 endif()
 
 if(S2_COORDINATE_OBSERVER_ONLY)
@@ -224,6 +244,9 @@ endif()
 if(MOBILE_BASE_TELEOP_ONLY)
     list(REMOVE_ITEM CORE_SOURCES "${CORE_DIR}/Src/single_arm_app.c")
     list(APPEND CORE_SOURCES "${CORE_DIR}/Src/mobile_base_teleop_app.c")
+endif()
+if(MOBILE_BASE_PRESERVE_HOLD)
+    list(APPEND CORE_SOURCES "${CORE_DIR}/Src/wheel_hold_monitor.c" "${CORE_DIR}/Src/wheel_hold_setup.c")
 endif()
 
 set(HAL_SOURCES
@@ -301,6 +324,10 @@ target_compile_definitions(
         STM32G474xx
 )
 
+if(S3_LEFT_GRIP_BENCH_ONLY)
+    target_compile_definitions(${TARGET_NAME} PRIVATE HOST_S3_LEFT_GRIP_BENCH=1 HOST_LEFT_ONLY_BUILD=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
+
 if(S2_COORDINATE_OBSERVER_ONLY)
     target_compile_definitions(${TARGET_NAME} PRIVATE HOST_S2_OBSERVER_ONLY=1 HOST_BINARY_UART_BAUD=921600UL)
 endif()
@@ -315,6 +342,9 @@ endif()
 
 if(MOBILE_BASE_TELEOP_ONLY)
     target_compile_definitions(${TARGET_NAME} PRIVATE HOST_MOBILE_BASE_TELEOP_ONLY=1 HOST_BINARY_UART_BAUD=921600UL)
+endif()
+if(MOBILE_BASE_PRESERVE_HOLD)
+    target_compile_definitions(${TARGET_NAME} PRIVATE HOST_MOBILE_BASE_PRESERVE_HOLD=1)
 endif()
 
 if(MOBILE_WHEEL_PULSE_ONLY)
@@ -455,7 +485,9 @@ if(BIMANUAL_DMA_DISPATCH_CANDIDATE OR
                         target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024A01UL)
                     endif()
                 else()
-                    if(S1_ARM_RANGE_PROFILE_HEADER)
+                    if(S3_STATIONARY_PICK_CANDIDATE)
+                        target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024911UL HOST_S3_STATIONARY_PICK=1U)
+                    elseif(S1_ARM_RANGE_PROFILE_HEADER)
                         target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x0002490AUL)
                     elseif(HOME_ASSISTANT_INVENTORY)
                         target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024909UL)
@@ -764,7 +796,7 @@ if(NOT ACTUATOR_MOBILE_FIRST_ID MATCHES "^[0-9]+$" OR ACTUATOR_MOBILE_FIRST_ID L
     message(FATAL_ERROR "ACTUATOR_MOBILE_FIRST_ID must be an integer in 7..250")
 endif()
 target_compile_definitions(${TARGET_NAME} PRIVATE ACTUATOR_MOBILE_FIRST_ID=${ACTUATOR_MOBILE_FIRST_ID})
-if(HOME_ASSISTANT_INVENTORY)
+if(HOME_ASSISTANT_INVENTORY OR S3_STATIONARY_PICK_CANDIDATE)
     if(NOT ACTUATOR_MOBILE_FIRST_ID STREQUAL "7")
         message(FATAL_ERROR "S1 inventory expects the declared mobile IDs 7..10")
     endif()
@@ -790,8 +822,12 @@ if(S1_ARM_RANGE_PROFILE_HEADER)
         message(FATAL_ERROR "S1 ranges require dual-arm resident verification with no taught/mobile/inventory profile")
     endif()
     target_compile_definitions(${TARGET_NAME} PRIVATE
-        S1_ARM_RANGE_PROFILE_HEADER="${S1_ARM_RANGE_PROFILE_HEADER}"
-        HOST_S1_RANGE_VERIFY_ONLY=1U)
+        S1_ARM_RANGE_PROFILE_HEADER="${S1_ARM_RANGE_PROFILE_HEADER}")
+    if(S3_STATIONARY_PICK_CANDIDATE)
+        target_compile_definitions(${TARGET_NAME} PRIVATE HOST_S1_RANGE_VERIFY_ONLY=0U)
+    else()
+        target_compile_definitions(${TARGET_NAME} PRIVATE HOST_S1_RANGE_VERIFY_ONLY=1U)
+    endif()
     add_custom_target(check_s1_ranges
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/setup/firmware/generate_development_ranges.py" --check
         VERBATIM)

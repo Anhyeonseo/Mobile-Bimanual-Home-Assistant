@@ -251,6 +251,11 @@ class ResidentBimanualStreamAdapter:
         self._feedback_transport_failure_streak = 0
 
     @property
+    def simulation_transport(self) -> bool:
+        """Explicit in-memory transports only; serial transports never opt in."""
+        return getattr(self._transport, "simulated", False) is True
+
+    @property
     def state(self) -> AdapterState:
         return self._state
 
@@ -755,6 +760,10 @@ class ResidentBimanualStreamAdapter:
             "splice point is not inside the currently admitted future route"
         )
 
+    def _initial_batch_base(self, previous_base):
+        """Optional device handoff after OPEN, before timestamping first APPEND."""
+        return previous_base
+
     def start(
         self,
         owner: str,
@@ -829,6 +838,14 @@ class ResidentBimanualStreamAdapter:
                 self._policy(horizon_end_tick=horizon)
             )
             self._require_accepted(opened, "stream open")
+            # OPEN may consume the original command lead. Device-specific
+            # readers can hand off and refresh the clock here. Move every
+            # point and the finite horizon together; geometry and intervals
+            # are unchanged. No rejected APPEND is retried or auto-rearmed.
+            base = self._initial_batch_base(base)
+            all_sample_ticks = tuple(_tick(base, offset) for offset, _ in converted_all)
+            sample_ticks = all_sample_ticks[:len(converted)]
+            horizon = all_sample_ticks[-1] if finite else 0
             appended = self._transport.append(
                 StreamBatchV2(
                     horizon_end_tick=horizon,
@@ -1020,6 +1037,9 @@ class ResidentBimanualStreamAdapter:
         except Exception as error:
             self._fault(error)
 
+    def _terminal_bus_available(self, dispatch, tracking, state, executor):
+        return dispatch.ready and not dispatch.active and not tracking.active and not tracking.pending
+
     def poll(self, owner: str):
         """Check all runtime safety domains; fail closed on any inconsistency."""
         self._claim(owner)
@@ -1059,7 +1079,7 @@ class ResidentBimanualStreamAdapter:
                 # read can own the bus between diagnostic requests. It is not
                 # a fault. Require idle availability only to finish the leg;
                 # firmware still enforces every dispatch deadline and fault.
-                if not dispatch.ready or dispatch.active or tracking.active or tracking.pending:
+                if not self._terminal_bus_available(dispatch, tracking, state, executor):
                     return state, executor, dispatch, tracking
                 if self._prepared is None or self._tail_positions_urad is None:
                     raise BimanualStreamError(

@@ -150,3 +150,268 @@ def test_camera_matches_delayed_exposure_instead_of_first_delivered_frame():
     result=camera.match(motors)
     assert result['capture_id']=='good' and camera.pipeline.calls==1
     assert result['acquisition_span_s']<.05
+
+
+def test_partial_scan_reports_the_current_failure_not_a_previous_good_sample():
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from tools.diagnostics.capture_s2_observer import capture
+
+    class FailingPort(Port):
+        def reset_input_buffer(self): pass
+
+        def write(self,data):
+            n=super().write(data)
+            if data==b'SAMPLE\n':
+                self.rows=[{**self.rows[0],'ok':False}, {'error':'motor_read_failed'}]
+            return n
+
+    p=FailingPort()
+    report=capture(SimpleNamespace(port='fake'), {'records':[]},None,None,None,None,
+                   lambda *args:nullcontext(), lambda *args:nullcontext(p))
+    assert report['status']=='failed' and report['failure_stage']=='L2.sample.axes'
+    assert report['last_valid_sequence']==0
+    assert report['last_raw_exchange']['rows'][0]['id']==1
+    assert report['last_raw_exchange']['rows'][-1]=={'error':'motor_read_failed'}
+    assert p.commands[0]=='INFO' and p.commands[-1]=='SAMPLE'
+
+
+def test_failed_write_invalidates_reader_and_cannot_resume():
+    port=Port();reader=acq.Reader(port,clock=lambda:port.now,token=7);reader.bind()
+    def disconnected(_):raise OSError('link dropped')
+    port.write=disconnected
+    with pytest.raises(OSError):reader.sample()
+    assert not reader.valid
+    with pytest.raises(ValueError, match='invalidated'):reader.sample()
+
+
+@pytest.mark.parametrize('change', ['wrong firmware','missing tick','bool sequence'])
+def test_bad_bind_reply_cannot_establish_a_clock(change):
+    class BadBind(Port):
+        def write(self,data):
+            n=super().write(data)
+            if data.startswith(b'BIND'):
+                if change=='wrong firmware':self.rows[0]['firmware']='other'
+                elif change=='missing tick':self.rows[0].pop('tick_ms')
+                else:self.rows[0]['sequence']=False
+            return n
+    port=BadBind();reader=acq.Reader(port,clock=lambda:port.now,token=7)
+    with pytest.raises(ValueError):reader.bind()
+    assert not reader.valid and 'SAMPLE' not in port.commands
+
+
+@pytest.mark.parametrize('bad',['duplicate','nan','invalid_raw'])
+def test_first_encoder_anchor_rejects_bad_inventory_and_values(bad):
+    p,first=fixture()
+    if bad=='duplicate':first['samples'].append(first['samples'][0])
+    if bad=='nan':first['samples'][0]['acquired_s']=float('nan')
+    if bad=='invalid_raw':first['samples'][6]['position']=4096
+    with pytest.raises(ValueError):
+        acq.EncoderTracker(p,first,home_confirmed=True,bottom_confirmed=True)
+
+
+def test_mutation_of_returned_record_does_not_rewrite_an_encoder_anchor():
+    profile, first=fixture()
+    tracker=acq.EncoderTracker(profile,first,home_confirmed=True,bottom_confirmed=True)
+    later=deepcopy(first);later['sequence']+=1
+    for r in later['samples']:r['acquired_s']+=.05
+    first['samples'][6]['position']+=100
+    assert tracker.update(later)['lift_height_m']==0
+
+
+RANGES=ROOT/'config/home_assistant/arm_ranges.development.json'
+
+
+def current_pose_fixture():
+    p,first=fixture()
+    ranges=json.loads(RANGES.read_text())
+    first['sequence']=6
+    for row in first['samples']:
+        row.update(position=2048,speed=0,torque=0)
+    # These readbacks differ from Home within the rebased operational ranges.
+    first['samples'][0]['position']=2200
+    first['samples'][1]['position']=1000
+    first['samples'][4]['position']=3900
+    calibration=dict(epoch=1,sequence=1,motor_writes=0,samples=[
+        dict(bus=bus,id=i,offset_raw=ranges['calibration'][acq.s2.ARMS[bus]]['offsets_raw'][i-1],
+             stored_id=i,mode=0,model_high=9,model_low=3,baud=0,acquired_s=99.75)
+        for bus,i in acq.EXPECTED if i!=10])
+    quiet=[]
+    for i in range(4):
+        row=deepcopy(first);row['sequence']=i+2
+        for sample in row['samples']:sample['acquired_s']-=.20-.05*i
+        quiet.append(row)
+    return p,first,calibration,[*quiet,first]
+
+
+def test_current_pose_anchors_unique_turns_without_claiming_home_or_motion_permission():
+    p,first,calibration,quiet=current_pose_fixture()
+    tracker=acq.EncoderTracker(p,first,home_confirmed=False,bottom_confirmed=True,
+                             range_reference=RANGES,calibration=calibration,bottom_samples=quiet)
+    state=tracker.state()
+    assert state['raw']['left']['shoulder']==1000 and state['raw']['left']['wrist_roll']==3900
+    assert state['raw']['left']['base']==2200 and state['lift_height_m']==0
+    assert tracker.anchor_evidence['motion_authorized'] is False
+    later=deepcopy(first);later['sequence']+=1
+    for row in later['samples']:row['acquired_s']+=.05
+    later['samples'][1]['position']=1001
+    assert tracker.update(later)['raw']['left']['shoulder']==1001
+
+
+@pytest.mark.parametrize('bad',['offset','mode','model','id','range_hash','epoch','sequence','stale',
+                              'missing','torque','moving','outside','bottom','both','leaves_range'])
+def test_current_pose_reference_rejects_incompatible_or_ambiguous_evidence(bad):
+    p,first,calibration,quiet=current_pose_fixture()
+    row=calibration['samples'][0]
+    if bad=='offset':row['offset_raw']+=1
+    if bad=='mode':row['mode']=1
+    if bad=='model':row['model_low']=4
+    if bad=='id':row['stored_id']=2
+    if bad=='range_hash':p['source_files_sha256']['config/home_assistant/arm_ranges.development.json']='0'*64
+    if bad=='epoch':calibration['epoch']=2
+    if bad=='sequence':calibration['sequence']=3
+    if bad=='stale':row['acquired_s']=100.01
+    if bad=='missing':calibration['samples'].pop()
+    if bad=='torque':first['samples'][0]['torque']=1
+    if bad=='moving':first['samples'][0]['speed']=0x8006
+    if bad=='outside':first['samples'][0]['position']=100
+    with pytest.raises(ValueError):
+        tracker=acq.EncoderTracker(p,first,home_confirmed=bad=='both',bottom_confirmed=bad!='bottom',
+                                 range_reference=RANGES,calibration=calibration,bottom_samples=quiet)
+        if bad=='leaves_range':
+            later=deepcopy(first);later['sequence']+=1
+            for row in later['samples']:row['acquired_s']+=.05
+            later['samples'][1]['position']=140
+            tracker.update(later)
+    if bad=='leaves_range':
+        with pytest.raises(ValueError):tracker.state()
+
+
+def test_bottom_origin_uses_position_stability_despite_velocity_quantization():
+    p,first,calibration,quiet=current_pose_fixture()
+    for i,r in enumerate(quiet):
+        r['samples'][6].update(position=[4095,0,4095,0,4095][i],speed=[50,32818,0,50,0][i])
+    tracker=acq.EncoderTracker(p,first,home_confirmed=False,bottom_confirmed=True,
+                             range_reference=RANGES,calibration=calibration,bottom_samples=quiet)
+    assert tracker.origin==4096 and tracker.state()['lift_raw_unwrapped']==4095
+    assert tracker.state()['lift_height_m']==pytest.approx(.084/4096)
+    assert tracker.anchor_evidence['bottom']['span_counts']==1
+    quiet[2]['samples'][6]['position']=5
+    with pytest.raises(ValueError,match='lift moved'):
+        acq.stationary_bottom(quiet)
+
+
+@pytest.mark.parametrize('bad',['missing','epoch','sequence','gap','short','torque'])
+def test_bottom_stability_proof_requires_continuous_stationary_evidence(bad):
+    _,_,_,quiet=current_pose_fixture()
+    if bad=='missing':quiet.pop()
+    if bad=='epoch':quiet[2]['epoch']+=1
+    if bad=='sequence':quiet[2]['sequence']+=1
+    if bad=='gap':quiet[2]['samples'][6]['acquired_s']+=.3
+    if bad=='short':
+        for i,r in enumerate(quiet):r['samples'][6]['acquired_s']=100+i*.01
+    if bad=='torque':quiet[1]['samples'][6]['torque']=1
+    with pytest.raises(ValueError):acq.stationary_bottom(quiet)
+
+
+def test_calibration_reader_requires_capability_and_keeps_scan_sequence():
+    class CalibrationPort(Port):
+        def write(self,data):
+            n=super().write(data)
+            if data.startswith((b'INFO',b'BIND')):self.rows[0]['arm_calibration']=True
+            if data==b'CALIB\n':
+                self.sequence+=1
+                self.rows=[dict(epoch=self.epoch,sequence=self.sequence,bus=bus,id=i,
+                    start_ms=int((self.now-99)*1000)+k,end_ms=int((self.now-99)*1000)+k+1,
+                    offset_raw=595,mode=0,model_high=9,model_low=3,stored_id=i,baud=0,ok=True)
+                    for k,(bus,i) in enumerate(acq.EXPECTED) if i!=10]
+                self.rows.append(dict(sample_end=True,epoch=self.epoch,sequence=self.sequence,
+                                      tick_ms=int((self.now-99)*1000)+13))
+            return n
+    port=CalibrationPort();reader=acq.Reader(port,clock=lambda:port.now,token=123);reader.bind()
+    row=reader.sample(arm_calibration_only=True)
+    assert row['sequence']==1 and len(row['samples'])==12 and row['motor_writes']==0
+    assert reader.sample()['sequence']==2
+    old=Port();reader=acq.Reader(old,clock=lambda:old.now,token=123);reader.bind()
+    with pytest.raises(ValueError,match='calibration reads'):reader.sample(arm_calibration_only=True)
+    assert 'CALIB' not in old.commands
+
+
+@pytest.mark.parametrize('calibration,step_ms,accepted',[(True,5,True),(True,10,False),(False,5,False)])
+def test_eeprom_read_budget_does_not_relax_pose_exposure_budget(calibration,step_ms,accepted):
+    class SlowScan(Port):
+        scanning=False
+        def write(self,data):
+            super().write(b'SAMPLE\n' if data==b'CALIB\n' else data)
+            if data.startswith((b'INFO',b'BIND')):self.rows[0]['arm_calibration']=True
+            self.scanning=data in (b'CALIB\n',b'SAMPLE\n')
+            if self.scanning:
+                rows=[r for r in self.rows[:-1] if data!=b'CALIB\n' or r['id']!=10]
+                start=rows[0]['start_ms']
+                for i,row in enumerate(rows):
+                    row.update(start_ms=start+i*step_ms,end_ms=start+i*step_ms+1)
+                    if data==b'CALIB\n':row.update(offset_raw=595,mode=0,model_high=9,model_low=3,stored_id=row['id'],baud=0)
+                self.rows=[*rows,dict(self.rows[-1],tick_ms=start+len(rows)*step_ms)]
+            return len(data)
+        def readline(self,n):
+            if self.scanning:self.now+=(step_ms-1)/1000
+            return super().readline(n)
+    port=SlowScan();reader=acq.Reader(port,clock=lambda:port.now,token=7);reader.bind()
+    if accepted:
+        report=reader.sample(arm_calibration_only=calibration)
+        assert .050<report['acquisition_span_bound_s']<.100
+    else:
+        with pytest.raises(ValueError,match='acquisition span exceeds'):
+            reader.sample(arm_calibration_only=calibration)
+        assert not reader.valid
+
+
+class GripPort(Port):
+    def __init__(self, change=None):
+        super().__init__()
+        self.change = change or {}
+
+    def write(self, data):
+        result = super().write(data)
+        if data == b'GRIP\n':
+            self.sequence += 1
+            tick = int((self.now - 99) * 1000)
+            axis = dict(epoch=self.epoch, sequence=self.sequence, bus=0, id=6, start_ms=tick,
+                        end_ms=tick+1, position=2083, speed=0, torque=0, ok=True,
+                        load_raw=1026, current_raw=1, motor_status_raw=0)
+            self.rows = [{**axis, **self.change}, dict(sample_end=True, epoch=self.epoch,
+                                                       sequence=self.sequence, tick_ms=tick+1)]
+        elif data != b'SAMPLE\n':
+            self.rows[0]['left_grip_feedback'] = True
+        return result
+
+
+def test_grip_and_whole_robot_can_share_a_bound_session():
+    port = GripPort()
+    reader = acq.Reader(port, clock=lambda: port.now, token=3)
+    reader.bind()
+    grip = reader.sample(left_gripper_only=True)
+    assert [s['load_raw'] for s in grip['samples']] == [1026]
+    whole = reader.sample()
+    assert whole['sequence'] == 2 and len(whole['samples']) == 13
+    assert port.commands == ['INFO', 'BIND 3', 'GRIP', 'INFO', 'SAMPLE', 'INFO']
+
+
+def test_old_firmware_never_receives_the_optional_request():
+    port = Port()
+    reader = acq.Reader(port, clock=lambda: port.now, token=3)
+    reader.bind()
+    with pytest.raises(ValueError, match='does not provide'):
+        reader.sample(left_gripper_only=True)
+    assert 'GRIP' not in port.commands
+
+
+@pytest.mark.parametrize('change', [{'id': 5}, {'bus': 1}, {'load_raw': True},
+                                    {'current_raw': -1}, {'motor_status_raw': 256}])
+def test_bad_gripper_sample_invalidates_the_binding(change):
+    port = GripPort(change)
+    reader = acq.Reader(port, clock=lambda: port.now, token=3)
+    reader.bind()
+    with pytest.raises(ValueError):
+        reader.sample(left_gripper_only=True)
+    assert not reader.valid

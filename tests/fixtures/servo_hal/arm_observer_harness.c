@@ -1,4 +1,5 @@
 #include "mobile_arm_observer.h"
+#include "single_arm_config.h"
 #include "bimanual_tracking_feedback.h"
 #include "bimanual_feedback_snapshot.h"
 #include <stdio.h>
@@ -49,7 +50,22 @@ int main(int argc,char **argv){
  if(scenario==4){shoulder=4095;CHECK(advance(2080));BimanualFeedbackSnapshot_Copy(now,&s);int32_t a=s.positions_urad[1];
   shoulder=1;CHECK(advance(2160));BimanualFeedbackSnapshot_Copy(now,&s);CHECK(s.positions_urad[1]>a&&s.positions_urad[1]-a<4000);return 0;}
  if(scenario==6){missing=true;CHECK(!advance(2200));return 0;}
- if(scenario==7){fail_reply=true;CHECK(!advance(2100));BimanualFeedbackSnapshot_Copy(now,&s);CHECK(s.present_mask!=4095);return 0;}
+ if(scenario==7){fail_reply=true;CHECK(!advance(2100));BimanualFeedbackSnapshot_Copy(now,&s);
+#if HOST_S3_STATIONARY_PICK
+  bool stale=false;for(unsigned i=0;i<12;i++)if(s.sample_age_ms[i]>=100)stale=true;
+  CHECK(stale); /* Retained values never become fresh without a response. */
+#else
+  CHECK(s.present_mask!=4095);
+#endif
+  return 0;}
+ if(scenario==10){
+#if HOST_S3_STATIONARY_PICK
+  uint32_t counts=s.completed_pairs;fail_reply=true;CHECK(advance(2020));
+  BimanualFeedbackSnapshot_Copy(now,&s);CHECK(s.present_mask==4095&&s.completed_pairs==counts);
+  fail_reply=false;CHECK(advance(2100));BimanualFeedbackSnapshot_Copy(now,&s);
+  CHECK(s.completed_pairs>counts);for(unsigned i=0;i<12;i++)CHECK(s.sample_age_ms[i]<=60);
+#endif
+  return 0;}
  if(scenario==9){CHECK(MobileArmObserver_Suspend());MobileArmObserver_Resume();active=true;CHECK(!MobileArmObserver_Poll());return 0;}
  CHECK(false);return 1;
 }

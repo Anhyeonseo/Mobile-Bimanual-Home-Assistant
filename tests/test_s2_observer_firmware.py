@@ -22,6 +22,30 @@ def test_transport_rejects_all_writes_on_both_buses(tmp_path):
     source=source.replace('ServoTransport_BeginService(&huart1,','ServoTransport_BeginService(bus?&other:&huart1,')
     source=source.replace('ServoTransport_Transmit(&huart1,','ServoTransport_Transmit(bus?&other:&huart1,')
     source=source.replace('ServoTransport_End(&huart1,','ServoTransport_End(bus?&other:&huart1,')
+    reads = """
+    for (unsigned bus=0; bus<2; bus++) {
+        UART_HandleTypeDef *uart = bus ? &other : &huart1;
+        for (unsigned id=1; id<=10; id++) for (unsigned length=14; length<=16; length++) {
+            uint8_t read[8] = {255,255,id,4,2,56,length,0};
+            unsigned sum=0; for(unsigned i=2; i<7; i++) sum+=read[i]; read[7]=~sum;
+            uint32_t token; assert(ServoTransport_BeginService(uart,ACTUATOR_BUS_WORK_ARM,&token));
+            int allowed = bus==0 && id==6 && length==15;
+            assert((ServoTransport_Transmit(uart,token,read,8,10)==HAL_OK)==allowed);
+            assert(ServoTransport_Transmit(uart,token,read,8,10)!=HAL_OK);
+            assert(ServoTransport_End(uart,token,false)==HAL_OK);
+        }
+        for (unsigned id=0; id<=11; id++) for (unsigned address=2; address<=33; address++)
+        for (unsigned length=2; length<=5; length++) {
+            uint8_t read[8] = {255,255,id,4,2,address,length,0};
+            unsigned sum=0; for(unsigned i=2; i<7; i++) sum+=read[i]; read[7]=~sum;
+            uint32_t token; assert(ServoTransport_BeginService(uart,ACTUATOR_BUS_WORK_ARM,&token));
+            int allowed=id>=1 && id<=6 && ((address==3&&length==4)||(address==31&&length==3));
+            assert((ServoTransport_Transmit(uart,token,read,8,10)==HAL_OK)==allowed);
+            assert(ServoTransport_End(uart,token,false)==HAL_OK);
+        }
+    }
+    """
+    source=source.replace('assert(other.sent==0);', 'assert(other.sent==0);'+reads)
     path=tmp_path/'gate.c';path.write_text(source);exe=tmp_path/'gate'
     subprocess.run(['gcc','-O2','-std=c11','-Wall','-Wextra','-Werror','-DHOST_S2_OBSERVER_ONLY=1',
         '-I',str(FAKE),'-I',str(BOARD/'Inc'),'-I',str(CORE/'include'),str(path),

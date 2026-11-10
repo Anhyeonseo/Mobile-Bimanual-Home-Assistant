@@ -185,7 +185,7 @@ HAL_StatusTypeDef Servo_ReadAllPositions(
 HAL_StatusTypeDef Servo_SyncWritePositions(
     const uint16_t positions[SINGLE_ARM_JOINT_COUNT]
 );
-void Servo_InMotionTelemetryBegin(void);
+HAL_StatusTypeDef Servo_InMotionTelemetryBegin(void);
 void Servo_InMotionTelemetryEnd(void);
 uint8_t Servo_InMotionTelemetryReleased(void);
 uint8_t Servo_InMotionTelemetryCanStart(void);
@@ -209,5 +209,9 @@ HAL_StatusTypeDef Servo_RunSynchronizedSmoothstep(
     const uint16_t target_positions[SINGLE_ARM_JOINT_COUNT],
     uint32_t duration_ms
 );
+
+#if HOST_S3_STATIONARY_PICK
+void Servo_InMotionFailureCopy(uint32_t out[8]);
+#endif
 
 #endif /* SERVO_BUS_H */

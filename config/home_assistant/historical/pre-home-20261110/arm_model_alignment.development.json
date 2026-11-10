@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "record_kind": "development_single_pose_arm_alignment",
+  "status": "operator_reference_captured_historical_directions_reused",
+  "robot_model": "alohamini1",
+  "arm_model": "SO-ARM101",
+  "geometry_sha256": "873a16f87cfddafd79dcc880cae26862d13614218c7cf81accd5793b4e28fc81",
+  "selected_pose": "config/home_assistant/arm_home_pose.development.json",
+  "direction_source": "config/home_assistant/arm_ranges.development.json",
+  "direction_source_sha256": "71caca1d55f529a4a39ef203ef10f850364c5a0e2199f43897a3dc10aebd085f",
+  "formula": "q_model = q_reference + sign * (raw_unwrapped - reference_raw) * 2*pi/4096",
+  "raw_input_policy": "continuous unwrapped raw anchored to observed reference; modulo-only readings do not select a turn or authorize motion",
+  "encoder_home_preserved": true,
+  "runtime_motion_authorized": false,
+  "independent_direction_verified": false,
+  "independent_pose_accuracy_verified": false,
+  "strict_commissioning_passed": false,
+  "arms": {
+    "left": {
+      "reference_raw": {
+        "base": 2034,
+        "shoulder": 2071,
+        "elbow": 2051,
+        "wrist_flex": 2102,
+        "wrist_roll": 2041,
+        "gripper": 2081
+      },
+      "reference_model_rad": {
+        "base": 0.0,
+        "shoulder": -1.5707963267948966,
+        "elbow": 1.2217304763960306,
+        "wrist_flex": 1.5707963267948966,
+        "wrist_roll": 1.5707963267948966,
+        "gripper": 0.0
+      },
+      "alignment": {
+        "base": {
+          "sign": 1,
+          "home_model_rad": 0.021475731030398976
+        },
+        "shoulder": {
+          "sign": 1,
+          "home_model_rad": -1.6060778849162662
+        },
+        "elbow": {
+          "sign": -1,
+          "home_model_rad": 1.2263324187596876
+        },
+        "wrist_flex": {
+          "sign": -1,
+          "home_model_rad": 1.6536312893407212
+        },
+        "wrist_roll": {
+          "sign": 1,
+          "home_model_rad": 1.581534192310096
+        },
+        "gripper": {
+          "sign": -1,
+          "home_model_rad": 0.05062136600022616
+        }
+      },
+      "reference_report": "output/home-assistant/s2/arms/left-selected-home-20261105-01.json",
+      "reference_report_sha256": "73eae02261a8b2485a9d4c3981823941099dc0200126ac596e7b1cb21f3a674d",
+      "captured_utc": "2026-11-05T08:53:47.289555+00:00",
+      "torque_off_verified": true,
+      "eeprom_matches_pre_reference_backup": true,
+      "sample_stability_check": "capture tool validates two scans within 8 modulo counts; first scan not retained in legacy report",
+      "direction_basis": "historical convention reused by operator, not a new model-axis direction measurement",
+      "model_tcp_in_arm_base_at_reference_m": [
+        0.1359537009838232,
+        -0.008078157892767142,
+        0.04594297339015943
+      ],
+      "tcp_frame": "official fixed gripper_frame_link; not variable contact center",
+      "reference_note_precedence": "explicit reference_note and selected pose define angles; legacy gripper-middle text is not the selected reference"
+    },
+    "right": {
+      "reference_raw": {
+        "base": 2046,
+        "shoulder": 2090,
+        "elbow": 2061,
+        "wrist_flex": 2084,
+        "wrist_roll": 2084,
+        "gripper": 2052
+      },
+      "reference_model_rad": {
+        "base": 0.0,
+        "shoulder": -1.5707963267948966,
+        "elbow": 1.2217304763960306,
+        "wrist_flex": 1.5707963267948966,
+        "wrist_roll": 1.5707963267948966,
+        "gripper": 0.0
+      },
+      "alignment": {
+        "base": {
+          "sign": 1,
+          "home_model_rad": 0.0030679615757712823
+        },
+        "shoulder": {
+          "sign": 1,
+          "home_model_rad": -1.6352235198860936
+        },
+        "elbow": {
+          "sign": -1,
+          "home_model_rad": 1.241672226638544
+        },
+        "wrist_flex": {
+          "sign": -1,
+          "home_model_rad": 1.6260196351587797
+        },
+        "wrist_roll": {
+          "sign": 1,
+          "home_model_rad": 1.5155730184310134
+        },
+        "gripper": {
+          "sign": -1,
+          "home_model_rad": 0.006135923151542565
+        }
+      },
+      "reference_report": "output/home-assistant/s2/arms/right-selected-home-20261105-01.json",
+      "reference_report_sha256": "1e8c0e7aa23415b6c64fc0620a9a2e91c5c1c597ccd15cbfd2d129339d219fd7",
+      "captured_utc": "2026-11-05T08:53:47.523983+00:00",
+      "torque_off_verified": true,
+      "eeprom_matches_pre_reference_backup": true,
+      "sample_stability_check": "capture tool validates two scans within 8 modulo counts; first scan not retained in legacy report",
+      "direction_basis": "historical convention reused by operator, not a new model-axis direction measurement",
+      "model_tcp_in_arm_base_at_reference_m": [
+        0.1359537009838232,
+        -0.008078157892767142,
+        0.04594297339015943
+      ],
+      "tcp_frame": "official fixed gripper_frame_link; not variable contact center",
+      "reference_note_precedence": "explicit reference_note and selected pose define angles; legacy gripper-middle text is not the selected reference"
+    }
+  }
+}

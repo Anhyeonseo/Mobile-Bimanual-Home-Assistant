@@ -1,0 +1,20 @@
+<div id="carry-posture-view">
+  <h2>공통 복귀 자세와 물체별 조정</h2>
+  <div class="viz-controls">
+    <label class="form-label">물체<select class="form-select" data-role="case"></select></label>
+    <label class="form-label">보는 방향<select class="form-select" data-role="view"><option value="arm-iso">팔 확대 · 입체</option><option value="arm-side">팔 확대 · 옆</option><option value="whole">로봇 전체</option></select></label>
+  </div>
+  <div class="posture-scene"><canvas data-role="mesh" role="img" aria-label="공식 Mini 1과 SO-ARM101 형상의 복귀 자세"></canvas><svg data-role="overlay" role="img" aria-label="잡은 물체의 형상과 어깨에서 물체 중심까지의 수평 거리"></svg></div>
+  <div data-role="metric" class="tabular-nums" aria-live="polite"></div>
+  <div class="text-small">물체 형상과 함께 경로 검사 · 실물 운반 미검증 · 리프트는 가상 높이</div>
+  <script type="application/json" data-role="data">__DATA__</script>
+</div>
+<style>
+#carry-posture-view{display:grid;gap:calc(var(--font-size-base)*.75);--s2-lift-moving:var(--viz-series-1);}
+#carry-posture-view .posture-scene{position:relative;width:100%;height:430px;}
+#carry-posture-view .posture-scene canvas,#carry-posture-view .posture-scene svg{position:absolute;inset:0;width:100%;height:100%;}
+@media(max-width:450px){#carry-posture-view .posture-scene{height:360px;}}
+</style>
+<script>__KINEMATICS__</script>
+<script>__RENDERER__</script>
+<script>__VIEWER__</script>

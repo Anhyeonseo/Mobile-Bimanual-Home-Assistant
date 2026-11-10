@@ -15,7 +15,7 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / 'ros2_ws/src/home_robot_tasks'))
+sys.path[:0] = [str(ROOT / 'ros2_ws/src/home_robot_tasks'), str(ROOT / 'ros2_ws/src/so101_arm_bridge')]
 from home_robot_tasks.lift_observation import LiftObservation
 
 

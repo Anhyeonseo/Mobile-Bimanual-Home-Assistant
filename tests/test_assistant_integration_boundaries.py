@@ -169,7 +169,7 @@ def test_joint_placement_binding_requires_arrival_and_new_grasp_observation(envi
         assert candidate['grasp_id'] == 'chosen-grasp'
         return dict(operation=operation, object_id=object_id, arm=candidate['arm'], target=t,
             position_m=[.15,0,.7], quaternion_xyzw=[0,0,0,1])
-    policy = TaskPlacementPolicy(profile=PlacementProfile(0,.6,(.2,),(.4,),(0,)),
+    policy = TaskPlacementPolicy(profile=PlacementProfile(0,.6,(0,.2,.4),(.4,),(0,)),
         feasibility_factory=lambda *_:Oracle(), target_to_map=lambda t:([3,3,.7],Stamp(now[0],service.context,t['capture_id'])),
         context=lambda:service.context,current_configuration=lambda:current,
         scene_revision=lambda:'scene-1',clock=lambda:now[0],grasp_ids=lambda *_:['chosen-grasp'],
@@ -177,6 +177,9 @@ def test_joint_placement_binding_requires_arrival_and_new_grasp_observation(envi
     # Exercise MissionCatalog's real delegation, not an alternate executor.
     catalog.placement_policy = policy
     args = {'object_id':'marker-1'}
+    with pytest.raises(InvalidTask, match='single_pick_lift_setting_required'):
+        MissionCatalog.resolve(catalog, 'align_for_pick', args, now[0])
+    policy.pick_height_for = lambda target: .2
     nav = MissionCatalog.resolve(catalog, 'align_for_pick', args, now[0])
     with pytest.raises(InvalidTask, match='base_pose_not_reached'):
         MissionCatalog.resolve(catalog, 'adjust_lift_for_pick', args, now[0])

@@ -24,7 +24,7 @@ class PayloadObservation:
     sequence: int
     observed_s: float
     object_id: str
-    relation: str  # held / empty / unknown, independently observed at gripper
+    relation: str  # contact / held / empty / unknown, independently observed at gripper
     destination: str | None = None
     object_at_destination: bool = False
     camera_frame: str = ""
@@ -117,7 +117,7 @@ class PayloadMonitor:
             if self.candidate is not None:
                 matches = (self.gap_min <= sample.gap_mm <= self.gap_max
                            and self.effort_min <= sample.effort_raw <= self.effort_max
-                           if self.candidate == "HELD" else
+                           if self.candidate in {"CONTACT", "HELD"} else
                            sample.gap_mm >= self.open_gap and sample.effort_raw <= self.empty_effort)
                 if not sample.healthy or not matches:
                     self._invalidate()
@@ -129,7 +129,7 @@ class PayloadMonitor:
     def observe_vision(self, sample, now_s):
         now = self._clock(now_s)
         try:
-            if (not isinstance(sample, PayloadObservation) or sample.relation not in {"held", "empty", "unknown"}
+            if (not isinstance(sample, PayloadObservation) or sample.relation not in {"contact", "held", "empty", "unknown"}
                     or type(sample.object_at_destination) is not bool):
                 raise InvalidTask("independent payload observation required")
             if self.camera_frames is not None and sample.camera_frame not in self.camera_frames:
@@ -143,7 +143,7 @@ class PayloadMonitor:
             self.vision = sample
             if self.candidate is not None and (
                 sample.object_id != self.object_id
-                or sample.relation != ("held" if self.candidate == "HELD" else "empty")
+                or sample.relation != {"CONTACT": "contact", "HELD": "held"}.get(self.candidate, "empty")
                 or (self.candidate == "RELEASED" and (
                     sample.destination != self.destination or not sample.object_at_destination))
             ):
@@ -166,10 +166,12 @@ class PayloadMonitor:
         state = "UNKNOWN"
         stamp = min(g.observed_s, v.observed_s) if g is not None and v is not None else now
         if valid:
-            held = (self.gap_min <= g.gap_mm <= self.gap_max
-                    and self.effort_min <= g.effort_raw <= self.effort_max and v.relation == "held")
+            loaded = (self.gap_min <= g.gap_mm <= self.gap_max
+                    and self.effort_min <= g.effort_raw <= self.effort_max)
             empty = g.gap_mm >= self.open_gap and g.effort_raw <= self.empty_effort and v.relation == "empty"
-            if held and self.intent in {"grasp", "release"}:
+            if loaded and v.relation == "contact" and self.intent == "grasp" and not self.carrying:
+                state = "CONTACT"
+            elif loaded and v.relation == "held" and self.intent in {"grasp", "release"}:
                 state = "HELD"
             elif empty and self.intent in {"empty", "grasp"} and not self.carrying:
                 state = "EMPTY"
@@ -194,6 +196,8 @@ class PayloadMonitor:
         if verified and state == "RELEASED":
             self.carrying = False
         return PayloadProof(state if verified else "UNKNOWN", stamp, {
+            "contact_plausible": verified and state == "CONTACT",
+            "probe_contact_live": state in {"CONTACT", "HELD"},
             "grasp_verified": verified and state == "HELD",
             "load_retained": verified and state == "HELD",
             "release_verified": verified and state == "RELEASED",

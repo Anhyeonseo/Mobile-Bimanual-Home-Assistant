@@ -2,3 +2,5 @@
 # environment for --rgbd; do not replace its platform-specific pyrealsense2 build.
 numpy==1.26.4
 pyserial==3.5
+# PNG export for the optional S3 frame handoff.
+Pillow>=10,<13

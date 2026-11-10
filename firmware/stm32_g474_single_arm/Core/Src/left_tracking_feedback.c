@@ -45,7 +45,7 @@ HAL_StatusTypeDef BimanualTrackingFeedback_Begin(void)
         return HAL_BUSY;
     }
     memset(&tracking, 0, sizeof(tracking));
-    Servo_InMotionTelemetryBegin();
+    if (Servo_InMotionTelemetryBegin() != HAL_OK) return HAL_ERROR;
 
     tracking.snapshot.active = 1U;
     return HAL_OK;

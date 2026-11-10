@@ -101,3 +101,45 @@ def test_cli_exports_metadata_evidence_without_loading_camera_sdk(tmp_path):
     output.unlink();(tmp_path/'depth_native.png').unlink()
     assert subprocess.run(cmd,capture_output=True).returncode==2
     assert not output.exists()
+
+
+def test_verified_near_mode_preserves_arm_and_color_geometry():
+    from home_robot_tasks import s2_development as dev, s2_geometry as geo
+    from home_robot_tasks.camera_evidence import near_depth_profile
+
+    config = ROOT/'config/home_assistant'
+    profile = json.loads((config/'s2_coordinates.development.json').read_text())
+    base = json.loads((config/'camera_device.observed.json').read_text())
+    near = json.loads((config/'camera_device.near.observed.json').read_text())
+    variant = near_depth_profile(profile,base,near)
+    dev.validate(variant,geo.load_geometry(config/'official_geometry.json'))
+    assert variant['calibration_id'] != profile['calibration_id'] == variant['base_profile_id']
+    assert variant['arms'] == profile['arms'] and variant['base_from_optical'] == profile['base_from_optical']
+    assert variant['camera_device'] == near['camera_device'] and variant['motion_authorized'] is False
+
+
+@pytest.mark.parametrize('mutation', ['device','color','native','scale','translation','depth_stream','both_scales','both_rgb_streams'])
+def test_near_mode_rejects_changed_factory_geometry(mutation):
+    from home_robot_tasks import s2_geometry as geo
+    from home_robot_tasks.camera_evidence import near_depth_profile
+
+    config = ROOT/'config/home_assistant'
+    profile = json.loads((config/'s2_coordinates.development.json').read_text())
+    base = json.loads((config/'camera_device.observed.json').read_text())
+    near = json.loads((config/'camera_device.near.observed.json').read_text())
+    cal = near['sdk_calibration']
+    if mutation=='device':near['camera_device']['device_id_hash']='other'
+    elif mutation=='color':cal['color_intrinsics']['fx']+=1
+    elif mutation=='native':cal['native_depth_intrinsics']['ppx']+=1
+    elif mutation=='scale':cal['depth_scale_m']*=2
+    elif mutation=='translation':cal['color_optical_from_depth_optical'][0][3]+=.001
+    elif mutation=='depth_stream':near['profiles']['depth']['width']=848
+    elif mutation=='both_scales':
+        base['sdk_calibration']['depth_scale_m'] *= 2
+        cal['depth_scale_m'] *= 2
+    elif mutation=='both_rgb_streams':
+        base['profiles']['color']['fps'] = near['profiles']['color']['fps'] = 15
+    near['camera_device']['factory_calibration_sha256']=geo.digest(cal)
+    near['camera_device']['stream_profile_id']='rgbd-v1-'+geo.digest(near['profiles'])
+    with pytest.raises(ValueError):
+        near_depth_profile(profile,base,near)

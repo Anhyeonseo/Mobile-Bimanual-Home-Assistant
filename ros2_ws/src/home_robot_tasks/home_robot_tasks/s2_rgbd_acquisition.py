@@ -5,7 +5,7 @@ https://realsenseai.github.io/librealsense/python_docs/_generated/pyrealsense2.t
 """
 from datetime import datetime, timezone
 import time
-from . import s2_commissioning as s2
+from . import s2_geometry as s2
 from .camera_evidence import from_metadata, match_observed_identity
 
 
@@ -40,10 +40,12 @@ def association(record,camera):
 
 class Capture:
     """Owns only camera streaming/options; restores changed options on exit."""
-    def __init__(self,profile,reference_evidence=None):
+    def __init__(self,profile,reference_evidence=None,*,retain_frame=False):
         self.expected=profile['camera_device'];self.pipeline=None;self.started=False;self.saved=[];self.buffer=[]
         self.reference=reference_evidence
         self.last_matched=None
+        self.retain_frame=retain_frame
+        self.images={}
         if self.reference is not None and self.reference['camera_device']!=self.expected:
             raise ValueError('camera reference does not match profile')
     def __enter__(self):
@@ -61,7 +63,11 @@ class Capture:
                     sensor.set_option(rs.option.global_time_enabled,1.)
             config=rs.config();config.enable_device(self.device['serial'])
             config.enable_stream(rs.stream.color,640,480,rs.format.bgr8,30)
-            config.enable_stream(rs.stream.depth,1280,720,rs.format.z16,30)
+            dims = (1280,720) if self.reference is None else (
+                self.reference['profiles']['depth']['width'], self.reference['profiles']['depth']['height'])
+            if dims not in ((1280,720), (640,360)):
+                raise ValueError('unsupported D415 measurement profile')
+            config.enable_stream(rs.stream.depth,*dims,rs.format.z16,30)
             self.pipeline=rs.pipeline(ctx);self.active=self.pipeline.start(config);self.started=True
             self.align=rs.align(rs.stream.color);self.clock=GlobalClock()
             # SDK device->OS conversion needs warmup. No motor reference exists yet.
@@ -113,7 +119,23 @@ class Capture:
                 'color_time_s':self.clock.convert(color.get_timestamp(),str(color.get_frame_timestamp_domain())),
                 'depth_time_s':self.clock.convert(depth.get_timestamp(),str(depth.get_frame_timestamp_domain()))}
         self.buffer.append(record);self.buffer=self.buffer[-3:]
+        if self.retain_frame:
+            import numpy as np
+            self.images[record['capture_id']]=(np.asanyarray(color.get_data()).copy(),
+                                               np.asanyarray(aligned.get_data()).copy(),m)
+            self.images={c['capture_id']:self.images[c['capture_id']] for c in self.buffer if c['capture_id'] in self.images}
         return record
+    def retain_matched(self, camera):
+        images=self.images[camera['capture_id']]
+        self.retain_frame=False
+        self.images.clear()
+        return images
+    def next_frame(self, timeout_ms=1000):
+        """Continuous consumer API; exposure time stays separate from arrival."""
+        if not self.started or not self.retain_frame:
+            raise ValueError('retaining camera stream required')
+        record=self._record(self.pipeline.wait_for_frames(timeout_ms))
+        return record, self.images[record['capture_id']]
     def match(self,motors):
         center=sum(r['acquired_s'] for r in motors['samples'])/len(motors['samples'])
         deadline=time.monotonic()+.1

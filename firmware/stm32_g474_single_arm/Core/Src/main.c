@@ -27,6 +27,7 @@
 #include "mobile_servo_output.h"
 #include "mobile_servo_feedback.h"
 #include "mobile_board.h"
+#include "mobile_arm_observer.h"
 #include "mobile_hold_output.h"
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
 #include "bimanual_servo_dispatch.h"
@@ -125,7 +126,7 @@ int main(void)
 
   /* USER CODE BEGIN 2 */
   SingleArmApp_Init(&hlpuart1, &huart1);
-  #if !HOST_S2_OBSERVER_ONLY && !HOST_BIMANUAL_CALIBRATION_ONLY && !HOST_LEFT_ONLY_CALIBRATION_ONLY && !HOST_MOBILE_BUS_INSPECTION_ONLY && !HOST_MOBILE_WHEEL_SETUP_ONLY && !HOST_MOBILE_WHEEL_PULSE_ONLY && !HOST_MOBILE_BASE_TELEOP_ONLY && !HOST_LIFT_TELEOP_ONLY
+  #if !HOST_S3_LEFT_GRIP_BENCH && !HOST_S2_OBSERVER_ONLY && !HOST_BIMANUAL_CALIBRATION_ONLY && !HOST_LEFT_ONLY_CALIBRATION_ONLY && !HOST_MOBILE_BUS_INSPECTION_ONLY && !HOST_MOBILE_WHEEL_SETUP_ONLY && !HOST_MOBILE_WHEEL_PULSE_ONLY && !HOST_MOBILE_BASE_TELEOP_ONLY && !HOST_LIFT_TELEOP_ONLY
   #if !HOST_LEFT_ONLY_BUILD
   RightServoBus_Init(&huart4);
   #endif
@@ -134,6 +135,10 @@ int main(void)
 #endif
   #if !HOST_LEFT_ONLY_BUILD
   (void)MobileBoard_Boot(&huart1, &huart4);
+#if HOST_S3_STATIONARY_PICK
+  /* Paused until an explicit AP observe request; motor-OFF boot is quiet. */
+  (void)MobileArmObserver_Configure(&huart1,&huart4,5U,150U);
+#endif
   #endif
   #endif
   /* USER CODE END 2 */
@@ -150,7 +155,7 @@ int main(void)
     BimanualServoDispatch_Poll();
 #endif
     SingleArmApp_Process();
-    #if !HOST_S2_OBSERVER_ONLY && !HOST_BIMANUAL_CALIBRATION_ONLY && !HOST_LEFT_ONLY_CALIBRATION_ONLY && !HOST_MOBILE_BUS_INSPECTION_ONLY && !HOST_MOBILE_WHEEL_SETUP_ONLY && !HOST_MOBILE_WHEEL_PULSE_ONLY && !HOST_MOBILE_BASE_TELEOP_ONLY && !HOST_LIFT_TELEOP_ONLY
+    #if !HOST_S3_LEFT_GRIP_BENCH && !HOST_S2_OBSERVER_ONLY && !HOST_BIMANUAL_CALIBRATION_ONLY && !HOST_LEFT_ONLY_CALIBRATION_ONLY && !HOST_MOBILE_BUS_INSPECTION_ONLY && !HOST_MOBILE_WHEEL_SETUP_ONLY && !HOST_MOBILE_WHEEL_PULSE_ONLY && !HOST_MOBILE_BASE_TELEOP_ONLY && !HOST_LIFT_TELEOP_ONLY
     MobileBoard_Poll();
     MobileServoOutput_Poll();
     MobileHoldOutput_Poll();

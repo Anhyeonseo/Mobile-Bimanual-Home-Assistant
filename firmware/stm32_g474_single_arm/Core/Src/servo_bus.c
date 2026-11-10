@@ -1,6 +1,11 @@
 #include "servo_bus_reader.h"
 #include "servo_bus.h"
+#include "servo_dma_cursor.h"
 #include "servo_transport.h"
+#if HOST_S3_STATIONARY_PICK
+#include "servo_feedback_completion.h"
+#include "timebase.h"
+#endif
 #include "actuator_core/sts3215_packet.h"
 #include "f0_metrics.h"
 #include "timebase.h"
@@ -33,6 +38,11 @@
 static UART_HandleTypeDef *servo_uart_handle = NULL;
 static uint32_t servo_service_token;
 static uint32_t servo_feedback_token;
+#if HOST_S3_STATIONARY_PICK
+static uint32_t servo_in_motion_telemetry_failure[8];
+void Servo_InMotionFailureCopy(uint32_t out[8])
+{ memcpy(out, servo_in_motion_telemetry_failure, sizeof(servo_in_motion_telemetry_failure)); }
+#endif
 static bool servo_reader_shared;
 static ServoStopRequestedFn servo_stop_requested = NULL;
 static ServoReadFailureFn servo_read_failure = NULL;
@@ -63,6 +73,9 @@ typedef struct
     uint32_t started_at_ms;
     uint8_t request[8];
     ServoRxWindow window;
+#if HOST_S3_STATIONARY_PICK
+    ServoFeedbackCompletion completion;
+#endif
 } ServoInMotionTelemetry;
 
 static ServoInMotionTelemetry servo_in_motion_telemetry = {0};
@@ -324,28 +337,8 @@ static uint32_t ServoBus_ProducerAbsolute(void)
         return 0U;
     }
 
-    uint32_t interrupt_mask = __get_PRIMASK();
-    __disable_irq();
-    uint32_t wraps = servo_dma_wrap_count;
-    uint16_t remaining = (uint16_t)__HAL_DMA_GET_COUNTER(
-        servo_uart_handle->hdmarx
-    );
-    uint32_t pending_tc = __HAL_DMA_GET_FLAG(
-        servo_uart_handle->hdmarx,
-        __HAL_DMA_GET_TC_FLAG_INDEX(servo_uart_handle->hdmarx)
-    );
-    if ((pending_tc != 0U) && (remaining != 0U))
-    {
-        wraps++;
-    }
-    uint32_t absolute =
-        (wraps * SERVO_BUS_DMA_RING_CAPACITY) +
-        (SERVO_BUS_DMA_RING_CAPACITY - remaining);
-    __DMB();
-    if (interrupt_mask == 0U)
-    {
-        __enable_irq();
-    }
+    uint32_t absolute = ServoDmaCursor_Read(servo_uart_handle->hdmarx,
+        &servo_dma_wrap_count, SERVO_BUS_DMA_RING_CAPACITY);
     servo_bus_health.producer_index = (uint16_t)(
         absolute % SERVO_BUS_DMA_RING_CAPACITY
     );
@@ -739,11 +732,24 @@ static ServoBusFailureReason ServoBus_MapRejectReason(
     }
 }
 
-void Servo_InMotionTelemetryBegin(void)
+HAL_StatusTypeDef Servo_InMotionTelemetryBegin(void)
 {
+#if HOST_S3_STATIONARY_PICK
+    /* Inventory/anchor reads deliberately disarm RX when they finish. Prepare
+     * it once HERE, before the first control tick is enabled, not inside the
+     * first timed read. Runtime requests then only take a DMA cursor. */
+    if (servo_in_motion_telemetry.enabled || servo_feedback_token != 0U)
+        return HAL_BUSY;
+    if (ServoTransport_ServiceAllowed())
+    {
+        if (!ServoBus_PrepareReader(servo_uart_handle, true)) return HAL_ERROR;
+    }
+    else if (!ServoBus_DmaHardwareActive()) return HAL_ERROR;
+#endif
     memset(&servo_in_motion_telemetry, 0, sizeof(servo_in_motion_telemetry));
     memset(&servo_in_motion_snapshot, 0, sizeof(servo_in_motion_snapshot));
     servo_in_motion_telemetry.enabled = 1U;
+    return HAL_OK;
 }
 
 void Servo_InMotionTelemetryEnd(void)
@@ -782,12 +788,22 @@ uint8_t Servo_InMotionTelemetryReleased(void)
 uint8_t Servo_InMotionTelemetryCanStart(void)
 {
     return servo_in_motion_telemetry.enabled && !Servo_InMotionTelemetryPending() &&
+#if HOST_S3_STATIONARY_PICK
+        /* BUSY can be the final echoed byte of the preceding sync-write.
+         * Let the cooperative loop try again; never reset RX for normal traffic. */
+        servo_uart_handle != NULL &&
+        __HAL_UART_GET_FLAG(servo_uart_handle, UART_FLAG_BUSY) == RESET &&
+#endif
         ServoTransport_ReadReady(servo_uart_handle);
 }
 
 uint8_t Servo_InMotionTelemetryPending(void)
 {
-    return (servo_in_motion_telemetry.state !=
+    return
+#if HOST_S3_STATIONARY_PICK
+        servo_feedback_token != 0U ||
+#endif
+        (servo_in_motion_telemetry.state !=
             SERVO_IN_MOTION_TELEMETRY_IDLE) ? 1U : 0U;
 }
 
@@ -797,6 +813,28 @@ Servo_InMotionTelemetryGetSnapshot(void)
     return &servo_in_motion_snapshot;
 }
 
+#if HOST_S3_STATIONARY_PICK
+static HAL_StatusTypeDef ServoBus_PrepareRuntimeRead(
+    uint8_t servo_id, uint32_t *start_absolute)
+{
+    /* The receiver is prepared before entering the periodic runtime. The
+     * maintenance helper may wait 2 ms + 2 ms, exceeding the output slot.
+     * Runtime admission must be nonblocking and must not rearm circular DMA. */
+    if (start_absolute == NULL ||
+        !ServoBus_ReaderCursor(servo_uart_handle, servo_feedback_token, start_absolute))
+        return HAL_ERROR;
+    if (__HAL_UART_GET_FLAG(servo_uart_handle, UART_FLAG_BUSY) != RESET)
+        return HAL_BUSY;
+    memset(&servo_bus_diagnostics, 0, sizeof(servo_bus_diagnostics));
+    servo_bus_diagnostics.servo_id = servo_id;
+    servo_bus_diagnostics.recovery_count = servo_bus_health.recovery_count;
+    servo_bus_health.transaction_count++;
+    servo_transaction_start_absolute = *start_absolute;
+    servo_transaction_active = 1U;
+    return HAL_OK;
+}
+#endif
+
 static HAL_StatusTypeDef Servo_InMotionTelemetryStartOwned(
     uint8_t joint_index,
     uint32_t started_at_ms
@@ -805,16 +843,30 @@ static HAL_StatusTypeDef Servo_InMotionTelemetryStartOwned(
     if ((servo_in_motion_telemetry.enabled == 0U) ||
         (servo_in_motion_telemetry.state !=
             SERVO_IN_MOTION_TELEMETRY_IDLE) ||
-        (joint_index >= servo_joint_count))
+        (joint_index >= servo_joint_count
+#if HOST_S3_STATIONARY_PICK
+         && joint_index >= 10U
+#endif
+        ))
     {
         return HAL_BUSY;
     }
 
-    const uint8_t servo_id = servo_joints[joint_index].id;
+    const uint8_t servo_id =
+#if HOST_S3_STATIONARY_PICK
+        joint_index >= 6U ? joint_index + 1U :
+#endif
+        servo_joints[joint_index].id;
     uint32_t transaction_start_absolute = 0U;
-    if (ServoBus_PrepareTransaction(servo_id, &transaction_start_absolute) !=
-        HAL_OK)
+    HAL_StatusTypeDef prepared =
+#if HOST_S3_STATIONARY_PICK
+        ServoBus_PrepareRuntimeRead(servo_id, &transaction_start_absolute);
+#else
+        ServoBus_PrepareTransaction(servo_id, &transaction_start_absolute);
+#endif
+    if (prepared != HAL_OK)
     {
+        if (prepared == HAL_BUSY) return HAL_BUSY;
         servo_in_motion_snapshot.failed_samples++;
         return HAL_ERROR;
     }
@@ -836,6 +888,10 @@ static HAL_StatusTypeDef Servo_InMotionTelemetryStartOwned(
         transaction_start_absolute
     );
 
+    telemetry->state = SERVO_IN_MOTION_TELEMETRY_TX_PENDING;
+#if HOST_S3_STATIONARY_PICK
+    ServoFeedbackCompletion_Start(&telemetry->completion, Timebase_NowUs(), ServoBus_ProducerAbsolute());
+#endif
     HAL_StatusTypeDef status = ServoTransport_TransmitIT(
         servo_uart_handle, servo_feedback_token,
         telemetry->request,
@@ -848,7 +904,7 @@ static HAL_StatusTypeDef Servo_InMotionTelemetryStartOwned(
         );
     }
 
-    telemetry->state = SERVO_IN_MOTION_TELEMETRY_TX_PENDING;
+
     servo_in_motion_snapshot.requested_samples++;
     return HAL_OK;
 }
@@ -862,9 +918,10 @@ HAL_StatusTypeDef Servo_InMotionTelemetryStart(
         return HAL_BUSY;
     HAL_StatusTypeDef status = Servo_InMotionTelemetryStartOwned(joint_index, started_at_ms);
     if (status == HAL_OK) return status;
-    HAL_StatusTypeDef ended = ServoTransport_End(servo_uart_handle, servo_feedback_token, status != HAL_OK);
+    HAL_StatusTypeDef ended = ServoTransport_End(servo_uart_handle, servo_feedback_token,
+        status != HAL_BUSY);
     if (ended == HAL_OK) servo_feedback_token = 0U;
-    if (status == HAL_OK && ended != HAL_OK) return HAL_BUSY;
+    if (ended != HAL_OK) return HAL_ERROR;
     return status;
 }
 
@@ -895,7 +952,11 @@ static HAL_StatusTypeDef ServoInMotionTelemetry_Fail(
     );
     servo_in_motion_snapshot.failed_samples++;
     telemetry->state = SERVO_IN_MOTION_TELEMETRY_IDLE;
+#if !HOST_S3_STATIONARY_PICK
     (void)ServoBus_Recover();
+#else
+    servo_transaction_active = 0U;
+#endif
     return status;
 }
 
@@ -970,11 +1031,16 @@ static HAL_StatusTypeDef Servo_InMotionTelemetryPollOwned(
                 (uint16_t)position_data[0] |
                 ((uint16_t)position_data[1] << 8U)
             );
-            uint16_t commanded = commanded_positions[telemetry->joint_index];
+            uint16_t commanded =
+#if HOST_S3_STATIONARY_PICK
+                telemetry->joint_index >= 6U ? actual :
+#endif
+                commanded_positions[telemetry->joint_index];
             uint16_t error = (actual > commanded) ?
                 (uint16_t)(actual - commanded) :
                 (uint16_t)(commanded - actual);
-            if (error > servo_in_motion_snapshot.maximum_error_raw[
+            if (telemetry->joint_index < SINGLE_ARM_JOINT_COUNT &&
+                error > servo_in_motion_snapshot.maximum_error_raw[
                     telemetry->joint_index])
             {
                 servo_in_motion_snapshot.maximum_error_raw[
@@ -1055,6 +1121,24 @@ HAL_StatusTypeDef Servo_InMotionTelemetryPoll(
     const uint16_t commanded_positions[SINGLE_ARM_JOINT_COUNT]
 )
 {
+#if HOST_S3_STATIONARY_PICK
+    if (servo_feedback_token == 0U) return HAL_OK;
+    ServoFeedbackCompletion *completion = &servo_in_motion_telemetry.completion;
+    uint32_t uart_errors = servo_uart_async_errors | ServoBus_CurrentUartErrorCode();
+    uint32_t dma_errors = servo_dma_async_error | (servo_uart_handle->hdmarx ? servo_uart_handle->hdmarx->ErrorCode : 0U);
+    uint32_t phase = completion->completing ? 3U : (servo_in_motion_telemetry.tx_completed ? 2U : 1U);
+    HAL_StatusTypeDef parsed = completion->completing ? completion->result :
+        Servo_InMotionTelemetryPollOwned(now_ms, commanded_positions);
+    HAL_StatusTypeDef result = ServoFeedbackCompletion_Poll(completion, servo_uart_handle, &servo_feedback_token,
+        parsed, Timebase_NowUs(), ServoBus_ProducerAbsolute(),
+        ServoBus_DmaHardwareActive() && ServoBus_CurrentUartErrorCode() == 0U && servo_uart_async_errors == 0U && servo_dma_async_error == 0U && servo_uart_handle->hdmarx->ErrorCode == 0U, servo_in_motion_telemetry.tx_completed != 0U);
+    ServoFeedbackCompletion_Record(completion, servo_in_motion_telemetry_failure, now_ms,
+        servo_in_motion_telemetry.joint_index, parsed == HAL_TIMEOUT ? parsed : result,
+        (uint32_t)servo_in_motion_telemetry.window.parser.last_reject |
+            ((uint32_t)servo_in_motion_telemetry.window.parser.servo_status << 8) |
+            ((uint32_t)servo_bus_diagnostics.reason << 16), uart_errors, dma_errors, phase);
+    return result;
+#else
     HAL_StatusTypeDef status = Servo_InMotionTelemetryPollOwned(now_ms, commanded_positions);
     if (servo_feedback_token != 0U && status != HAL_OK && status != HAL_BUSY)
     {
@@ -1068,6 +1152,7 @@ HAL_StatusTypeDef Servo_InMotionTelemetryPoll(
         if (status == HAL_OK && ended != HAL_OK) return ended;
     }
     return status;
+#endif
 }
 
 HAL_StatusTypeDef Servo_ReadPosition(
@@ -2417,6 +2502,10 @@ bool ServoBus_PrepareReader(UART_HandleTypeDef *uart, bool proof)
     HAL_StatusTypeDef ready = ServoBus_ArmReceiver();
     HAL_StatusTypeDef ended = ServoTransport_End(uart, token, false);
     if (ready != HAL_OK || ended != HAL_OK) {
+#if HOST_S3_STATIONARY_PICK
+        /* Keep a failed setup lease reachable by telemetry End/STOP. */
+        if (ended != HAL_OK) servo_feedback_token = token;
+#endif
         ServoTransport_RequestStop(uart); return false;
     }
     servo_reader_shared = true;

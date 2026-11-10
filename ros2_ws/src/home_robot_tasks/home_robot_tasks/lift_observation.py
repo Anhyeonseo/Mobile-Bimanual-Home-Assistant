@@ -5,10 +5,11 @@ therefore ephemeral: closing the port or losing continuity invalidates its origi
 """
 import math
 import uuid
+from so101_arm_bridge.encoder_units import LIFT_METERS_PER_TURN, observed_delta, lift_rise_m
 
 
 class LiftObservation:
-    def __init__(self, *, bottom_confirmed, m_per_turn=0.084):
+    def __init__(self, *, bottom_confirmed, m_per_turn=LIFT_METERS_PER_TURN):
         if bottom_confirmed is not True:
             raise ValueError('operator must confirm the current mechanical bottom')
         if not math.isfinite(m_per_turn) or not 0 < m_per_turn < 1:
@@ -55,7 +56,7 @@ class LiftObservation:
             # Tick rollover is deliberately a new session, like a restart.
             if not 0 < tick - old_tick <= 200 or not 0 < received - old_received <= .2:
                 raise ValueError('sample gap, repeated sample or controller restart')
-            delta = (p - old_p + 2048) % 4096 - 2048
+            delta = observed_delta(p, old_p)
             if abs(delta) > 256:
                 raise ValueError('encoder continuity lost')
             self.unwrapped += delta
@@ -69,7 +70,7 @@ class LiftObservation:
                 if max(positions) - min(positions) <= 2 and all(v[1] == 0 for v in self.quiet):
                     self.origin = self.unwrapped
                     self.origin_id = str(uuid.uuid4())
-        height = None if self.origin is None else -(self.unwrapped - self.origin) * self.m_per_turn / 4096
+        height = None if self.origin is None else lift_rise_m(self.unwrapped - self.origin, self.m_per_turn)
         if height is not None and not -.005 <= height <= .645:
             raise ValueError('height outside development travel')
         return dict(session_id=self.session_id, origin_id=self.origin_id,

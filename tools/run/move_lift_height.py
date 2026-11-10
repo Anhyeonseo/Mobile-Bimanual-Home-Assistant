@@ -16,13 +16,14 @@ import secrets
 import sys
 import time
 import teleop_lift as base
+from so101_arm_bridge.encoder_units import LIFT_METERS_PER_TURN, lift_rise_m, lift_target_counts
 from teleop_lift_bidirectional import INFO
 
 
 def target_counts(height_cm):
     if not math.isfinite(height_cm) or not 1 <= height_cm <= 61:
         raise ValueError('목표 높이는 최저점 대비 1..61cm 범위여야 합니다.')
-    counts = -round(height_cm/100/.084*4096)
+    counts = lift_target_counts(height_cm / 100)
     # Keep at least ~5mm before the unchanged MCU upper guard.
     if -counts > INFO['top_guard_counts'] - 250:
         raise ValueError('목표가 제어기 상단 정지 구간에 너무 가깝습니다.')
@@ -47,7 +48,7 @@ def run(port,path,*,check_up=False,visible_check=False,height_cm=None,maximum_se
                 initial=initial,reference_id=reference,check_up=check_up,visible_check=visible_check,
                 visible_rise_cm=1.0 if visible_check else None,
                 maximum_movement_seconds=15 if visible_check else None,target_height_cm=height_cm,
-                scale_m_per_turn=.084,scale_validated=False,s2_complete=False)
+                scale_m_per_turn=LIFT_METERS_PER_TURN,scale_validated=False,s2_complete=False)
     path.parent.mkdir(parents=True,exist_ok=True)
     capture=base.Capture();nonce=secrets.randbelow(0xffffffff)+1
     attempted=False;stopped=None;error=None
@@ -104,11 +105,11 @@ def run(port,path,*,check_up=False,visible_check=False,height_cm=None,maximum_se
                 if settling and quiet is not None:
                     report.update(status='visible_up_check_stopped' if visible_check else 'target_reached_and_stopped',
                                   observed_upward_counts=report['start_counts']-quiet,relative_counts=quiet,
-                                  height_above_bottom_m=-quiet*.084/4096,sample_tick_ms=row['sample_tick'])
+                                  height_above_bottom_m=lift_rise_m(quiet),sample_tick_ms=row['sample_tick'])
                     break
                 if settling and now-settle_start>5:raise RuntimeError('목표 정지 확인 시간 초과')
                 if ready and now-last_print>=5:
-                    print(f"최저점 대비 {-row['relative_counts']*.084/4096*100:.2f}cm · {current}",flush=True);last_print=now
+                    print(f"최저점 대비 {lift_rise_m(row['relative_counts'])*100:.2f}cm · {current}",flush=True);last_print=now
                 time.sleep(max(0,base.PERIOD-(time.monotonic()-now)))
         except base.StartupNotStationary as exc:
             attempted=False;error=str(exc)

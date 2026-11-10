@@ -11,6 +11,7 @@ import math
 from ..fetch import InvalidTask, FetchRequest, plan_fetch
 from ..navigation import NavigationMap, identifier
 from ..navigation_fusion import TravelEnvelope
+from ..stationary_lift import preset_step
 from .contracts import Context, Stamp, document, finite
 from .language import parse_request, ground_intent
 from .meaning import intent_from_meaning
@@ -163,7 +164,16 @@ class AssistantService:
         value, target, destination = self._resolved(request_id)
         if not self.app.pose_known:
             raise InvalidTask('localization_required')
-        profile = PlacementProfile(0, .6, (0, .2, .4), (.35, .5, .65), (-math.pi, -math.pi/2, 0, math.pi/2))
+        support = self.store.get(target['support_id'])
+        if (not support or support['kind'] != 'surface' or support['geometry_kind'] != 'support_surface'
+                or support['source'] != 'simulation' or not support['position_m']
+                or support['room_id'] != target['room_id']):
+            raise InvalidTask('observed_pick_support_required')
+        Stamp.parse(support['stamp']).check(self.context, self.clock(), 60)
+        support_height = finite(support['position_m'][2] - self.app.map.floor_z, 'support height', 0)
+        # The synthetic application has 0.60 m of travel. Only one lift position reaches the search.
+        fixed_height = preset_step(support_height, .6) / 100
+        profile = PlacementProfile(0, .6, (fixed_height,), (.35, .5, .65), (-math.pi, -math.pi/2, 0, math.pi/2))
         feasibility = SyntheticFeasibility(self.app.map, self.app.xy, target['position_m'])
         candidates = PlacementPlanner(profile, feasibility).plan(target_m=target['position_m'],
             stamp=Stamp.parse(target['stamp']), context=self.context, now_s=self.clock(), maximum_age_s=60,
@@ -172,7 +182,8 @@ class AssistantService:
         request = FetchRequest(target['entity_id'], target['room_id'], destination['entity_id'])
         task = plan_fetch(request, self._world())
         fingerprint = hashlib.sha256(document({'request': value['intent'], 'selection': value['selection'],
-            'target': target, 'destination': destination, 'context': self.context.to_dict(), 'start_xy': list(self.app.xy)}).encode()).hexdigest()
+            'target': target, 'support': support, 'pick_lift_m': fixed_height, 'destination': destination,
+            'context': self.context.to_dict(), 'start_xy': list(self.app.xy)}).encode()).hexdigest()
         preview = dict(request_id=request_id, preview_id=fingerprint, task=task, placement=candidates,
                        target=target, destination=destination, mode='simulation', executable=False,
                        physical_task_completed=False, hardware_commands=0,

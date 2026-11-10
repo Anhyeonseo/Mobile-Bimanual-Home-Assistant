@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "record_kind": "temporary_arm_ready_pose",
+  "name": "임시 준비자세",
+  "status": "OPERATOR_SELECTED_CURRENT_POSE_RECORDED",
+  "captured_utc": "2026-11-10T09:33:21.983681+00:00",
+  "calibration_id": "s2-dev-2f48bba0751f549d3f70773b",
+  "range_sha256": "a7da574fcad9f6c515493b6a2410c9cc059d272d977d759d4cb387320a79da2b",
+  "source_capture": "output/home-assistant/s3/home-distance-20261110/temporary-ready-pose-20261110T093321Z.json",
+  "source_capture_sha256": "77bd3ea3bfe8b7e65936822199f9f75be6859307c4981f6cc02593ab5e139ee4",
+  "remote_source_capture": "/home/hyper/robot/shared/diagnostics/s3/home-distance-20261110/temporary-ready-pose-20261110T093321Z.json",
+  "joint_order": [
+    "base",
+    "shoulder",
+    "elbow",
+    "wrist_flex",
+    "wrist_roll",
+    "gripper"
+  ],
+  "fixed_lift_m": 0.0,
+  "lift_reference": "operator_confirmed_mechanical_bottom",
+  "home_reference_role": "coordinate_zero_only; ready pose is separate from official Home",
+  "arms": {
+    "left": {
+      "raw": {
+        "base": 2041,
+        "shoulder": 997,
+        "elbow": 2680,
+        "wrist_flex": 3066,
+        "wrist_roll": 3106,
+        "gripper": 2046
+      },
+      "model_rad": {
+        "base": -0.010737865515199488,
+        "shoulder": -1.6122138080678088,
+        "elbow": 0.9694758579437253,
+        "wrist_flex": 1.5615924420675826,
+        "wrist_roll": 1.6229516735830083,
+        "gripper": -0.0015339807878856412
+      },
+      "control_rad": {
+        "base": -0.010737865515199488,
+        "shoulder": -1.6122138080678088,
+        "elbow": -0.9694758579437253,
+        "wrist_flex": -1.5615924420675826,
+        "wrist_roll": 1.6229516735830083,
+        "gripper": 0.0030679615757712823
+      },
+      "within_recorded_range": true,
+      "within_official_joint_limits": true
+    },
+    "right": {
+      "raw": {
+        "base": 2038,
+        "shoulder": 1024,
+        "elbow": 2621,
+        "wrist_flex": 3057,
+        "wrist_roll": 3119,
+        "gripper": 2047
+      },
+      "model_rad": {
+        "base": -0.015339807878856412,
+        "shoulder": -1.5707963267948966,
+        "elbow": 0.8789709914584724,
+        "wrist_flex": 1.547786614976612,
+        "wrist_roll": 1.6444274046134073,
+        "gripper": -0.0015339807878856412
+      },
+      "control_rad": {
+        "base": -0.015339807878856412,
+        "shoulder": -1.5707963267948966,
+        "elbow": -0.8789709914584724,
+        "wrist_flex": -1.547786614976612,
+        "wrist_roll": 1.6428934238255217,
+        "gripper": 0.0015339807878856412
+      },
+      "within_recorded_range": true,
+      "within_official_joint_limits": true
+    }
+  },
+  "torque_enabled": false,
+  "hold_active": false,
+  "motor_write_commands": 0,
+  "runtime_motion_authorized": false,
+  "collision_path_verified": false,
+  "stop_latched_at_capture": true,
+  "before_after_maximum_change_raw": 0,
+  "reuse_policy": "Use as temporary planning/posture reference under this calibration. Read current state and validate a path before any movement; no automatic return or torque enable."
+}

@@ -5,7 +5,7 @@ import json
 import secrets
 import threading
 import time
-from teleop_mobile_base import inspect, send, receive, frame, validate, stop, PERIOD
+from teleop_mobile_base import inspect, send, receive, frame, validate, stop, PERIOD, response_timeout
 
 BROWSER_LEASE = .25
 
@@ -75,7 +75,7 @@ button.on{background:#58d9bd}#stop{background:#efae9c}small{display:block;color:
 <button data-key="q">Q ↶<br>왼쪽 회전</button><button data-key="w">W ↑<br>전진</button><button data-key="e">E ↷<br>오른쪽 회전</button>
 <button data-key="a">A ←<br>왼쪽 이동</button><button id="stop">Space<br>정지</button><button data-key="d">D →<br>오른쪽 이동</button>
 <div></div><button data-key="s">S ↓<br>후진</button></div>
-<small>한 방향씩 조작합니다. 창을 벗어나면 정지 요청을 보냅니다. 통신이 끊기면 정지하고, 재연결하려면 페이지를 새로고침하세요.<br>종료·토크 해제: Pi 터미널에서 Ctrl+C. 정지하지 않으면 모터 12V를 차단하세요.</small>
+<small>한 방향씩 조작합니다. 창을 벗어나면 정지 요청을 보냅니다. 통신이 끊기면 정지하고, 재연결하려면 페이지를 새로고침하세요.<br>바퀴 조종 종료: 젯슨 터미널에서 Ctrl+C. 정지하지 않으면 모터 12V를 차단하세요.</small>
 <script>
 const token=location.hash.slice(1), newClient=()=>crypto.randomUUID?crypto.randomUUID():Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
 const mapping={w:'F',s:'B',a:'L',d:'R',q:'A',e:'D'},pressed=new Map();
@@ -172,13 +172,13 @@ def run_web(port, bind="127.0.0.1", web_port=8765):
         control.set_status(True, "연결됨 · 키를 누르고 조종하세요")
         print(json.dumps(info), flush=True)
         print(f"조종 주소: http://{bind}:{server.server_port}/#{token}", flush=True)
-        print("PC 브라우저에서 위 주소를 여세요. 종료·토크 해제는 이 터미널에서 Ctrl+C.", flush=True)
+        print("PC 브라우저에서 위 주소를 여세요. 바퀴 조종 종료는 이 터미널에서 Ctrl+C.", flush=True)
         seq = 0
         while True:
             tick = time.monotonic(); motion = control.desired(tick); seq += 1
             if seq > 0xffffffff: raise RuntimeError("sequence exhausted")
             send(port, frame(f"D {nonce:08X} {seq:08X} {motion}"))
-            validate(receive(port, .3), "ack", nonce, seq)
+            validate(receive(port, response_timeout()), "ack", nonce, seq)
             remaining = PERIOD - (time.monotonic() - tick)
             if remaining > 0: time.sleep(remaining)
     except BaseException as exc: error = exc

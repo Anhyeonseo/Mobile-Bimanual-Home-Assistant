@@ -1,0 +1,32 @@
+<div id="d415-view-range">
+  <h2>D415 시야와 발밑 사각지대</h2>
+  <div class="viz-controls">
+    <label class="form-label">촬영 설정<select class="form-select" data-role="mode"></select></label>
+    <label class="form-label">보기<select class="form-select" data-role="view"><option value="side">옆에서</option><option value="iso">입체로</option><option value="top">위에서</option></select></label>
+  </div>
+  <div class="camera-scene"><canvas data-role="mesh" role="img" aria-label="현재 장착 모델의 Mini 1 로봇과 D415"></canvas><svg data-role="overlay" role="img" aria-label="RGB 및 깊이 카메라 시야와 수평면의 겹치는 영역"></svg></div>
+  <div class="viz-row text-small camera-legend"><span><i class="rgb-line"></i>RGB</span><span><i class="depth-line"></i>깊이</span><span><i class="common-fill"></i>둘 다 보이는 범위</span></div>
+  <div class="viz-controls">
+    <label class="form-label">관찰할 면 높이 <output data-role="height-label"></output><input class="form-range" data-role="height" type="range" min="0" max="90" step="1" value="0"></label>
+    <label class="form-label">카메라 아래 기울기 <output data-role="pitch-label"></output><input class="form-range" data-role="pitch" type="range" min="30" max="85" step="1" value="45"></label>
+  </div>
+  <div data-role="range" class="tabular-nums" aria-live="polite"></div>
+  <div data-role="details" class="text-small"></div>
+  <div class="text-small">바퀴축 중심에서 잰 거리 · 장착 모델 기준 · 차체·가구 가림과 깊이 누락 미반영<br>각도 변경은 가상 비교 · 깊이축 3m까지 표시</div>
+  <script type="application/json" data-role="data">__DATA__</script>
+</div>
+<style>
+#d415-view-range{display:grid;gap:calc(var(--font-size-base)*.75);--s2-lift-moving:var(--viz-series-3);}
+#d415-view-range .camera-scene{position:relative;width:100%;height:440px;}
+#d415-view-range .camera-scene canvas,#d415-view-range .camera-scene svg{position:absolute;inset:0;width:100%;height:100%;}
+#d415-view-range .camera-legend span{display:inline-flex;align-items:center;gap:calc(var(--font-size-base)*.4);}
+#d415-view-range .camera-legend i{display:inline-block;width:22px;height:9px;}
+#d415-view-range .rgb-line{border-top:2px solid var(--viz-series-1);}
+#d415-view-range .depth-line{border-top:2px dashed var(--viz-series-2);}
+#d415-view-range .common-fill{background:color-mix(in srgb,var(--viz-series-1) 20%,transparent);}
+@media(max-width:450px){#d415-view-range .camera-scene{height:340px;}}
+</style>
+<script>__KINEMATICS__</script>
+<script>__RENDERER__</script>
+<script>__GEOMETRY__</script>
+<script>__VIEWER__</script>

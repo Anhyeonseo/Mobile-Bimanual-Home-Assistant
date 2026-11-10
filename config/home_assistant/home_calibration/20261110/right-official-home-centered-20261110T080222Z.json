@@ -1,0 +1,330 @@
+{
+  "created_utc": "2026-11-10T08:02:22.496406+00:00",
+  "firmware": {
+    "firmware": "arm-calibration-v1",
+    "arm": "right",
+    "motion_enabled": false,
+    "ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "consumed_mask": 0
+  },
+  "reference": "operator-positioned reference; arm and gripper pose recorded in reference_note",
+  "before": [
+    {
+      "id": 1,
+      "ok": true,
+      "position": 2047,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903010000010000ff0f468c28e8030c2c2f2020001000010136010198050014c8500ac8c8"
+    },
+    {
+      "id": 2,
+      "ok": true,
+      "position": 3068,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903020000010000ff0f468c28e8030c2c2f20200010000101360101fa070014c8500ac8c8"
+    },
+    {
+      "id": 3,
+      "ok": true,
+      "position": 1291,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903030000010000ff0f468c28e8030c2c2f20200010000101360101a80d0014c8500ac8c8"
+    },
+    {
+      "id": 4,
+      "ok": true,
+      "position": 1028,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903040000010000ff0f468c28e8030c2c2f20200010000101360101160d0014c8500ac8c8"
+    },
+    {
+      "id": 5,
+      "ok": true,
+      "position": 1063,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903050000010000ff0f468c28e8030c2c2f20200010000101360101ed0d0014c8500ac8c8"
+    },
+    {
+      "id": 6,
+      "ok": true,
+      "position": 2048,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903060000010000ff0f468c28e8030c2c2f202000100001013601014c040014c8500ac8c8"
+    }
+  ],
+  "results": [
+    {
+      "id": 6,
+      "center_ok": true,
+      "reason": "verified",
+      "attempted": true,
+      "before": 2048,
+      "after": 2048,
+      "offset_after": 1100,
+      "torque_off_verified": true
+    },
+    {
+      "id": 5,
+      "center_ok": true,
+      "reason": "verified",
+      "attempted": true,
+      "before": 1063,
+      "after": 2048,
+      "offset_after": 1595,
+      "torque_off_verified": true
+    },
+    {
+      "id": 4,
+      "center_ok": true,
+      "reason": "verified",
+      "attempted": true,
+      "before": 1028,
+      "after": 2048,
+      "offset_after": 1774,
+      "torque_off_verified": true
+    },
+    {
+      "id": 3,
+      "center_ok": true,
+      "reason": "verified",
+      "attempted": true,
+      "before": 1291,
+      "after": 2048,
+      "offset_after": 1892,
+      "torque_off_verified": true
+    },
+    {
+      "id": 2,
+      "center_ok": true,
+      "reason": "verified",
+      "attempted": true,
+      "before": 3068,
+      "after": 2048,
+      "offset_after": 3081,
+      "torque_off_verified": true
+    },
+    {
+      "id": 1,
+      "center_ok": true,
+      "reason": "verified",
+      "attempted": true,
+      "before": 2047,
+      "after": 2048,
+      "offset_after": 1431,
+      "torque_off_verified": true
+    }
+  ],
+  "motion_commands_sent": false,
+  "status": "centered_verified",
+  "old_runtime_limits_valid": false,
+  "arm": "right",
+  "reference_note": "Operator explicitly confirms RIGHT arm and gripper match shown official TheRobotStudio SO101 so101_new_calib.urdf/STL zero pose, all six model joint angles 0 rad. Operator requests STL basis, not installed pad-gap measurement. Supported arm; gripper empty. Physical alignment operator-confirmed, not independently image-verified. Left arm not selected. Gripper 2048 denotes nominal STL zero, not measured 0 mm or a measured pad opening. Right range provenance remains copied from left by prior operator request, not independently measured.",
+  "centering_preflight": {
+    "kind": "home_2048_preflight",
+    "arm": "right",
+    "joints": [
+      {
+        "joint": "base",
+        "reference_unwrapped_raw": 2047,
+        "proposed_minimum_raw": 1018,
+        "proposed_maximum_raw": 3113,
+        "home_2048_fits": true,
+        "feasible_home_raw_interval": [
+          1030,
+          3030
+        ],
+        "positive_raw_direction": 1,
+        "range_source": "copied_from_left_by_operator_request"
+      },
+      {
+        "joint": "shoulder",
+        "reference_unwrapped_raw": 3068,
+        "proposed_minimum_raw": 855,
+        "proposed_maximum_raw": 3209,
+        "home_2048_fits": true,
+        "feasible_home_raw_interval": [
+          1193,
+          2934
+        ],
+        "positive_raw_direction": 1,
+        "range_source": "copied_from_left_by_operator_request"
+      },
+      {
+        "joint": "elbow",
+        "reference_unwrapped_raw": 1291,
+        "proposed_minimum_raw": 895,
+        "proposed_maximum_raw": 3002,
+        "home_2048_fits": true,
+        "feasible_home_raw_interval": [
+          1153,
+          3141
+        ],
+        "positive_raw_direction": -1,
+        "range_source": "copied_from_left_by_operator_request"
+      },
+      {
+        "joint": "wrist_flex",
+        "reference_unwrapped_raw": 1028,
+        "proposed_minimum_raw": 915,
+        "proposed_maximum_raw": 3195,
+        "home_2048_fits": true,
+        "feasible_home_raw_interval": [
+          1133,
+          2948
+        ],
+        "positive_raw_direction": -1,
+        "range_source": "copied_from_left_by_operator_request"
+      },
+      {
+        "joint": "wrist_roll",
+        "reference_unwrapped_raw": 1063,
+        "proposed_minimum_raw": 262,
+        "proposed_maximum_raw": 3912,
+        "home_2048_fits": true,
+        "feasible_home_raw_interval": [
+          1786,
+          2231
+        ],
+        "positive_raw_direction": 1,
+        "range_source": "copied_from_left_by_operator_request"
+      },
+      {
+        "joint": "gripper",
+        "reference_unwrapped_raw": 2048,
+        "proposed_minimum_raw": 1936,
+        "proposed_maximum_raw": 3182,
+        "home_2048_fits": true,
+        "feasible_home_raw_interval": [
+          112,
+          2961
+        ],
+        "positive_raw_direction": -1,
+        "range_source": "copied_from_left_by_operator_request"
+      }
+    ],
+    "safe_to_center": true,
+    "invalidated_artifacts": [
+      "arm_ranges_and_firmware_hash",
+      "model_alignment_and_TF",
+      "jaw_gap_calibration",
+      "saved_raw_poses_and_paths"
+    ],
+    "motion_authorized": false,
+    "source_ranges_sha256": "71caca1d55f529a4a39ef203ef10f850364c5a0e2199f43897a3dc10aebd085f"
+  },
+  "center_reference_rows": {
+    "6": {
+      "id": 6,
+      "ok": true,
+      "position": 2048,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903060000010000ff0f468c28e8030c2c2f202000100001013601014c040014c8500ac8c8"
+    },
+    "5": {
+      "id": 5,
+      "ok": true,
+      "position": 1063,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903050000010000ff0f468c28e8030c2c2f20200010000101360101ed0d0014c8500ac8c8"
+    },
+    "4": {
+      "id": 4,
+      "ok": true,
+      "position": 1028,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903040000010000ff0f468c28e8030c2c2f20200010000101360101160d0014c8500ac8c8"
+    },
+    "3": {
+      "id": 3,
+      "ok": true,
+      "position": 1291,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903030000010000ff0f468c28e8030c2c2f20200010000101360101a80d0014c8500ac8c8"
+    },
+    "2": {
+      "id": 2,
+      "ok": true,
+      "position": 3068,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903020000010000ff0f468c28e8030c2c2f20200010000101360101fa070014c8500ac8c8"
+    },
+    "1": {
+      "id": 1,
+      "ok": true,
+      "position": 2047,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903010000010000ff0f468c28e8030c2c2f2020001000010136010198050014c8500ac8c8"
+    }
+  },
+  "pending_id": null,
+  "after": [
+    {
+      "id": 1,
+      "ok": true,
+      "position": 2048,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903010000010000ff0f468c28e8030c2c2f2020001000010136010197050014c8500ac8c8"
+    },
+    {
+      "id": 2,
+      "ok": true,
+      "position": 2048,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903020000010000ff0f468c28e8030c2c2f20200010000101360101090c0014c8500ac8c8"
+    },
+    {
+      "id": 3,
+      "ok": true,
+      "position": 2048,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903030000010000ff0f468c28e8030c2c2f2020001000010136010164070014c8500ac8c8"
+    },
+    {
+      "id": 4,
+      "ok": true,
+      "position": 2048,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903040000010000ff0f468c28e8030c2c2f20200010000101360101ee060014c8500ac8c8"
+    },
+    {
+      "id": 5,
+      "ok": true,
+      "position": 2047,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903050000010000ff0f468c28e8030c2c2f202000100001013601013b060014c8500ac8c8"
+    },
+    {
+      "id": 6,
+      "ok": true,
+      "position": 2048,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903060000010000ff0f468c28e8030c2c2f202000100001013601014c040014c8500ac8c8"
+    }
+  ],
+  "power_cycle_persistence_verified": false
+}

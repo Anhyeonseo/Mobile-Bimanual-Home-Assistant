@@ -192,19 +192,20 @@ def test_actual_maintenance_gate_rejects_every_motion_owner(tmp_path):
 #include <assert.h>
 enum {ACTUATOR_V2_EXECUTOR_CLOSED=0};
 static unsigned host_stop_latched,host_binary_servos_configured,host_right_arm_output_active;
-static unsigned host_v2_executor_ready=1,host_v2_executor_clock_active,buffered,mobile,stop;
+static unsigned host_v2_executor_ready=1,host_v2_executor_clock_active,buffered,mobile,stop,observer;
 static struct {unsigned active;} host_binary_motion;
 static struct {struct {unsigned state;} diagnostics;} host_v2_stream_executor;
 static unsigned Host_BufferedExecutionIsActive(void){return buffered;}
 static unsigned MobileBoard_IsConfigured(void){return mobile;}
 static unsigned MobileBoard_StopActive(void){return stop;}
+static unsigned MobileArmObserver_OwnsFeedback(void){return observer;}
 '''
     source+='static bool Host_InventoryPermitted(void){'+body+'}\n'
     source+=r'''
 int main(void){
  unsigned *blocked[]={&host_stop_latched,&host_binary_servos_configured,&host_right_arm_output_active,
  &host_binary_motion.active,&buffered,&host_v2_executor_clock_active,
- &host_v2_stream_executor.diagnostics.state,&mobile,&stop};
+ &host_v2_stream_executor.diagnostics.state,&mobile,&stop,&observer};
  assert(Host_InventoryPermitted());
  for(unsigned i=0;i<sizeof(blocked)/sizeof(blocked[0]);i++){
   *blocked[i]=1;assert(!Host_InventoryPermitted());*blocked[i]=0;

@@ -49,6 +49,8 @@ def test_all_encoder_branches_round_trip_without_wrapping_endpoints():
 
 def test_point_targets_take_nearest_valid_branch_or_reject_never_detour():
     _,entries,_=read_development_ranges(PROFILE)
+    # Keep the original seam-crossing regression after the live profile rebase.
+    _,entries,_=read_development_ranges(PROFILE.parent/'historical/pre-home-20261110'/PROFILE.name)
     roll,shoulder=entries[4],entries[1]
     assert shortest_target(roll,200,500)==500
     assert shortest_target(roll,500,200)==200
@@ -83,7 +85,7 @@ def test_left_adapter_preserves_development_only_restriction():
 
 def test_point_move_runs_through_real_host_preflight_without_long_rotation():
     _,entries,_=read_development_ranges(PROFILE)
-    current=[2048]*12;target=current.copy();current[4]=200;target[4]=500
+    current=[2048]*12;target=current.copy();current[4]=500;target[4]=800
     samples=point_move_samples(entries,current,target)
     adapter=ResidentBimanualStreamAdapter(object(),operational_limits_for_simulation(PROFILE))
     converted=adapter._validate_finite_plan_points(samples)

@@ -1,176 +1,164 @@
-"""Read-only s2-observer-v1 transport and bounded continuous-count acquisition."""
-import json
+"""L2 continuous encoder state; legacy Reader import retained for callers."""
 import math
-import secrets
-import time
-from . import s2_commissioning as s2
-EXPECTED = [(0,i) for i in range(1,7)]+[(0,10)]+[(1,i) for i in range(1,7)]
+from so101_arm_bridge.observer_protocol import EXPECTED, Reader
+from so101_arm_bridge.encoder_units import observed_delta
+from . import s2_geometry as s2
 
 
-class Reader:
-    def __init__(self,port,*,clock=time.monotonic,token=None):
-        self.port,self.clock=port,clock
-        self.token=token or secrets.randbelow(2**32-1)+1
-        self.last_sequence=0
-        self.offset_interval=None
-        self.clock_tick=None
-        self.clock_host=None
-        self.last_exchange=None
-        self.valid=True
+def axis_key(row):
+    bus, motor = row['bus'], row['id']
+    if type(bus) is not int or type(motor) is not int:
+        raise ValueError('integer bus and motor ID required')
+    return bus, motor
 
-    def exchange(self,command,*,sample=False):
-        if not self.valid: raise ValueError('reader invalidated; reconnect and re-reference')
-        started=self.clock()
-        if self.port.write((command+'\n').encode())!=len(command)+1:
-            self.valid=False;raise ValueError('partial request write')
-        rows=[]
-        try:
-            while self.clock()-started<1.:
-                line=self.port.readline(1024)
-                if not line: continue
-                if len(line)>=1024 or not line.endswith(b'\n'):raise ValueError('truncated observation reply')
-                row=json.loads(line)
-                if not isinstance(row,dict) or 'error' in row:raise ValueError('observer rejected command: '+str(row))
-                if sample and 'firmware' in row:raise ValueError('controller rebooted during capture')
-                rows.append(row)
-                if len(rows)>14:raise ValueError('unexpected sample length')
-                if not sample or row.get('sample_end') is True:return started,self.clock(),rows
-            raise ValueError('observer reply timeout')
-        except (ValueError, OSError, TypeError):
-            self.valid=False
-            raise
 
-    def bind(self):
-        _,_,rows=self.exchange('INFO')
-        if rows[0].get('firmware')!='s2-observer-v1' or rows[0].get('motor_writes')!=0:
-            self.valid=False;raise ValueError('isolated S2 observer firmware required')
-        a,b,rows=self.exchange('BIND '+str(self.token))
-        r=rows[0]
-        if r.get('epoch')!=self.token or r.get('sequence')!=0 or b-a>.02:
-            self.valid=False;raise ValueError('epoch/clock bind failed or excessive RTT')
-        tick=r['tick_ms']/1000
-        # 1 ms MCU tick quantization is included in the lower offset bound.
-        self.offset_interval=(a-tick-.001,b-tick)
-        self.clock_tick=tick
-        self.clock_host=b
-        return {'epoch':self.token,'host_clock_offset_interval_s':list(self.offset_interval),
-                'round_trip_s':b-a,'motor_writes':0}
+def measured(row):
+    key = axis_key(row)
+    pos, stamp = row['position'], row['acquired_s']
+    if type(pos) is not int or not 0 <= pos < 4096 or type(stamp) not in (int, float) or not math.isfinite(stamp):
+        raise ValueError(f'invalid encoder feedback: bus {key[0]} ID {key[1]}')
+    return pos, stamp
 
-    def sample(self):
-        if self.offset_interval is None:raise ValueError('bind required')
-        a,b,rows=self.exchange('SAMPLE',sample=True)
-        self.last_exchange={'request_s':a,'received_s':b,'rows':rows}
-        try:
-            if len(rows)!=14 or [(r.get('bus'),r.get('id')) for r in rows[:-1]]!=EXPECTED:
-                raise ValueError('missing, duplicate or wrong motor samples')
-            seq=self.last_sequence+1
-            if any(r.get('epoch')!=self.token or r.get('sequence')!=seq for r in rows):
-                raise ValueError('reset or sequence mismatch')
-            # STM32 and host clocks do not run at exactly the same rate. Bound
-            # the offset at EACH exchange using request/response causality,
-            # rather than keeping the startup offset forever. 5000 ppm is an
-            # explicit oscillator envelope, not a relaxed association limit.
-            if type(rows[-1].get('tick_ms')) is not int or type(rows[0].get('start_ms')) is not int:
-                raise ValueError('integer MCU timing required')
-            tick=rows[-1]['tick_ms']/1000
-            first=rows[0]['start_ms']/1000
-            if not self.clock_tick<=first<=tick or not 0<b-self.clock_host<=.2:
-                raise ValueError('MCU clock reset or observation gap')
-            rate=.005
-            elapsed=tick-self.clock_tick
-            drift=rate*elapsed
-            offset_lo=max(self.offset_interval[0]-drift,a-first-.001-rate*(tick-first))
-            offset_hi=min(self.offset_interval[1]+drift,b-tick)
-            # A short INFO exchange bounds the clock without the long motor
-            # scan/USB buffering delay. It never resets the epoch or sequence.
-            sa,sb,sync_rows=self.exchange('INFO')
-            sync=sync_rows[0]
-            self.last_exchange['clock_sync']={'request_s':sa,'received_s':sb,'row':sync}
-            if (sync.get('firmware')!='s2-observer-v1' or sync.get('epoch')!=self.token
-                    or sync.get('sequence')!=seq or sync.get('motor_writes')!=0
-                    or type(sync.get('tick_ms')) is not int or sb-sa>.02):
-                raise ValueError('clock sync identity/latency failed')
-            st=sync['tick_ms']/1000
-            if not tick<=st or st-tick>.03:raise ValueError('clock reset or delayed sync')
-            sync_drift=rate*(st-tick)
-            offset_lo=max(offset_lo,sa-st-.001-sync_drift)
-            offset_hi=min(offset_hi,sb-st+sync_drift)
-            if offset_lo>offset_hi:
-                raise ValueError('MCU clock outside bounded drift envelope')
-            samples=[]
-            for r in rows[:-1]:
-                for key in ('position','speed','torque','start_ms','end_ms'):
-                    if type(r[key]) is not int:raise ValueError('integer motor telemetry required')
-                if r['ok'] is not True or not 0<=r['position']<=4095 or not 0<=r['speed']<=65535 or r['torque'] not in (0,1):
-                    raise ValueError('invalid motor feedback')
-                start,end=r['start_ms']/1000,r['end_ms']/1000
-                if not first<=start<=end<=tick or not 0<=end-start<=.02:raise ValueError('motor transaction too old or MCU tick wrapped')
-                event_drift=rate*(tick-start)
-                lo=start+offset_lo-event_drift;hi=end+offset_hi+event_drift
-                if hi<a-.005 or lo>b+.005:raise ValueError('MCU clock reset or drift')
-                samples.append({**r,'acquired_s':(lo+hi)/2,'time_uncertainty_s':(hi-lo)/2})
-            span=max(r['acquired_s']+r['time_uncertainty_s'] for r in samples)-min(r['acquired_s']-r['time_uncertainty_s'] for r in samples)
-            if span>.05:raise ValueError(f'motor acquisition span exceeds 50 ms: {span*1000:.3f} ms')
-            self.last_sequence=seq
-            self.offset_interval=(offset_lo,offset_hi)
-            self.clock_tick=tick
-            self.clock_host=b
-            return {'epoch':self.token,'sequence':seq,'request_s':a,'received_s':b,
-                    'acquisition_span_bound_s':span,'samples':samples,'motor_writes':0,
-                    'clock_offset_interval_s':[offset_lo,offset_hi],'clock_drift_bound_ppm':5000}
-        except (ValueError,KeyError,TypeError):
-            self.valid=False
-            raise
+
+def stationary_lift_window(records):
+    """Check five continuous torque-off lift positions, not its noisy speed.
+
+    The observed lift velocity register can alternate 0/+50/-50 while its
+    encoder changes by one count. Five continuous position samples remain
+    mandatory. This proves only a stationary observation, never an origin or motion permission.
+    """
+    if len(records) != 5:
+        raise ValueError('five stationary bottom samples required')
+    counts=[];previous=None;epoch=records[0]['epoch']
+    for record in records:
+        if record['epoch'] != epoch or [axis_key(r) for r in record['samples']] != EXPECTED:
+            raise ValueError('bottom sample inventory or epoch changed')
+        row=record['samples'][6];raw,stamp=measured(row)
+        if row['torque'] != 0:
+            raise ValueError('bottom reference requires torque-off lift')
+        if previous is not None:
+            last,old_stamp,sequence=previous
+            if record['sequence'] != sequence+1 or not 0 < stamp-old_stamp <= .2:
+                raise ValueError('bottom sample continuity lost')
+            counts.append(counts[-1]+observed_delta(raw,last))
+        else:
+            counts.append(raw);started=stamp
+        previous=raw,stamp,record['sequence']
+    if not .15 <= stamp-started <= .6 or max(counts)-min(counts)>2:
+        raise ValueError('lift moved before stationary bottom reference')
+    # Larger counts correspond to lower height; keep all original readings and
+    # the measured span in evidence rather than replacing them by a speed=0 claim.
+    return dict(origin=max(counts),last=counts[-1],span_counts=max(counts)-min(counts),
+                observed_duration_s=stamp-started,method='five_stationary_position_samples')
+
+
+def stationary_bottom(records):
+    """Caller must separately confirm the physical bottom before using the origin."""
+    return dict(stationary_lift_window(records),method='five_position_samples_at_confirmed_bottom')
 
 
 class EncoderTracker:
-    """Unwrap only continuous short steps from an explicitly confirmed Home/bottom.
+    """Track an explicit Home or range-resolved read-only anchor and lift bottom."""
 
-    Modulo arithmetic here tracks measured motion, never chooses a motion path.
-    A gap or any discontinuity invalidates ALL axes and requires re-anchoring.
-    """
-    def __init__(self,profile,first,*,home_confirmed,bottom_confirmed):
-        if home_confirmed is not True or bottom_confirmed is not True:
+    def __init__(self, profile, first, *, home_confirmed, bottom_confirmed,
+                 range_reference=None, calibration=None, bottom_samples=None):
+        if bottom_confirmed is not True or (home_confirmed is not True and range_reference is None):
             raise ValueError('operator reference and physical bottom required')
-        self.profile=profile;self.epoch=first['epoch'];self.last={};self.counts={};self.valid=True
+        if home_confirmed is True and range_reference is not None:
+            raise ValueError('choose Home or current-pose reference')
+        self.anchor_evidence = {'basis':'confirmed_home'}
+        self.range_entries = None
+        bottom=None
+        if range_reference is not None:
+            from so101_arm_bridge.development_ranges import read_development_ranges
+            ranges, _, digest = read_development_ranges(range_reference)
+            if profile['source_files_sha256'].get('config/home_assistant/arm_ranges.development.json') != digest:
+                raise ValueError('range evidence differs from the coordinate profile')
+            bottom=stationary_bottom(bottom_samples or [])
+            if bottom_samples[-1] != first:
+                raise ValueError('current-pose anchor must be the last stationary sample')
+            if (calibration is None or calibration['epoch'] != first['epoch']
+                    or calibration['sequence']+1 != bottom_samples[0]['sequence']
+                    or calibration.get('motor_writes') != 0
+                    or [axis_key(r) for r in calibration['samples']] != [k for k in EXPECTED if k[1]!=10]):
+                raise ValueError('same-session twelve-axis calibration read required')
+            for row in calibration['samples']:
+                side = s2.ARMS[row['bus']]
+                if (row['offset_raw'] != ranges['calibration'][side]['offsets_raw'][row['id']-1]
+                        or row['mode'] != 0 or row['stored_id'] != row['id']
+                        or (row['model_high'],row['model_low'],row['baud']) != (9,3,0)):
+                    raise ValueError(f'{side} ID {row["id"]}: motor calibration or mode changed')
+            gap=min(r['acquired_s'] for r in bottom_samples[0]['samples'])-max(r['acquired_s'] for r in calibration['samples'])
+            if not 0 <= gap <= .2:
+                raise ValueError('calibration evidence not immediately before the anchor')
+            self.range_entries = ranges['arms']
+            self.anchor_evidence = dict(basis='unique_branch_in_recorded_range',
+                ranges_sha256=digest,calibration_sequence=calibration['sequence'],
+                right_range_source='copied_from_left_by_operator_request',bottom=bottom,motion_authorized=False)
+        self.profile = profile
+        self.epoch = first['epoch']
+        self.sequence = first['sequence']
+        self.last, self.counts = {}, {}
+        if [axis_key(r) for r in first['samples']] != EXPECTED:
+            raise ValueError('all 13 ordered axes required to anchor')
         for row in first['samples']:
-            key=(row['bus'],row['id'])
-            raw=row['position']
-            if key==(0,10):count=raw
-            else:
-                side='left' if key[0]==0 else 'right'
-                ref=profile['arms'][side]['reference_raw'][s2.JOINTS[key[1]-1]]
-                delta=(raw-ref+2048)%4096-2048
-                if abs(delta)>128:raise ValueError('arm no longer at captured reference pose')
-                count=ref+delta
-            self.last[key]=row;self.counts[key]=count
-        if set(self.last)!=set(EXPECTED):raise ValueError('all 13 axes required')
-        self.origin=self.counts[(0,10)]
-        self.sequence=first['sequence']
+            key = bus, motor = axis_key(row)
+            raw, stamp = measured(row)
+            count = raw
+            if self.range_entries is not None and (row['torque'] != 0 or (key != (0,10) and (row['speed'] & 0x7fff) > 5)):
+                raise ValueError('current-pose anchor requires stationary torque-off motors')
+            if key != (0, 10):
+                side = s2.ARMS[bus]
+                if self.range_entries is not None:
+                    from so101_arm_bridge.development_ranges import unwrap_in_range
+                    count = unwrap_in_range(self.range_entries[side][s2.JOINTS[motor-1]],raw)
+                else:
+                    ref = profile['arms'][side]['reference_raw'][s2.JOINTS[motor-1]]
+                    delta = observed_delta(raw, ref)
+                    if abs(delta) > 128:
+                        raise ValueError(f'{side} ID {motor} no longer at captured reference pose')
+                    count = ref + delta
+            self.last[key], self.counts[key] = (raw, stamp), count
+        if bottom is not None:
+            self.counts[(0,10)]=bottom['last']
+        self.origin = self.counts[(0, 10)] if bottom is None else bottom['origin']
+        self.valid = True
 
-    def update(self,record):
+    def update(self, record):
         try:
-            if not self.valid or record['epoch']!=self.epoch or record['sequence']!=self.sequence+1:
+            if not self.valid or record['epoch'] != self.epoch or record['sequence'] != self.sequence+1:
                 raise ValueError('encoder epoch/sequence changed')
-            if [(r['bus'],r['id']) for r in record['samples']]!=EXPECTED:raise ValueError('axis inventory changed')
+            if [axis_key(r) for r in record['samples']] != EXPECTED:
+                raise ValueError('axis inventory changed')
             for row in record['samples']:
-                key=(row['bus'],row['id']);old=self.last[key]
-                if not 0<row['acquired_s']-old['acquired_s']<=.2:raise ValueError('encoder sample gap or reset')
-                if type(row['position']) is not int or not 0<=row['position']<=4095:raise ValueError('invalid encoder')
-                delta=(row['position']-old['position']+2048)%4096-2048
-                if abs(delta)>256:raise ValueError('encoder discontinuity')
-                self.counts[key]+=delta
-                self.last[key]=row
-            self.sequence=record['sequence']
+                key = axis_key(row)
+                old_pos, old_stamp = self.last[key]
+                pos, stamp = measured(row)
+                if not 0 < stamp-old_stamp <= .2:
+                    raise ValueError(f'encoder sample gap or reset: bus {key[0]} ID {key[1]}')
+                delta = observed_delta(pos, old_pos)
+                if abs(delta) > 256:
+                    raise ValueError(f'encoder discontinuity: bus {key[0]} ID {key[1]}')
+                self.counts[key] += delta
+                if self.range_entries is not None and key != (0,10):
+                    entry=self.range_entries[s2.ARMS[key[0]]][s2.JOINTS[key[1]-1]]
+                    if not entry['minimum_unwrapped_raw'] <= self.counts[key] <= entry['maximum_unwrapped_raw']:
+                        raise ValueError('observed arm left the range used to resolve its turn')
+                self.last[key] = pos, stamp
+            self.sequence = record['sequence']
             return self.state()
-        except (ValueError,KeyError,TypeError):
-            self.valid=False
+        except (ValueError, KeyError, TypeError, OverflowError):
+            self.valid = False
             raise
 
     def state(self):
-        if not self.valid:raise ValueError('turn reference invalid')
-        return {'raw':{side:{j:self.counts[(bus,i+1)] for i,j in enumerate(s2.JOINTS)} for bus,side in enumerate(s2.ARMS)},
-                'lift_raw_unwrapped':self.counts[(0,10)],
-                'lift_height_m':(self.counts[(0,10)]-self.origin)*self.profile['lift']['meters_per_count'],
-                'joint_times_s':{side:{j:self.last[(bus,i+1)]['acquired_s'] for i,j in enumerate(s2.JOINTS)} for bus,side in enumerate(s2.ARMS)},
-                'lift_time_s':self.last[(0,10)]['acquired_s']}
+        if not self.valid:
+            raise ValueError('turn reference invalid')
+        raw, times = {}, {}
+        for bus, side in enumerate(s2.ARMS):
+            raw[side] = {j: self.counts[(bus, i)] for i,j in enumerate(s2.JOINTS, 1)}
+            times[side] = {j: self.last[(bus, i)][1] for i,j in enumerate(s2.JOINTS, 1)}
+        lift = self.counts[(0, 10)]
+        return {'raw': raw, 'joint_times_s': times, 'lift_raw_unwrapped': lift,
+                'lift_time_s': self.last[(0, 10)][1],
+                'lift_height_m': (lift-self.origin)*self.profile['lift']['meters_per_count']}
