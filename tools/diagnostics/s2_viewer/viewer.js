@@ -37,6 +37,7 @@
     return {frames,arms,joints,platform};
   }
   if(typeof module!=='undefined' && module.exports) {module.exports={evaluate,point,mul,rot};return;}
+  globalThis.S2Kinematics={evaluate,point,mul,rot};
   const root=document.getElementById('s2-coordinate-inspector');
   if(!root)return;
   const get=name=>root.querySelector('[data-role="'+name+'"]');

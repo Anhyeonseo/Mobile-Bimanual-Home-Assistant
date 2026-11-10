@@ -1,0 +1,364 @@
+{
+  "schema_version": 2,
+  "arm_coordinate_convention": "so101_new_calib_from_controller_v1",
+  "record_kind": "s2_nominal_development_coordinates",
+  "provenance": "nominal_with_operator_reference",
+  "geometry_sha256": "873a16f87cfddafd79dcc880cae26862d13614218c7cf81accd5793b4e28fc81",
+  "source_files_sha256": {
+    "config/home_assistant/installation.development.json": "60a2134c5b13fdc34646533cfe2a2e14eca22e576a6d107561642edeec2467a5",
+    "config/home_assistant/arm_model_alignment.development.json": "71fa16d64f685b4aae497b3757b67a18525c6aa9e35463dae0ec50898619c484",
+    "config/home_assistant/arm_mounts.nominal.json": "fdcc2889b7fbf6ae069a41ea817fd25bd922b70220ece794c802029f255f2859",
+    "tools/diagnostics/s2_viewer/lift-contacts.json": "c90a89e1981f2c7fcbbc7926ca37ee8c8b17ba8d5de10f7f68d936aa6c79679b",
+    "tools/diagnostics/s2_viewer/lift-floor-reference.json": "ad6a3abe3e1fa66302df8e49fffaf7e6c92e852ee682131d024d2b4007a00e19",
+    "config/home_assistant/camera_device.observed.json": "82d0b8cbe70a28914e8f71d7fa25c185a8c58a7d5c0e33c1349706d98bb05fb2",
+    "config/home_assistant/arm_ranges.development.json": "a7da574fcad9f6c515493b6a2410c9cc059d272d977d759d4cb387320a79da2b",
+    "ros2_ws/src/so101_description/urdf/so101_arm_macro.xacro": "7d0ffb3b78e58959720c37dfcccd2a2b09d99435cb8cc041ba3568581e907af5"
+  },
+  "assembly_revision": "mini1-fixed-d415-official-home-20261110",
+  "source_frame": "color_camera_optical_frame",
+  "target_frame": "base_link",
+  "base_definition": "official wheel axle centroid; +X forward, +Y left, +Z up",
+  "base_from_cad": [
+    [
+      0.0,
+      -1.0,
+      0.0,
+      0.00013466666666667182
+    ],
+    [
+      1.0,
+      0.0,
+      0.0,
+      6.846666666666728e-05
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      -0.042199999999999994
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "ground_z_m": -0.0702,
+  "base_from_optical": [
+    [
+      -0.011929717012670982,
+      -0.707056462332393,
+      0.7070564623323932,
+      0.1007488922318314
+    ],
+    [
+      -0.9999288383940117,
+      0.008435583797296172,
+      -0.008435583797296173,
+      0.033217110981069504
+    ],
+    [
+      0.0,
+      -0.7071067811865476,
+      -0.7071067811865475,
+      1.0161999249838758
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "camera_device": {
+    "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+    "stream_profile_id": "rgbd-v1-52b8cdab670d4770de886ec17c375dcb131a4d7ad72ae0ea92774aa5ea0916da",
+    "factory_calibration_sha256": "4213fcd9d40419ceb64ea3a403f670bc44bfbcf6223a52aa4c20b3f930ab7591"
+  },
+  "arms": {
+    "left": {
+      "base_from_arm_at_lift_zero": [
+        [
+          0.9999279496272193,
+          0.011933389953199107,
+          0.0012999071237717052,
+          0.04792890129674372
+        ],
+        [
+          -0.011933379875693288,
+          0.9999287945670056,
+          -1.5508627748208752e-05,
+          0.15620748591966227
+        ],
+        [
+          -0.001299999633824663,
+          -4.775165289435985e-09,
+          0.999999155000119,
+          0.18778465097121194
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "alignment": {
+        "base": {
+          "sign": 1,
+          "raw_to_control_sign": 1,
+          "control_to_model_sign": 1,
+          "home_model_rad": 0.0
+        },
+        "shoulder": {
+          "sign": 1,
+          "raw_to_control_sign": 1,
+          "control_to_model_sign": 1,
+          "home_model_rad": 0.0
+        },
+        "elbow": {
+          "sign": 1,
+          "raw_to_control_sign": -1,
+          "control_to_model_sign": -1,
+          "home_model_rad": 0.0
+        },
+        "wrist_flex": {
+          "sign": 1,
+          "raw_to_control_sign": -1,
+          "control_to_model_sign": -1,
+          "home_model_rad": 0.0
+        },
+        "wrist_roll": {
+          "sign": 1,
+          "raw_to_control_sign": 1,
+          "control_to_model_sign": 1,
+          "home_model_rad": 0.0
+        },
+        "gripper": {
+          "sign": 1,
+          "raw_to_control_sign": -1,
+          "control_to_model_sign": -1,
+          "home_model_rad": 0.0015339807878856412
+        }
+      },
+      "reference_raw": {
+        "base": 2048,
+        "shoulder": 2048,
+        "elbow": 2048,
+        "wrist_flex": 2048,
+        "wrist_roll": 2048,
+        "gripper": 2047
+      },
+      "reference_model_rad": {
+        "base": 0.0,
+        "shoulder": 0.0,
+        "elbow": 0.0,
+        "wrist_flex": 0.0,
+        "wrist_roll": 0.0,
+        "gripper": 0.0
+      },
+      "reference_from_tcp": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "reference_report_sha256": "f25b7fc5d901903b567a177b1d6331749e897099be020411d49517ed49d2e45d"
+    },
+    "right": {
+      "base_from_arm_at_lift_zero": [
+        [
+          0.9999280026335394,
+          0.01193340029797092,
+          0.0012583745980359778,
+          0.0441845475129861
+        ],
+        [
+          -0.011933390854130038,
+          0.9999287944435485,
+          -1.5013134228451362e-05,
+          -0.15762815395139584
+        ],
+        [
+          -0.0012584641525129757,
+          -4.622596947508023e-09,
+          0.9999992081336749,
+          0.1884826421234278
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "alignment": {
+        "base": {
+          "sign": 1,
+          "raw_to_control_sign": 1,
+          "control_to_model_sign": 1,
+          "home_model_rad": 0.0
+        },
+        "shoulder": {
+          "sign": 1,
+          "raw_to_control_sign": 1,
+          "control_to_model_sign": 1,
+          "home_model_rad": 0.0
+        },
+        "elbow": {
+          "sign": 1,
+          "raw_to_control_sign": -1,
+          "control_to_model_sign": -1,
+          "home_model_rad": 0.0
+        },
+        "wrist_flex": {
+          "sign": 1,
+          "raw_to_control_sign": -1,
+          "control_to_model_sign": -1,
+          "home_model_rad": 0.0
+        },
+        "wrist_roll": {
+          "sign": 1,
+          "raw_to_control_sign": 1,
+          "control_to_model_sign": 1,
+          "home_model_rad": 0.0015339807878856412
+        },
+        "gripper": {
+          "sign": 1,
+          "raw_to_control_sign": -1,
+          "control_to_model_sign": -1,
+          "home_model_rad": 0.0
+        }
+      },
+      "reference_raw": {
+        "base": 2048,
+        "shoulder": 2048,
+        "elbow": 2048,
+        "wrist_flex": 2048,
+        "wrist_roll": 2047,
+        "gripper": 2048
+      },
+      "reference_model_rad": {
+        "base": 0.0,
+        "shoulder": 0.0,
+        "elbow": 0.0,
+        "wrist_flex": 0.0,
+        "wrist_roll": 0.0,
+        "gripper": 0.0
+      },
+      "reference_from_tcp": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "reference_report_sha256": "8bf74622f3d60e7d6d384a26acf48efa622046108cc7b1dcdac8859d66a960d9"
+    }
+  },
+  "lift": {
+    "axis_base": [
+      -1.8800999996677132e-05,
+      0.0,
+      0.9999999998232612
+    ],
+    "platform_at_lift_zero": [
+      [
+        0.0,
+        -1.0,
+        0.0,
+        0.0680355299922539
+      ],
+      [
+        1.0,
+        0.0,
+        0.0,
+        -0.0009765333333333326
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        -0.5028170728801189
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "travel_m": 0.6438468174282681,
+    "meters_per_count": -2.05078125e-05,
+    "floor_height_low_m": {
+      "left": 0.2555906229597231,
+      "right": 0.25629065546609775
+    },
+    "plate_local_point_m": [
+      0.15726,
+      0.026474,
+      0.688207695839842
+    ],
+    "live_origin": null,
+    "requires_new_origin_after_restart": true
+  },
+  "policy": {
+    "maximum_skew_s": 0.05,
+    "maximum_age_s": 0.2,
+    "report_maximum_age_s": 5.0,
+    "maximum_sample_gap_s": 0.2,
+    "maximum_delta_counts": 256
+  },
+  "tcp_definition": "official fixed gripper_frame_link; not object center or variable jaw contact center",
+  "development_coordinates_available": true,
+  "coordinate_use_allowed": false,
+  "validation_passed": false,
+  "strict_commissioning_passed": false,
+  "motion_authorized": false,
+  "pending_physical_validation": [
+    "camera extrinsics during S3",
+    "multi-pose TCP and historical direction verification during S3"
+  ],
+  "live_integration_verified": false,
+  "calibration_id": "s2-dev-2f48bba0751f549d3f70773b"
+}

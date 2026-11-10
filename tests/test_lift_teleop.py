@@ -106,6 +106,28 @@ def test_prepare_backup_failure_sends_no_writes(monkeypatch, tmp_path):
     assert p.writes==[]
 
 
+@pytest.mark.parametrize('alter_other_byte',[False,True])
+def test_v5_reuses_prepare_with_exact_identity_and_mode_only_change(monkeypatch,tmp_path,alter_other_byte):
+    from teleop_lift_bidirectional import INFO as v5_info
+    wrong=Port([m.INFO])
+    with pytest.raises(RuntimeError):m.prepare(wrong,tmp_path/'wrong.json',expected_info=v5_info)
+    assert wrong.writes==[b'INFO\n'] and not (tmp_path/'wrong.json').exists()
+    before=dict(torque=0,goal=0,eeprom=[0]*40)
+    after=dict(torque=0,goal=0,eeprom=[0]*40);after['eeprom'][33]=1
+    if alter_other_byte:after['eeprom'][31]=1
+    samples=iter((before,after));monkeypatch.setattr(m,'snapshot',lambda port:next(samples))
+    port=Port([v5_info,dict(type='prepared',fault=False,torque_raw=0,goal_raw=0)])
+    destination=tmp_path/'backup.json'
+    if alter_other_byte:
+        with pytest.raises(RuntimeError,match='모드 외 설정 변경'):
+            m.prepare(port,destination,expected_info=v5_info)
+    else:
+        m.prepare(port,destination,expected_info=v5_info)
+        assert Path(str(destination)+'.verified.json').exists()
+    assert json.loads(destination.read_text())['before']==before
+    assert len(port.writes)==2 and port.writes[1].startswith(b'PREP ')
+
+
 def test_not_interactive_never_arms(monkeypatch,tmp_path):
     monkeypatch.setattr(m.os,"isatty",lambda fd: False);p=Port([])
     with pytest.raises(RuntimeError): m.run(p,0,tmp_path/"x.json")

@@ -25,6 +25,25 @@ int main(int argc,char **argv){
     uint32_t a=0,b=0,stale;uint8_t bytes[]={255,255,1};uint16_t pose[6]={2048,2048,2048,2048,2048,2048};
     CHECK(argc==2);int scenario=atoi(argv[1]);BimanualServoDispatch_Init(&left,&right);
     switch(scenario){
+    case 15: /* TX callback precedes the final echoed RX bit on either bus. */
+        CHECK(BimanualServoDispatch_Launch(pose,pose,0,0)==HAL_OK);
+        left.wire_busy=right.wire_busy=1;complete(&left);complete(&right);
+        for(unsigned i=0;i<10;i++){
+            BimanualServoDispatch_Poll();
+            CHECK(!BimanualServoDispatch_Faulted() && !BimanualServoDispatch_Ready());
+            CHECK(!ServoTransport_ReadReady(&left) && !ServoTransport_ReadReady(&right));
+        }
+        left.wire_busy=0;BimanualServoDispatch_Poll();
+        CHECK(!BimanualServoDispatch_Faulted() && !BimanualServoDispatch_Ready());
+        right.wire_busy=0;BimanualServoDispatch_Poll();
+        CHECK(BimanualServoDispatch_Ready());
+        CHECK(BimanualServoDispatch_GetSnapshot()->completed_count==1);
+        CHECK(BimanualServoDispatch_GetSnapshot()->failure_count==0);break;
+    case 16: /* Duplicate completion remains a fault while waiting for wire idle. */
+        CHECK(BimanualServoDispatch_Launch(pose,pose,0,0)==HAL_OK);
+        left.wire_busy=1;complete(&left);BimanualServoDispatch_Poll();
+        CHECK(!BimanualServoDispatch_Faulted());
+        complete(&left);CHECK(BimanualServoDispatch_Faulted());break;
     case 14:
         CHECK(!ServoTransport_SetPeriodicMode(true,false));
         CHECK(ServoTransport_BeginService(&left,ACTUATOR_BUS_WORK_ARM,&a));

@@ -6,118 +6,22 @@ An accepted coordinate profile never grants motion permission.
 from __future__ import annotations
 
 from copy import deepcopy
-import hashlib
-import json
 import math
-from pathlib import Path
-import xml.etree.ElementTree as ET
+from .s2_urdf import render_observation_urdf as _render_urdf
 
 import numpy as np
 
 from .camera_registration import fit_fixed_camera, _spread
 
-JOINTS = ("base", "shoulder", "elbow", "wrist_flex", "wrist_roll", "gripper")
-UPSTREAM = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
-ARMS = ("left", "right")
+# Retain the public commissioning API for historical offline tools.
+from .s2_geometry import (ARMS, JOINTS, UPSTREAM, arm_transforms, digest, load_geometry,
+                          model_angles, nominal_base_from_cad, number, origin, rigid,
+                          rotation, text, tool_pose, vector)
+
 POLICY = {"camera_max_m": .010, "tcp_max_m": .010, "combined_max_m": .015,
           "lift_max_m": .005, "depth_max_m": .010, "maximum_skew_s": .050,
           "maximum_age_s": .200, "reference_angle_max_rad": math.radians(2),
           "tcp_orientation_max_rad": math.radians(3), "report_maximum_age_s": 5.0}
-
-
-def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
-
-
-def nominal_base_from_cad(geometry):
-    """Mini 1 axle-centroid reference, not a measured installation transform."""
-    if geometry['robot_model'] != 'alohamini1':
-        raise ValueError('Mini 1 geometry required for nominal base reference')
-    joints={j['name']:j for j in geometry['mobile_reference_joints']}
-    center=np.mean([origin(joints[name])[:3,3] for name in ('wheel1','wheel2','wheel3')],axis=0)
-    result=np.eye(4)
-    result[:3,:3]=[[0,-1,0],[1,0,0],[0,0,1]]
-    result[:3,3]=-result[:3,:3]@center
-    return result
-
-
-def number(value, name, maximum=100):
-    if type(value) not in (int, float) or abs(value) > maximum or not math.isfinite(value):
-        raise ValueError(f"{name}: finite value in ±{maximum} required")
-    return float(value)
-
-
-def vector(value, length, name):
-    if not isinstance(value, list) or len(value) != length:
-        raise ValueError(f"{name}: {length} values required")
-    return np.array([number(v, name) for v in value])
-
-
-def text(value, name):
-    if not isinstance(value, str) or not value.strip() or len(value) > 200:
-        raise ValueError(f"{name}: nonempty text required")
-    return value
-
-
-def rotation(axis, angle):
-    a = np.array(axis, dtype=float)
-    a /= np.linalg.norm(a)
-    x, y, z = a
-    cross = np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])
-    result = np.eye(4)
-    result[:3, :3] = np.eye(3) + math.sin(angle) * cross + (1 - math.cos(angle)) * cross @ cross
-    return result
-
-
-def origin(joint):
-    o = joint.get("origin", {})
-    xyz = [float(x) for x in o.get("xyz", "0 0 0").split()]
-    r, p, y = [float(x) for x in o.get("rpy", "0 0 0").split()]
-    result = rotation([0, 0, 1], y) @ rotation([0, 1, 0], p) @ rotation([1, 0, 0], r)
-    result[:3, 3] = xyz
-    return result
-
-
-def rigid(value):
-    m = np.asarray(value, dtype=float)
-    if (m.shape != (4, 4) or not np.isfinite(m).all() or
-            not np.allclose(m[3], [0, 0, 0, 1], atol=1e-9) or
-            not np.allclose(m[:3, :3].T @ m[:3, :3], np.eye(3), atol=1e-7) or
-            not math.isclose(np.linalg.det(m[:3, :3]), 1, abs_tol=1e-7)):
-        raise ValueError("proper rigid transform required")
-    return m
-
-
-def load_geometry(path):
-    path = Path(path)
-    data = json.loads(path.read_text())
-    if data["robot_model"] != "alohamini1" or data["arm_model"] != "SO-ARM101":
-        raise ValueError("ALOHA Mini 1 + SO-ARM101 required")
-    expected = {"alohamini1.urdf", "so101_new_calib.urdf", "alohamini_config.py.txt"}
-    if len(data["sources"]) != 3 or {s["file"] for s in data["sources"]} != expected:
-        raise ValueError("all three pinned official sources required")
-    for source in data["sources"]:
-        name = source["file"]
-        if Path(name).name != name:
-            raise ValueError("source must be a local basename")
-        raw = (path.parent / "official_sources" / name).read_bytes()
-        if hashlib.sha256(raw).hexdigest() != source["sha256"]:
-            raise ValueError("official source hash changed")
-        key = {"so101_new_calib.urdf": "arm_joints", "alohamini1.urdf": "mobile_reference_joints"}.get(name)
-        if key:
-            extracted = []
-            for j in ET.fromstring(raw).findall("joint"):
-                row = dict(j.attrib)
-                for tag in ("parent", "child", "origin", "axis", "limit"):
-                    e = j.find(tag)
-                    if e is not None:
-                        row[tag] = dict(e.attrib)
-                extracted.append(row)
-            if data[key] != extracted:
-                raise ValueError("derived geometry differs from pinned official source")
-    if data["lift_nominal_m_per_turn"] != .084 or data["encoder_counts_per_turn"] != 4096:
-        raise ValueError("unexpected Mini 1 nominal transmission")
-    return data
 
 
 def alignment(checks):
@@ -143,30 +47,6 @@ def alignment(checks):
             raise ValueError(f"{joint}: direction/encoder scale/reference angles disagree")
         result[joint] = {"sign": sign, "home_model_rad": q[0] - sign * (raw[0] - 2048) * 2 * math.pi / 4096}
     return result
-
-
-def model_angles(raw, mapping):
-    if set(raw) != set(JOINTS) or set(mapping) != set(JOINTS):
-        raise ValueError("exactly six named joints required; positional arrays are not accepted")
-    return {j: mapping[j]["home_model_rad"] + mapping[j]["sign"] *
-            (number(raw[j], j, 32768) - 2048) * 2 * math.pi / 4096 for j in JOINTS}
-
-
-def arm_transforms(geometry, angles):
-    joints = {j["name"]: j for j in geometry["arm_joints"]}
-    transforms = {"base_link": np.eye(4)}
-    for key, name in zip(JOINTS, UPSTREAM):
-        j = joints[name]
-        axis = [float(x) for x in j["axis"]["xyz"].split()]
-        transforms[j["child"]["link"]] = transforms[j["parent"]["link"]] @ origin(j) @ rotation(axis, angles[key])
-    tcp = joints["gripper_frame_joint"]
-    transforms["gripper_frame_link"] = transforms[tcp["parent"]["link"]] @ origin(tcp)
-    return transforms
-
-
-def tool_pose(geometry, arm, raw):
-    transforms = arm_transforms(geometry, model_angles(raw, arm["alignment"]))
-    return transforms["gripper_frame_link"] @ rigid(arm["reference_from_tcp"])
 
 
 def fit_mount(local_points, base_points):
@@ -507,14 +387,6 @@ def rebind_origin(profile, evidence):
     return result
 
 
-def _rpy(m):
-    r = rigid(m)[:3, :3]
-    pitch = math.atan2(-r[2, 0], math.hypot(r[0, 0], r[1, 0]))
-    if abs(math.cos(pitch)) < 1e-8:
-        return [0., pitch, math.atan2(-r[0, 1], r[1, 1])]
-    return [math.atan2(r[2, 1], r[2, 2]), pitch, math.atan2(r[1, 0], r[0, 0])]
-
-
 def export_urdf(profile, geometry, *, allow_simulation=False):
     """A kinematic TF model, using model-angle JointStates, not actuator commands.
 
@@ -527,48 +399,3 @@ def export_urdf(profile, geometry, *, allow_simulation=False):
     if not profile["validation_passed"] or (not profile["coordinate_use_allowed"] and not (allow_simulation and profile["provenance"] == "simulation")):
         raise ValueError("validated coordinate profile required")
     return _render_urdf(profile, geometry)
-
-
-def _render_urdf(profile, geometry, *, lift_axis="0 0 1", lift_travel=.64, ground_z=None):
-    """Internal renderer: callers must validate their own profile contract first."""
-    root = ET.Element("robot", name="alohamini1_s2_coordinates")
-    root.append(ET.Comment("Kinematic observation model ONLY; no collision model or motion authorization."))
-    root.append(ET.Comment("Calibration " + profile["calibration_id"]))
-    ET.SubElement(root, "link", name="base_link")
-    ET.SubElement(root, "link", name="s2_lift_link")
-
-    def joint(name, parent, child, matrix, kind="fixed", axis=None, limits=None):
-        j = ET.SubElement(root, "joint", name=name, type=kind)
-        ET.SubElement(j, "parent", link=parent)
-        ET.SubElement(j, "child", link=child)
-        ET.SubElement(j, "origin", xyz=" ".join(map(str, matrix[:3, 3])), rpy=" ".join(map(str, _rpy(matrix))))
-        if axis:
-            ET.SubElement(j, "axis", xyz=axis)
-        if limits:
-            ET.SubElement(j, "limit", **limits)
-
-    if ground_z is not None:
-        ET.SubElement(root, "link", name="base_footprint")
-        footprint = np.eye(4)
-        footprint[2, 3] = ground_z
-        joint("s2_floor_projection", "base_link", "base_footprint", footprint)
-    joint("s2_lift_joint", "base_link", "s2_lift_link", np.eye(4), "prismatic", lift_axis,
-          {"lower": "0", "upper": str(lift_travel), "effort": "0", "velocity": "0"})
-    ET.SubElement(root, "link", name=profile["source_frame"])
-    joint("s2_fixed_camera", "base_link", profile["source_frame"], rigid(profile["base_from_optical"]))
-    names = dict(zip(UPSTREAM, JOINTS))
-    for side in ARMS:
-        prefix = side + "_s2_"
-        links = {j[tag]["link"] for j in geometry["arm_joints"] for tag in ("parent", "child")}
-        for link in sorted(links):
-            ET.SubElement(root, "link", name=prefix + link)
-        arm = profile["arms"][side]
-        joint(side + "_s2_mount", "s2_lift_link", prefix + "base_link", rigid(arm["base_from_arm_at_lift_zero"]))
-        for j in geometry["arm_joints"]:
-            name = f"{side}_model_{names[j['name']]}" if j["name"] in names else side + "_s2_" + j["name"]
-            joint(name, prefix + j["parent"]["link"], prefix + j["child"]["link"], origin(j), j["type"],
-                  j.get("axis", {}).get("xyz") if j["type"] != "fixed" else None, j.get("limit"))
-        ET.SubElement(root, "link", name=side + "_tcp")
-        joint(side + "_s2_tcp", prefix + "gripper_frame_link", side + "_tcp", rigid(arm["reference_from_tcp"]))
-    ET.indent(root)
-    return ET.tostring(root, encoding="unicode") + "\n"

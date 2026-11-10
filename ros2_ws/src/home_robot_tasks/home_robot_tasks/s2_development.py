@@ -9,9 +9,28 @@ import math
 from pathlib import Path
 import json
 import numpy as np
-from . import s2_commissioning as s2
+from . import s2_geometry as s2
+from . import so101_joint_coordinates as arm_coordinates
+from .s2_urdf import render_observation_urdf
 
 KIND = 's2_nominal_development_coordinates'
+
+
+def camera_transform(camera):
+    """Apply an explicit base-Z registration correction once to the nominal pose."""
+    transform=s2.rigid(camera['base_from_optical']).copy()
+    adjustment=camera.get('operator_height_adjustment')
+    if camera['status']=='nominal_model_retained_by_operator':
+        if adjustment is not None:raise ValueError('height adjustment requires explicit operator-adjusted status')
+    elif camera['status']=='nominal_with_operator_height_adjustment':
+        if (not isinstance(adjustment,dict) or adjustment.get('operator_confirmed') is not True
+                or adjustment.get('frame')!='base_link' or adjustment.get('axis')!='z'
+                or adjustment.get('measured_extrinsic') is not False):
+            raise ValueError('explicit operator vertical registration evidence required')
+        transform[2,3]+=s2.number(adjustment['offset_m'],'camera height adjustment',.05)
+    else:
+        raise ValueError('nominal camera choice not confirmed')
+    return transform
 
 
 def build(root):
@@ -28,7 +47,12 @@ def build(root):
     contacts = read('tools/diagnostics/s2_viewer/lift-contacts.json')
     floor = read('tools/diagnostics/s2_viewer/lift-floor-reference.json')
     device = read('config/home_assistant/camera_device.observed.json')
-    read(alignment['direction_source'])
+    ranges = read(alignment['direction_source'])
+    from so101_arm_bridge.development_ranges import validate_development_ranges
+    validate_development_ranges(ranges)
+    control_xml = (root/arm_coordinates.CONTROL_MODEL).read_bytes()
+    files[arm_coordinates.CONTROL_MODEL] = hashlib.sha256(control_xml).hexdigest()
+    axis_signs = arm_coordinates.arm_axis_signs(control_xml, g)
     if files[alignment['direction_source']] != alignment['direction_source_sha256']:
         raise ValueError('historical direction source changed')
     for value in (alignment, mounts, contacts):
@@ -39,8 +63,7 @@ def build(root):
     if not floor['measurement_evidence']['operator_confirmed'] or installation['d415']['moves_with_lift']:
         raise ValueError('confirmed floor and fixed camera required')
     camera = installation['d415']['development_transform_choice']
-    if camera['status'] != 'nominal_model_retained_by_operator':
-        raise ValueError('nominal camera choice not confirmed')
+    camera_pose=camera_transform(camera)
     base = s2.nominal_base_from_cad(g)
     js = {j['name']:j for j in g['mobile_reference_joints']}
     axis = np.array([float(v) for v in js['vertical_move']['axis']['xyz'].split()])
@@ -52,32 +75,42 @@ def build(root):
     arms = {}
     for side in s2.ARMS:
         a = alignment['arms'][side]
-        if not a['torque_off_verified'] or not a['eeprom_matches_pre_reference_backup']:
+        calibrated = alignment.get('home_recalibrated') is True
+        evidence_key = 'eeprom_calibration_persistence_verified' if calibrated else 'eeprom_matches_pre_reference_backup'
+        if not a['torque_off_verified'] or a.get(evidence_key) is not True:
             raise ValueError('arm reference capture not verified')
+        if calibrated:
+            if (a['reference_report_sha256'] != ranges['calibration'][side]['centered_sha256']
+                    or a['persistence_report_sha256'] != ranges['calibration'][side]['persistence_sha256']):
+                raise ValueError('Home reference and range EEPROM evidence differ')
+            persistence = root/a['persistence_report']
+            if persistence.exists() and hashlib.sha256(persistence.read_bytes()).hexdigest() != a['persistence_report_sha256']:
+                raise ValueError('Home persistence record changed')
         # Archived capture bytes remain auditable; no local capture required on deployment.
         report = root/a['reference_report']
         if report.exists() and hashlib.sha256(report.read_bytes()).hexdigest() != a['reference_report_sha256']:
             raise ValueError('arm capture changed')
-        q = s2.model_angles(a['reference_raw'], a['alignment'])
+        mapping = arm_coordinates.model_alignment(a, ranges['arms'][side], axis_signs)
+        q = s2.model_angles(a['reference_raw'], mapping)
         if any(abs(q[j]-a['reference_model_rad'][j]) > 1e-10 for j in s2.JOINTS):
             raise ValueError('reference offsets disagree')
         mount = platform @ s2.origin(js[side+'_base']) @ s2.rigid(mounts['arms'][side]['cad_arm_from_model_root'])
         arms[side] = {'base_from_arm_at_lift_zero':mount.tolist(),
-                      'alignment':a['alignment'], 'reference_raw':a['reference_raw'],
+                      'alignment':mapping, 'reference_raw':a['reference_raw'],
                       'reference_model_rad':a['reference_model_rad'],
                       'reference_from_tcp':np.eye(4).tolist(),
                       'reference_report_sha256':a['reference_report_sha256']}
     ground = float((base @ [0,0,floor['referenced_ground_cad_z_m'],1])[2])
-    p = {'schema_version':1, 'record_kind':KIND, 'provenance':'nominal_with_operator_reference',
+    p = {'schema_version':2, 'arm_coordinate_convention':arm_coordinates.CONVENTION, 'record_kind':KIND, 'provenance':'nominal_with_operator_reference',
          'geometry_sha256':s2.digest(g), 'source_files_sha256':files,
-         'assembly_revision':'mini1-fixed-d415-selected-home-20261105',
+         'assembly_revision':alignment.get('assembly_revision', 'mini1-fixed-d415-selected-home-20261105'),
          'source_frame':'color_camera_optical_frame', 'target_frame':'base_link',
          'base_definition':'official wheel axle centroid; +X forward, +Y left, +Z up',
          'base_from_cad':base.tolist(), 'ground_z_m':ground,
-         'base_from_optical':s2.rigid(camera['base_from_optical']).tolist(),
+         'base_from_optical':camera_pose.tolist(),
          'camera_device':device['camera_device'], 'arms':arms,
          'lift':{'axis_base':axis_base.tolist(), 'platform_at_lift_zero':platform.tolist(),
-                 'travel_m':contacts['travel_m'], 'meters_per_count':-.084/4096,
+                 'travel_m':contacts['travel_m'], 'meters_per_count':-g['lift_nominal_m_per_turn']/g['encoder_counts_per_turn'],
                  'floor_height_low_m':{side:floor['endpoints']['low'][side]['floor_height_m'] for side in s2.ARMS},
                  'plate_local_point_m':contacts['height_datum']['local_point_m'],
                  'live_origin':None, 'requires_new_origin_after_restart':True},
@@ -88,9 +121,26 @@ def build(root):
          'validation_passed':False, 'strict_commissioning_passed':False, 'motion_authorized':False,
          'pending_physical_validation':['camera extrinsics during S3','multi-pose TCP and historical direction verification during S3'],
          'live_integration_verified':False}
+    if camera.get('operator_height_adjustment') is not None:
+        p.update(provenance='nominal_with_operator_height_adjustment',
+            camera_nominal_base_from_optical=s2.rigid(camera['base_from_optical']).tolist(),
+            camera_height_adjustment=deepcopy(camera['operator_height_adjustment']))
     p['calibration_id'] = 's2-dev-'+s2.digest(p)[:24]
     validate(p,g)
     return p
+
+
+def released_profile(root, geometry):
+    """Load the published mapping byte-for-byte; rebuilding on another BLAS can change its ID."""
+    root = Path(root)
+    profile = json.loads((root/'config/home_assistant/s2_coordinates.development.json').read_text())
+    validate(profile, geometry)
+    if profile.get('arm_coordinate_convention') != arm_coordinates.CONVENTION:
+        raise ValueError('current model-coordinate profile required')
+    for name, expected in profile['source_files_sha256'].items():
+        if hashlib.sha256((root/name).read_bytes()).hexdigest() != expected:
+            raise ValueError(f'profile source changed: {name}')
+    return profile
 
 
 def validate(profile, geometry):
@@ -100,7 +150,16 @@ def validate(profile, geometry):
         raise ValueError('development profile/geometry mismatch')
     if any(profile[k] is not False for k in ('coordinate_use_allowed','validation_passed','strict_commissioning_passed','motion_authorized')):
         raise ValueError('nominal coordinates cannot assert measured acceptance or motion authorization')
+    version = profile.get('schema_version')
+    if version not in (1, 2) or (version == 2 and profile.get('arm_coordinate_convention') != arm_coordinates.CONVENTION):
+        raise ValueError('unknown arm coordinate convention')
     s2.rigid(profile['base_from_optical'])
+    if 'camera_height_adjustment' in profile:
+        expected=camera_transform(dict(status='nominal_with_operator_height_adjustment',
+            base_from_optical=profile['camera_nominal_base_from_optical'],
+            operator_height_adjustment=profile['camera_height_adjustment']))
+        if not np.allclose(expected,profile['base_from_optical'],atol=1e-12,rtol=0):
+            raise ValueError('camera height adjustment differs from declared nominal pose')
     axis = s2.vector(profile['lift']['axis_base'],3,'lift axis')
     if not math.isclose(float(np.linalg.norm(axis)),1,abs_tol=1e-9):
         raise ValueError('unit lift axis required')
@@ -110,6 +169,15 @@ def validate(profile, geometry):
         s2.rigid(arm['reference_from_tcp'])
         if any(arm['alignment'][j]['sign'] not in (-1,1) for j in s2.JOINTS):
             raise ValueError('joint directions must be signed')
+        if version == 2:
+            mapping = arm['alignment']
+            if any(m.get('control_to_model_sign') not in (-1, 1) or m.get('raw_to_control_sign') not in (-1, 1)
+                   or m['control_to_model_sign'] * m['raw_to_control_sign'] != m['sign'] for m in mapping.values()):
+                raise ValueError('signed control/model conversion required')
+            at_reference = s2.model_angles(arm['reference_raw'], mapping)
+            if any(abs(at_reference[j]-arm['reference_model_rad'][j]) > 1e-10 for j in s2.JOINTS):
+                raise ValueError('model conversion moved the reference pose')
+
 
 
 def evaluate(profile, geometry, raw, lift_height_m, *, camera_xyz_m=None):
@@ -128,9 +196,7 @@ def evaluate(profile, geometry, raw, lift_height_m, *, camera_xyz_m=None):
         positions.update({f'{side}_model_{j}':q for j,q in s2.model_angles(raw[side],arm['alignment']).items()})
     point = None
     if camera_xyz_m is not None:
-        xyz = s2.vector(camera_xyz_m,3,'camera point')
-        if xyz[2]<=0: raise ValueError('positive optical depth required')
-        point = (s2.rigid(profile['base_from_optical']) @ np.r_[xyz,1])[:3].tolist()
+        point = s2.optical_to_base(profile['base_from_optical'], camera_xyz_m)
     return {'calibration_id':profile['calibration_id'], 'coordinate_mode':'offline_development',
             'provenance':profile['provenance'], 'frame':'base_link',
             'object_surface_xyz_m':point, 'base_from_tcp':frames,
@@ -140,7 +206,7 @@ def evaluate(profile, geometry, raw, lift_height_m, *, camera_xyz_m=None):
 
 def export_urdf(profile,geometry):
     validate(profile,geometry)
-    return s2._render_urdf(profile,geometry,
+    return render_observation_urdf(profile,geometry,
         lift_axis=' '.join(map(str,profile['lift']['axis_base'])),
         lift_travel=profile['lift']['travel_m'],ground_z=profile['ground_z_m'])
 
@@ -270,9 +336,7 @@ def transform_report(profile,geometry,report,*,capture_snapshot,now_s,clock_id):
         if type(surface['valid']) is not bool: raise ValueError('typed surface validity required')
         xyz = None
         if surface['valid']:
-            point = s2.vector(surface['xyz_m'],3,'surface point')
-            if point[2]<=0: raise ValueError('positive optical depth required')
-            xyz = (s2.rigid(profile['base_from_optical']) @ np.r_[point,1])[:3].tolist()
+            xyz = s2.optical_to_base(profile['base_from_optical'], surface['xyz_m'])
         results.append({'id':identifier,'label':label,'score':score,'base_surface_xyz_m':xyz,
                         'reason':surface.get('reason') if xyz is None else None,'grasp_pose':None})
     return {**deepcopy(capture_snapshot),'detections':results,'inference_age_s':age,

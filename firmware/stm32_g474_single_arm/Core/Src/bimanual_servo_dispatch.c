@@ -10,7 +10,7 @@ static actuator_bimanual_dispatch_t dispatch_state;
 static uint8_t left_packet[ACTUATOR_STS3215_SYNC_WRITE_POSITION_PACKET_SIZE];
 static uint8_t right_packet[ACTUATOR_STS3215_SYNC_WRITE_POSITION_PACKET_SIZE];
 static volatile uint32_t left_token, right_token;
-static volatile uint8_t launch_in_progress, tx_events, uart_error_event;
+static volatile uint8_t launch_in_progress, tx_events, retiring_events, uart_error_event;
 #if HOST_BIMANUAL_DMA_FAULT_INJECTION_BUILD
 static uint8_t right_dma_fault_injection_consumed;
 #endif
@@ -20,6 +20,7 @@ static void clear_events(void)
     uint32_t mask = __get_PRIMASK();
     __disable_irq();
     tx_events = 0U;
+    retiring_events = 0U;
     uart_error_event = 0U;
     __DMB();
     if (mask == 0U) __enable_irq();
@@ -66,7 +67,8 @@ void BimanualServoDispatch_Poll(void)
     if (launch_in_progress != 0U) return;
     mask = __get_PRIMASK();
     __disable_irq();
-    events = tx_events;
+    retiring_events |= tx_events;
+    events = retiring_events;
     error = uart_error_event;
     tx_events = 0U;
     uart_error_event = 0U;
@@ -77,20 +79,38 @@ void BimanualServoDispatch_Poll(void)
         return;
     }
     if ((events & 1U) != 0U) {
-        if (ServoTransport_End(left_bus_uart, left_token, false) != HAL_OK ||
-            actuator_bimanual_dispatch_complete_left(&dispatch_state) != ACTUATOR_BIMANUAL_DISPATCH_OK) {
+        HAL_StatusTypeDef ended = ServoTransport_End(left_bus_uart, left_token, false);
+        if (ended == HAL_ERROR) {
             BimanualServoDispatch_LatchFault();
             return;
         }
-        left_token = 0U;
+        if (ended == HAL_OK) {
+            if (actuator_bimanual_dispatch_complete_left(&dispatch_state) != ACTUATOR_BIMANUAL_DISPATCH_OK) {
+                BimanualServoDispatch_LatchFault();
+                return;
+            }
+            retiring_events &= (uint8_t)~1U;
+            left_token = 0U;
+        }
+        /* BUSY is a still-owned wire tail, not a DMA failure. Retry without
+         * blocking. OutputReady at the next control tick remains the deadline. */
     }
     if ((events & 2U) != 0U) {
-        if (ServoTransport_End(right_bus_uart, right_token, false) != HAL_OK ||
-            actuator_bimanual_dispatch_complete_right(&dispatch_state) != ACTUATOR_BIMANUAL_DISPATCH_OK) {
+        HAL_StatusTypeDef ended = ServoTransport_End(right_bus_uart, right_token, false);
+        if (ended == HAL_ERROR) {
             BimanualServoDispatch_LatchFault();
             return;
         }
-        right_token = 0U;
+        if (ended == HAL_OK) {
+            if (actuator_bimanual_dispatch_complete_right(&dispatch_state) != ACTUATOR_BIMANUAL_DISPATCH_OK) {
+                BimanualServoDispatch_LatchFault();
+                return;
+            }
+            retiring_events &= (uint8_t)~2U;
+            right_token = 0U;
+        }
+        /* BUSY is a still-owned wire tail, not a DMA failure. Retry without
+         * blocking. OutputReady at the next control tick remains the deadline. */
     }
 }
 
@@ -158,7 +178,7 @@ void BimanualServoDispatch_OnTxComplete(UART_HandleTypeDef *uart)
     if (uart == NULL || uart->gState != HAL_UART_STATE_READY) return;
     if (uart == left_bus_uart && left_token != 0U) event = 1U;
     if (uart == right_bus_uart && right_token != 0U) event = 2U;
-    if ((tx_events & event) != 0U) uart_error_event = 1U;
+    if (((tx_events | retiring_events) & event) != 0U) uart_error_event = 1U;
     tx_events |= event;
 }
 

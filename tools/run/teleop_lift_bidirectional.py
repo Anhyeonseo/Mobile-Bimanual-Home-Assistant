@@ -12,6 +12,7 @@ import termios
 import time
 import tty
 import teleop_lift as base
+from so101_arm_bridge.encoder_units import LIFT_METERS_PER_TURN, lift_rise_m
 
 INFO = dict(base.INFO, firmware='lift-teleop-v5', down_only=False,
             bottom_guard_counts=256, top_guard_counts=30000)
@@ -67,7 +68,7 @@ def run(port,input_fd,path,*,check_up=False):
     reference=initial['reference_id']
     path.parent.mkdir(parents=True,exist_ok=True)
     report=dict(status='incomplete',started_utc=datetime.now(timezone.utc).isoformat(),
-                reference_id=reference,check_up=check_up,scale_m_per_turn=.084,
+                reference_id=reference,check_up=check_up,scale_m_per_turn=LIFT_METERS_PER_TURN,
                 calibration_valid=False,s2_complete=False)
     old=termios.tcgetattr(input_fd);attempted=False;error=None;stopped=None
     capture=base.Capture();nonce=secrets.randbelow(0xffffffff)+1
@@ -114,11 +115,11 @@ def run(port,input_fd,path,*,check_up=False):
                     print('준비 완료 | '+('W 한 번: 최대 2초 상승 검사 · Space/X 정지' if check_up else 'W 유지: 상승 · S 유지: 하강 · Space: 정지 · B: 중간점 저장 후 종료 · X: 종료'),flush=True)
                 if finishing and quiet is not None:
                     report.update(status='intermediate_point_recorded',relative_counts=quiet,
-                                  height_above_bottom_m=-quiet*.084/4096,sample_tick_ms=row['sample_tick'])
+                                  height_above_bottom_m=lift_rise_m(quiet),sample_tick_ms=row['sample_tick'])
                     break
                 if finishing and now-finish_started>5:raise RuntimeError('중간점 정지 확인 실패')
                 if ready and now-last_print>=1:
-                    print(f"\r최저점 대비 {-row['relative_counts']*.084/4096*100:.2f} cm | {dict(U='상승',D='하강',Z='정지')[current]}    ",end='',flush=True)
+                    print(f"\r최저점 대비 {lift_rise_m(row['relative_counts'])*100:.2f} cm | {dict(U='상승',D='하강',Z='정지')[current]}    ",end='',flush=True)
                     last_print=now
                 time.sleep(max(0,base.PERIOD-(time.monotonic()-now)))
         except base.StartupNotStationary as exc:
@@ -147,6 +148,7 @@ def main():
     p.add_argument('--port',required=True)
     p.add_argument('--file',type=Path)
     mode=p.add_mutually_exclusive_group()
+    mode.add_argument('--prepare',action='store_true',help='reuse EEPROM backup and torque-off speed-mode setup with exact v5 identity')
     mode.add_argument('--set-bottom',action='store_true')
     mode.add_argument('--link-check',action='store_true')
     mode.add_argument('--check-up',action='store_true')
@@ -154,14 +156,15 @@ def main():
     p.add_argument('--bottom-confirmed',action='store_true')
     p.add_argument('--up-direction-confirmed',action='store_true')
     a=p.parse_args()
-    if (a.set_bottom or a.link_check or a.check_up or a.run) and not a.file:p.error('--file required')
+    if (a.prepare or a.set_bottom or a.link_check or a.check_up or a.run) and not a.file:p.error('--file required')
     if a.set_bottom and not a.bottom_confirmed:p.error('현재 실제 최저점 확인이 필요합니다.')
     if a.run and not a.up_direction_confirmed:p.error('짧은 상승 검사 후 실제 상승 확인이 필요합니다.')
     if a.file and a.file.exists():p.error('기존 기록을 덮어쓰지 않습니다.')
     import serial
     with base.stopping_signals(),base.acquire_backend_lease('stm32',0):
         with base.open_exclusive_serial(serial,a.port,921600,.01) as port:
-            if a.set_bottom:print(json.dumps(set_bottom(port,a.file),ensure_ascii=False))
+            if a.prepare:base.prepare(port,a.file,expected_info=INFO)
+            elif a.set_bottom:print(json.dumps(set_bottom(port,a.file),ensure_ascii=False))
             elif a.link_check:base.link_check(port,a.file,INFO)
             elif a.check_up or a.run:run(port,sys.stdin.fileno(),a.file,check_up=a.check_up)
             else:print(json.dumps(base.inspect(port,INFO)))

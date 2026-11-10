@@ -15,9 +15,10 @@ from .workflow_ports import Phase, SequencePort
 
 class PickPlacePort:
     def __init__(self, motion, gripper, scene, resolve_stage, monitor, clock,
-                 *, motion_timeout_s=20, gripper_timeout_s=5, scene_timeout_s=3):
+                 *, probe=None, motion_timeout_s=20, gripper_timeout_s=5, scene_timeout_s=3):
         self.motion, self.gripper, self.scene = motion, gripper, scene
         self.resolve, self.clock = resolve_stage, clock
+        self.probe = probe
         if not callable(resolve_stage):
             raise InvalidTask("explicit manipulation stage resolver required")
         self.timeouts = {}
@@ -27,7 +28,8 @@ class PickPlacePort:
             if not 0 < value <= 60:
                 raise InvalidTask("bounded manipulation timeout required")
             self.timeouts[name] = value
-        for port in (motion, gripper, scene):
+        ports = (motion, gripper, scene) if probe is None else (motion, gripper, scene, probe)
+        for port in ports:
             if not all(callable(getattr(port, m, None)) for m in ("ready", "start", "poll", "cancel")):
                 raise InvalidTask("asynchronous manipulation ports required")
         self.sequence = SequencePort(self._build, monitor, clock)
@@ -52,11 +54,17 @@ class PickPlacePort:
         # During a jaw transition, do not demand the completed grasp/release
         # state. AFTER requires fresh independent evidence from the monitor.
         if operation == "pick":
+            close_after = ("grasp_verified",) if self.probe is None else ("contact_plausible",)
+            probe_stage = () if self.probe is None else (
+                ("probe", "probe", ("contact_plausible",), ("probe_clearance_verified", "probe_contact_live"),
+                 ("probe_follow_verified", "grasp_verified", "load_retained")),
+            )
             spec = (
                 ("open", "gripper", ("gripper_empty",), (), ("gripper_open", "gripper_empty")),
                 ("pregrasp", "motion", ("gripper_open", "gripper_empty"), ("gripper_empty",), ()),
                 ("approach", "motion", ("gripper_open", "gripper_empty"), ("gripper_empty",), ()),
-                ("close", "gripper", ("gripper_empty",), (), ("grasp_verified",)),
+                ("close", "gripper", ("gripper_empty",), (), close_after),
+                *probe_stage,
                 ("attach", "scene", held, held, attached),
                 ("retreat", "motion", held + attached, held + attached, ("arm_clear",)),
             )
@@ -73,9 +81,16 @@ class PickPlacePort:
             stage = operation + "_" + name
             # One wrapper per stage, while shared underlying ports serialize
             # motion/gripper ownership. Resolution is lazy, never preplanned.
-            port = ResolvedPort(stage, getattr(self, role), self.resolve, self.clock)
-            phases.append(Phase(stage, port, deepcopy(parameters), stationary + before,
-                                stationary + during, after, self.timeouts[role]))
+            if role == "probe":
+                # The dedicated backend owns the checked short stroke. A caller cannot supply a pose.
+                port = self.probe
+                args = {key: parameters[key] for key in ("object_id", "arm")}
+                timeout = self.timeouts["motion"]
+            else:
+                port = ResolvedPort(stage, getattr(self, role), self.resolve, self.clock)
+                args, timeout = deepcopy(parameters), self.timeouts[role]
+            phases.append(Phase(stage, port, args, stationary + before,
+                                stationary + during, after, timeout))
         return tuple(phases)
 
     def start(self, goal_id, parameters):

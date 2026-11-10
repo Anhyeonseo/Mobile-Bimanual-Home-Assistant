@@ -28,6 +28,8 @@ typedef struct
 
 /* Non-consuming, atomic observation of the last real timer interrupt. */
 bool ControlTick_PeekEpoch(uint32_t *epoch_us);
+/* Read admission only: never consumes or postpones an output event. */
+bool ControlTick_ReadWindowAvailable(uint32_t budget_us);
 void ControlTick_Init(void);
 void ControlTick_OnInterrupt(void);
 void ControlTick_Reset(void);

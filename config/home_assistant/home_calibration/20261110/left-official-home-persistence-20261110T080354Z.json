@@ -1,0 +1,76 @@
+{
+  "created_utc": "2026-11-10T08:03:55.113800+00:00",
+  "firmware": {
+    "firmware": "arm-calibration-v1",
+    "arm": "left",
+    "motion_enabled": false,
+    "ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "consumed_mask": 63
+  },
+  "reference": "operator-positioned reference; arm and gripper pose recorded in reference_note",
+  "before": [
+    {
+      "id": 1,
+      "ok": true,
+      "position": 2047,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903010000010000ff0f468c28e8030c2c2f20200010000101360101a9040014c8500ac8c8"
+    },
+    {
+      "id": 2,
+      "ok": true,
+      "position": 3162,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903020000010000ff0f468c28e8030c2c2f20200010000101360101cc0d0014c8500ac8c8"
+    },
+    {
+      "id": 3,
+      "ok": true,
+      "position": 2334,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903030000010000ff0f468c28e8030c2c2f20200010000101360101dd0b0014c8500ac8c8"
+    },
+    {
+      "id": 4,
+      "ok": true,
+      "position": 2044,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903040000010000ff0f468c28e8030c2c2f20200010000101360101da060014c8500ac8c8"
+    },
+    {
+      "id": 5,
+      "ok": true,
+      "position": 2045,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903050000010000ff0f468c28e8030c2c2f20200010000101360101b40a0014c8500ac8c8"
+    },
+    {
+      "id": 6,
+      "ok": true,
+      "position": 2050,
+      "torque": 0,
+      "lock": 1,
+      "eeprom_hex": "030a000903060000010000ff0f468c28e8030c2c2f202000100001013601016c020014c8500ac8c8"
+    }
+  ],
+  "results": [],
+  "motion_commands_sent": false,
+  "status": "persistence_verified",
+  "old_runtime_limits_valid": false,
+  "arm": "left",
+  "reference_note": "Operator confirms motor power OFF then ON after right centering, both arms and lift remain supported; read-only EEPROM persistence and torque check. Official STL zero reference, no pad measurement.",
+  "calibration_registers_match": true,
+  "compared_record_sha256": "f25b7fc5d901903b567a177b1d6331749e897099be020411d49517ed49d2e45d"
+}

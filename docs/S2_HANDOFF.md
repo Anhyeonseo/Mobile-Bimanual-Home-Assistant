@@ -15,6 +15,8 @@ RGB-D·모터 시각 범위 최대 48.42ms, 모터 속도 0·토크 OFF·모터 
 설치·좌표 프로필의 기존 상태 플래그는 생성 당시 기록으로 보존했다. 최신 완료 상태는
 별도 관측 근거와 `s2_coordinates.py audit`에서 판단하며, 검증한 프로필 해시를 변경하지 않는다.
 
+11월 5일에 실물 검증한 좌표 프로필은 `config/home_assistant/historical/s2_coordinates.20261105.json`에 보관한다. 11월 6일 로컬 활성 프로필은 관절각을 공식 SO-ARM101 방향으로 환산한다. 새 프로필의 검증은 로컬 왕복 변환과 기존 촬영 재생까지 진행했다. [모델각과 제어각 환산](S3_STATIONARY_LAB.md#모델각과-제어각-환산-적용)
+
 ## 완료한 연결
 
 | 항목 | 결과 | 근거와 한계 |
@@ -121,3 +123,31 @@ cd /home/hyper/robot/releases/s2-coordinates-b19a1295753b
 - 베이스 정지 위치·리프트 작업 높이·충돌 없는 접근 경로를 고른다.
 - 리프트 소음은 기존 최종 실물 이슈로 유지한다. 발생하지 않는다고 판정하지 않았다.
 - LiDAR 장착과 지도 계층은 주행/매핑 단계에서 다룬다.
+
+## 코드 경계와 장애 재현 (2026-11-06)
+
+이 구조는 [기존 L0–L5 설계](MOBILE_MANIPULATION_DESIGN.md)의 책임을 구현한다. 단계 번호(S0–S2)는 개발 이력이지 런타임 계층 번호가 아니다.
+
+| 책임 | 코드 진입점 | 입력 → 출력 / 지켜야 할 경계 |
+|---|---|---|
+| 설치 조사 | `tools/diagnostics/home_robot_inventory.py` | OS·USB 메타데이터 → 설치 기록. 장치 노드를 열지 않으며 읽지 못한 필드는 개별적으로 표시 |
+| L1 STM32 | `s2_observer_app.c`, `servo_transport.c` | ID별 읽기 응답. 펌웨어 자체가 쓰기를 거부한다. 호스트의 좌표 계산이나 인식에 의존하지 않음 |
+| L2 장치 게이트웨이 | `so101_arm_bridge/observer_protocol.py`, `encoder_units.py`, `home_robot_tasks/s2_acquisition.py` | 배타적 연결에서 INFO/BIND/SAMPLE → 시간 구간이 있는 13축 샘플 → 연속 각도·높이. 패킷·시계·원점의 오류는 해당 세션을 중단. 엔코더 차분은 관측용이며 궤적 선택에 사용하지 않음 |
+| L2 유지보수 전용 | `calibration_maintenance.py`, `calibrate_arm_home.py` | 명시적으로 선택한 보정 펌웨어·팔·기준 자세에만 적용. 백업 동기화 후 보정하며, 전원 재인가 검증은 읽기만 한다. 관측용 릴리스에는 이 모듈을 넣지 않는다. |
+| L3A 공간·센서 | `s2_rgbd_acquisition.py`, `s2_observation.py`, `s2_geometry.py` | 실제 노출 시각과 모터 기록 → 같은 촬영 좌표. FK·카메라 점 변환·URDF 표현은 공통 수학을 쓰되, `s2_development`의 개발 모델과 `s2_commissioning`의 엄격한 실측 수락은 독립 검증 |
+| 진단·증거 저장 | `tools/diagnostics/capture_s2_observer.py`, `snapshot_io.py` | 위 구성 요소의 수명과 출력만 관리한다. 선택한 프레임을 저장할 때 S2 수집기가 S3 대상 선택 도구를 호출하지 않음 |
+
+**이후 개발:** S3 인식은 같은 세션/프레임의 이미지와 관측 근거를 소비한다. 마스크의 표면점·보이는 중심은 파지 접촉점이 아니다. L3C가 실제 집게·도달성·충돌을 검토하고, L3D가 실행 결과를 검증한다. S4 지도는 캡처 당시의 지도 버전·로봇 위치를 별도로 연결해야 한다. S5 요청 해석이 시리얼 통신이나 원점 설정에 접근하지 않는다. 진단 JSON은 상위 계층의 모터 실행 API가 아니다.
+
+**문제 발생 시:** 호스트 보고서에서 먼저 `error`와 `failure_stage`를 본다. `L2.bind.identity`면 펌웨어 식별, `L2.sample.clock`이면 INFO 왕복·epoch·시계 차이를 확인한다. `last_valid_sequence`는 검증을 마친 마지막 모터 샘플 번호이며, `last_raw_exchange.rows`에는 이후 실패한 SAMPLE의 부분 응답도 남는다. `L2.encoder_update`는 누적 회전 기준, `L3A.match_rgbd`는 촬영 시각 연결, `L3A.coordinate_session`은 장치/원점/보정 식별과 FK 경계다. 카메라 종료 중 별도 오류가 생기면 최초 오류와 구분한다. 오류 해결을 위해 시간을 완화하거나 옛 높이를 재사용하지 않는다.
+
+완료된 통합 보고서는 로봇 없이 재생할 수 있다. 첫 엔코더 기준부터 다시 계산해 RGB-D 시각 범위, 스냅샷, 좌표를 원본과 대조한다. 다른 기록을 섞거나 실패한 세션을 실측 근거로 승격하지 않는다.
+
+```sh
+python3 tools/diagnostics/s2_development.py compare-recording \
+  --profile config/home_assistant/s2_coordinates.development.json \
+  --recording output/home-assistant/s2/coordinates/integrated-20261105-04.json \
+  --output /tmp/s2-replay-result-new.json
+```
+
+호스트 릴리스 ID에는 런타임 파일뿐 아니라 플래시 스크립트의 원본 템플릿도 반영한다. 같은 펌웨어를 포함하는 새 호스트 패키지를 만들었다고 해서 보드에 적용된 펌웨어가 바뀌는 것은 아니다.

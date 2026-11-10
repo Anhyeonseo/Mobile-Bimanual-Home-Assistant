@@ -19,9 +19,10 @@ def audit():
     lift = json.loads((ROOT / installation["lift"]["geometry"]).read_text())
     camera_observation = installation["d415"].get("device_observation", {})
     camera_recorded = camera_observation.get("status") == "recorded_metadata_validated"
-    nominal_retained = installation["d415"].get("development_transform_choice", {}).get("status") == "nominal_model_retained_by_operator"
+    nominal_retained = installation["d415"].get("development_transform_choice", {}).get("status") in (
+        "nominal_model_retained_by_operator", "nominal_with_operator_height_adjustment")
     from home_robot_tasks import s2_development as dev
-    profile = dev.build(ROOT)
+    profile = dev.released_profile(ROOT, geometry)
     integration_path=ROOT/'config/home_assistant/s2_integration.observed.json'
     integration=json.loads(integration_path.read_text()) if integration_path.exists() else {}
     integrated=(integration.get('status')=='development_integration_verified'

@@ -116,6 +116,22 @@ class ResidentArmPort:
         if self.adapter.heartbeat_required:
             self.adapter.keepalive()
 
+    def pending_stop_reason(self):
+        """Expose the first fault while STOP verification still owns the arm."""
+        entry = self.entries.get(self.owner)
+        return entry["reason"] if entry and entry["cancel"] else None
+
+    def retire_completed(self, goal_id):
+        """Forget only a successful child after its caller has recorded it.
+
+        Periodic stationary holds use distinct IDs without growing the port's
+        bounded history forever. This never clears a fault or transport owner.
+        """
+        entry = self.entries.get(goal_id)
+        if self.owner == goal_id or entry is None or entry["status"] != "SUCCEEDED":
+            raise InvalidTask("only a completed successful arm child can be retired")
+        del self.entries[goal_id]
+
     def start(self, goal_id, parameters):
         from so101_arm_bridge.bimanual_stream_adapter import TimedJointPoint
 

@@ -27,6 +27,8 @@ def read_development_ranges(path: Path):
 
 
 def validate_development_ranges(d):
+    if isinstance(d, dict) and type(d.get('schema_version')) is int and d['schema_version'] == 2:
+        return _validate_rebased_ranges(d)
     if not isinstance(d, dict) or (d.get('record_kind') != 'development_arm_ranges'
             or type(d.get('schema_version')) is not int or d['schema_version'] != 1
             or d.get('status') != 'LEFT_CAPTURED_RIGHT_COPIED_BY_OPERATOR_REQUEST'
@@ -67,6 +69,69 @@ def validate_development_ranges(d):
             if joint=='gripper' and (e.get('opening_raw_direction')!=1 or e.get('closing_raw_direction')!=-1 or e.get('maximum_open_raw')!=hi):
                 raise ValueError('gripper opening semantics mismatch')
             entries.append(e)
+    return tuple(entries)
+
+
+def offset_shift(old, new):
+    """Coordinate change from signed-magnitude EEPROM offsets, not a motion path."""
+    def signed(value):
+        if not 0 <= _integer(value) < 4096:
+            raise ValueError('invalid servo offset')
+        return -(value & 2047) if value & 2048 else value
+    delta = (signed(old) - signed(new) + 2048) % 4096 - 2048
+    if delta == -2048:
+        raise ValueError('ambiguous half-turn calibration change')
+    return delta
+
+
+def translated_entry(entry, shift):
+    """Translate the whole continuous interval without wrapping or clipping it."""
+    result = dict(entry)
+    lo = entry['minimum_unwrapped_raw'] + shift
+    hi = entry['maximum_unwrapped_raw'] + shift
+    if not 0 <= lo <= 2048 <= hi <= 4095:
+        raise ValueError('rebased full range does not fit one servo turn around Home')
+    result.update(minimum_unwrapped_raw=lo, maximum_unwrapped_raw=hi)
+    result['minimum_urad'], result['maximum_urad'] = sorted(
+        round(entry['positive_raw_direction'] * (raw-2048) * 6283185/4096)
+        for raw in (lo, hi))
+    if 'maximum_open_raw' in result:
+        result['maximum_open_raw'] = hi
+    return result
+
+
+def _validate_rebased_ranges(d):
+    source = d.get('rebase', {}).get('source_profile')
+    if not isinstance(source, dict) or source.get('schema_version') != 1:
+        raise ValueError('original schema 1 range evidence required')
+    validate_development_ranges(source)
+    rebase = d['rebase']
+    _sha(rebase['source_file_sha256'])
+    digest = hashlib.sha256(json.dumps(source, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    if rebase.get('source_document_sha256') != digest:
+        raise ValueError('original range evidence changed')
+    if (d.get('status') != 'HOME_REBASED_LEFT_CAPTURED_RIGHT_COPIED'
+            or d.get('hardware_enabled') is not False or d.get('firmware_limit_authorized') is not False
+            or d.get('record_kind') != 'development_arm_ranges'):
+        raise ValueError('expected non-executable rebased development profile')
+    for key in ('zero_raw', 'raw_units_per_turn', 'turn_urad'):
+        if _integer(d.get(key)) != source[key]:
+            raise ValueError('coordinate constants changed')
+    if set(d.get('arms', {})) != {'left', 'right'} or set(d.get('calibration', {})) != {'left', 'right'}:
+        raise ValueError('both arms required')
+    entries = []
+    for arm in ('left', 'right'):
+        calibration = d['calibration'][arm]
+        _sha(calibration['centered_sha256']); _sha(calibration['persistence_sha256'])
+        offsets = calibration['offsets_raw']
+        if len(offsets) != 6 or set(d['arms'][arm]) != set(JOINTS):
+            raise ValueError('six named joints and offsets required')
+        for i, joint in enumerate(JOINTS):
+            shift = offset_shift(source['calibration'][arm]['offsets_raw'][i], offsets[i])
+            expected = translated_entry(source['arms'][arm][joint], shift)
+            if d['arms'][arm][joint] != expected:
+                raise ValueError('rebased range, direction or provenance differs from EEPROM translation: '+arm+'/'+joint)
+            entries.append(d['arms'][arm][joint])
     return tuple(entries)
 
 

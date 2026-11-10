@@ -137,8 +137,11 @@ def snapshot(port):
     return value
 
 
-def prepare(port, path):
-    inspect(port)
+def prepare(port, path, expected_info=None):
+    if expected_info is None:
+        inspect(port)
+    else:
+        inspect(port, expected_info)
     before = snapshot(port)
     if before["torque"] != 0: raise RuntimeError("설정 전환은 토크 OFF에서만 가능합니다.")
     save_new(path, dict(kind="lift_preparation_backup", created_utc=datetime.now(timezone.utc).isoformat(), before=before))

@@ -5,6 +5,9 @@
 #include "bimanual_feedback_snapshot.h"
 #include "bimanual_operational_limits.h"
 #include "servo_transport.h"
+#if HOST_S3_STATIONARY_PICK
+#include "s3_platform_snapshot.h"
+#endif
 static struct {
     UART_HandleTypeDef *left,*right;
     uint32_t period_ms,age_ms,resumed_ms,last_read_ms;
@@ -62,6 +65,7 @@ bool MobileArmObserver_Poll(void)
         if(ServoTransport_ReadReady(observer.left)&&ServoTransport_ReadReady(observer.right)){
             if(BimanualTrackingFeedback_Begin()!=HAL_OK){observer.fault=true;return false;}
             observer.owned=true;
+            now=HAL_GetTick(); /* Receiver preparation precedes the read deadline. */
         }
     }
     if(observer.owned){
@@ -79,16 +83,27 @@ bool MobileArmObserver_Poll(void)
             observer.raw_left[sample.joint_index]=sample.left_position_raw;
             observer.raw_right[sample.joint_index]=sample.right_position_raw;
             observer.joint=(sample.joint_index+1u)%6u;
-        }else if(result==BIMANUAL_TRACKING_TRANSIENT_FAILURE||result==BIMANUAL_TRACKING_FAULT){
-            /* Keep the failed pair absent until a new successful READ, even
-             * when the old sample has not reached its age limit yet. */
+#if !HOST_S3_STATIONARY_PICK
+        }else if(result==BIMANUAL_TRACKING_TRANSIENT_FAILURE){
             BimanualFeedbackSnapshot_InvalidatePair(observer.joint);
-            if(result==BIMANUAL_TRACKING_FAULT){observer.fault=true;return false;}
+#endif
+        }else if(result==BIMANUAL_TRACKING_FAULT){
+            BimanualFeedbackSnapshot_InvalidatePair(observer.joint);
+            observer.fault=true;return false;
         }
+        /* A recoverable missing response is not a fresh measurement. Preserve
+         * the previous sample with its ORIGINAL stamp while retrying; the
+         * unchanged age checks below still stop stale feedback. */
+
         if(now-observer.last_read_ms>=observer.period_ms&&BimanualTrackingFeedback_CanStart()){
             observer.last_read_ms=now;
-            if(BimanualTrackingFeedback_Start(observer.joint,now,observer.raw_left,
-                    observer.raw_right,0,0)!=HAL_OK){observer.fault=true;return false;}
+            uint8_t slot=observer.joint;
+#if HOST_S3_STATIONARY_PICK
+            slot=S3Platform_Select(slot);
+#endif
+            HAL_StatusTypeDef started=BimanualTrackingFeedback_Start(slot,now,observer.raw_left,
+                    observer.raw_right,0,0);
+            if(started!=HAL_OK && started!=HAL_BUSY){observer.fault=true;return false;}
         }
     }
     if(now-observer.resumed_ms>=observer.age_ms){

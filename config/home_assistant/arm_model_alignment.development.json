@@ -1,16 +1,16 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "record_kind": "development_single_pose_arm_alignment",
-  "status": "operator_reference_captured_historical_directions_reused",
+  "status": "official_stl_zero_centered_and_persistence_verified",
   "robot_model": "alohamini1",
   "arm_model": "SO-ARM101",
   "geometry_sha256": "873a16f87cfddafd79dcc880cae26862d13614218c7cf81accd5793b4e28fc81",
   "selected_pose": "config/home_assistant/arm_home_pose.development.json",
   "direction_source": "config/home_assistant/arm_ranges.development.json",
-  "direction_source_sha256": "71caca1d55f529a4a39ef203ef10f850364c5a0e2199f43897a3dc10aebd085f",
+  "direction_source_sha256": "a7da574fcad9f6c515493b6a2410c9cc059d272d977d759d4cb387320a79da2b",
   "formula": "q_model = q_reference + sign * (raw_unwrapped - reference_raw) * 2*pi/4096",
   "raw_input_policy": "continuous unwrapped raw anchored to observed reference; modulo-only readings do not select a turn or authorize motion",
-  "encoder_home_preserved": true,
+  "encoder_home_preserved": false,
   "runtime_motion_authorized": false,
   "independent_direction_verified": false,
   "independent_pose_accuracy_verified": false,
@@ -18,119 +18,125 @@
   "arms": {
     "left": {
       "reference_raw": {
-        "base": 2034,
-        "shoulder": 2071,
-        "elbow": 2051,
-        "wrist_flex": 2102,
-        "wrist_roll": 2041,
-        "gripper": 2081
+        "base": 2048,
+        "shoulder": 2048,
+        "elbow": 2048,
+        "wrist_flex": 2048,
+        "wrist_roll": 2048,
+        "gripper": 2047
       },
       "reference_model_rad": {
         "base": 0.0,
-        "shoulder": -1.5707963267948966,
-        "elbow": 1.2217304763960306,
-        "wrist_flex": 1.5707963267948966,
-        "wrist_roll": 1.5707963267948966,
+        "shoulder": 0.0,
+        "elbow": 0.0,
+        "wrist_flex": 0.0,
+        "wrist_roll": 0.0,
         "gripper": 0.0
       },
       "alignment": {
         "base": {
           "sign": 1,
-          "home_model_rad": 0.021475731030398976
+          "home_model_rad": 0.0
         },
         "shoulder": {
           "sign": 1,
-          "home_model_rad": -1.6060778849162662
+          "home_model_rad": 0.0
         },
         "elbow": {
           "sign": -1,
-          "home_model_rad": 1.2263324187596876
+          "home_model_rad": 0.0
         },
         "wrist_flex": {
           "sign": -1,
-          "home_model_rad": 1.6536312893407212
+          "home_model_rad": 0.0
         },
         "wrist_roll": {
           "sign": 1,
-          "home_model_rad": 1.581534192310096
+          "home_model_rad": 0.0
         },
         "gripper": {
           "sign": -1,
-          "home_model_rad": 0.05062136600022616
+          "home_model_rad": -0.0015339807878856412
         }
       },
-      "reference_report": "output/home-assistant/s2/arms/left-selected-home-20261105-01.json",
-      "reference_report_sha256": "73eae02261a8b2485a9d4c3981823941099dc0200126ac596e7b1cb21f3a674d",
-      "captured_utc": "2026-11-05T08:53:47.289555+00:00",
+      "reference_report": "config/home_assistant/home_calibration/20261110/left-official-home-centered-20261110T075202Z.json",
+      "reference_report_sha256": "f25b7fc5d901903b567a177b1d6331749e897099be020411d49517ed49d2e45d",
+      "captured_utc": "2026-11-10T07:52:02.242259+00:00",
       "torque_off_verified": true,
-      "eeprom_matches_pre_reference_backup": true,
-      "sample_stability_check": "capture tool validates two scans within 8 modulo counts; first scan not retained in legacy report",
+      "sample_stability_check": "two pre-center scans, per-axis drift checks and final Home readback; original scans retained",
       "direction_basis": "historical convention reused by operator, not a new model-axis direction measurement",
       "model_tcp_in_arm_base_at_reference_m": [
-        0.1359537009838232,
-        -0.008078157892767142,
-        0.04594297339015943
+        0.39136147022015794,
+        -9.21206311457187e-06,
+        0.22646971024033283
       ],
       "tcp_frame": "official fixed gripper_frame_link; not variable contact center",
-      "reference_note_precedence": "explicit reference_note and selected pose define angles; legacy gripper-middle text is not the selected reference"
+      "reference_note_precedence": "operator-confirmed official STL zero; no pad-gap or independent angle measurement",
+      "persistence_report": "config/home_assistant/home_calibration/20261110/left-official-home-persistence-20261110T080354Z.json",
+      "persistence_report_sha256": "f1e415973f2091f7dc6cc5237689cd95769d9982d1a9aefcbee779f6233177ff",
+      "eeprom_calibration_persistence_verified": true
     },
     "right": {
       "reference_raw": {
-        "base": 2046,
-        "shoulder": 2090,
-        "elbow": 2061,
-        "wrist_flex": 2084,
-        "wrist_roll": 2084,
-        "gripper": 2052
+        "base": 2048,
+        "shoulder": 2048,
+        "elbow": 2048,
+        "wrist_flex": 2048,
+        "wrist_roll": 2047,
+        "gripper": 2048
       },
       "reference_model_rad": {
         "base": 0.0,
-        "shoulder": -1.5707963267948966,
-        "elbow": 1.2217304763960306,
-        "wrist_flex": 1.5707963267948966,
-        "wrist_roll": 1.5707963267948966,
+        "shoulder": 0.0,
+        "elbow": 0.0,
+        "wrist_flex": 0.0,
+        "wrist_roll": 0.0,
         "gripper": 0.0
       },
       "alignment": {
         "base": {
           "sign": 1,
-          "home_model_rad": 0.0030679615757712823
+          "home_model_rad": 0.0
         },
         "shoulder": {
           "sign": 1,
-          "home_model_rad": -1.6352235198860936
+          "home_model_rad": 0.0
         },
         "elbow": {
           "sign": -1,
-          "home_model_rad": 1.241672226638544
+          "home_model_rad": 0.0
         },
         "wrist_flex": {
           "sign": -1,
-          "home_model_rad": 1.6260196351587797
+          "home_model_rad": 0.0
         },
         "wrist_roll": {
           "sign": 1,
-          "home_model_rad": 1.5155730184310134
+          "home_model_rad": 0.0015339807878856412
         },
         "gripper": {
           "sign": -1,
-          "home_model_rad": 0.006135923151542565
+          "home_model_rad": 0.0
         }
       },
-      "reference_report": "output/home-assistant/s2/arms/right-selected-home-20261105-01.json",
-      "reference_report_sha256": "1e8c0e7aa23415b6c64fc0620a9a2e91c5c1c597ccd15cbfd2d129339d219fd7",
-      "captured_utc": "2026-11-05T08:53:47.523983+00:00",
+      "reference_report": "config/home_assistant/home_calibration/20261110/right-official-home-centered-20261110T080222Z.json",
+      "reference_report_sha256": "8bf74622f3d60e7d6d384a26acf48efa622046108cc7b1dcdac8859d66a960d9",
+      "captured_utc": "2026-11-10T08:02:22.496406+00:00",
       "torque_off_verified": true,
-      "eeprom_matches_pre_reference_backup": true,
-      "sample_stability_check": "capture tool validates two scans within 8 modulo counts; first scan not retained in legacy report",
+      "sample_stability_check": "two pre-center scans, per-axis drift checks and final Home readback; original scans retained",
       "direction_basis": "historical convention reused by operator, not a new model-axis direction measurement",
       "model_tcp_in_arm_base_at_reference_m": [
-        0.1359537009838232,
-        -0.008078157892767142,
-        0.04594297339015943
+        0.39136147022015794,
+        -9.21206311457187e-06,
+        0.22646971024033283
       ],
       "tcp_frame": "official fixed gripper_frame_link; not variable contact center",
-      "reference_note_precedence": "explicit reference_note and selected pose define angles; legacy gripper-middle text is not the selected reference"
+      "reference_note_precedence": "operator-confirmed official STL zero; no pad-gap or independent angle measurement",
+      "persistence_report": "config/home_assistant/home_calibration/20261110/right-official-home-persistence-20261110T080354Z.json",
+      "persistence_report_sha256": "e0a0d01eecf09ff15ae615f95bb8c821f528bf1ef53321481a9724dff33085ed",
+      "eeprom_calibration_persistence_verified": true
     }
-  }
+  },
+  "home_recalibrated": true,
+  "assembly_revision": "mini1-fixed-d415-official-home-20261110"
 }

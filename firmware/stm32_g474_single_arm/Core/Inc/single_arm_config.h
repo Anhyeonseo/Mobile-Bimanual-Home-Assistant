@@ -11,6 +11,10 @@
 #define HOST_MOBILE_BASE_TELEOP_ONLY 0
 #endif
 
+#ifndef HOST_MOBILE_BASE_PRESERVE_HOLD
+#define HOST_MOBILE_BASE_PRESERVE_HOLD 0
+#endif
+
 #ifndef HOST_MOBILE_BUS_INSPECTION_ONLY
 #define HOST_MOBILE_BUS_INSPECTION_ONLY 0
 #endif
@@ -25,6 +29,10 @@
 
 #ifndef HOST_LEFT_ONLY_CALIBRATION_ONLY
 #define HOST_LEFT_ONLY_CALIBRATION_ONLY 0U
+#endif
+
+#ifndef HOST_S3_LEFT_GRIP_BENCH
+#define HOST_S3_LEFT_GRIP_BENCH 0U
 #endif
 
 #ifndef HOST_S2_OBSERVER_ONLY
@@ -305,6 +313,15 @@
  */
 #define SERVO_SHOULDER_TORQUE_LIMIT_RAW UINT16_C(900)
 #define SERVO_ELBOW_TORQUE_LIMIT_RAW UINT16_C(800)
+
+/* Isolated S3 candidate: match the supported rigid-contact bench's output
+ * ceiling. Servo_ConfigureForTrajectory and the right-bus setup read this
+ * register back before ENABLE. This is not a force calibration. */
+#if HOST_S3_STATIONARY_PICK
+#define SERVO_GRIPPER_TORQUE_LIMIT_RAW UINT16_C(80)
+#else
+#define SERVO_GRIPPER_TORQUE_LIMIT_RAW UINT16_C(150)
+#endif
 
 /*
  * STS3215 Goal_Speed (address 46-47). Feetech convention: 0 = unlimited,

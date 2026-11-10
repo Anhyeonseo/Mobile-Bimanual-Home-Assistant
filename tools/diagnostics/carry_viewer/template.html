@@ -1,0 +1,26 @@
+<div id="carry-capture-view">
+  <h2>리모컨 집기 경로 검토</h2>
+  <div class="viz-controls">
+    <label class="form-label">계산 조건<select class="form-select" data-role="scenario"></select></label>
+    <label class="form-label">보는 방향<select class="form-select" data-role="view"><option value="iso">입체</option><option value="side">옆</option><option value="top">위</option></select></label>
+  </div>
+  <div class="carry-scene"><canvas data-role="mesh" role="img" aria-label="현재 촬영으로 계산한 로봇 형상"></canvas><svg data-role="overlay" role="img" aria-label="관측한 탁자, 리모컨과 집게 경로"></svg></div>
+  <div class="viz-row text-small"><span>● 왼팔</span><span data-role="legend-target">□ 리모컨</span><span data-role="legend-depth">· 관측한 주변 표면</span></div>
+  <label class="form-label">계산 단계 <output data-role="stage" aria-live="polite"></output><input class="form-range" type="range" min="0" max="0" value="0" step="1" data-role="progress"></label>
+  <div data-role="result" aria-live="polite"></div>
+  <div class="carry-photo"><img data-role="photo" src="__PHOTO__" alt="이번 RGB-D 촬영의 리모컨"><span class="text-small">__CAPTURE__ · 모터 이동 0회<br>가상 높이는 실물 이동을 뜻하지 않음</span></div>
+  <script type="application/json" data-role="data">__DATA__</script>
+</div>
+<style>
+#carry-capture-view {display:grid;gap:calc(var(--font-size-base,14px)*.75);--s2-lift-moving:var(--viz-series-1);}
+#carry-capture-view .carry-scene {position:relative;width:100%;height:440px;}
+#carry-capture-view .carry-scene canvas,#carry-capture-view .carry-scene svg {position:absolute;inset:0;width:100%;height:100%;}
+#carry-capture-view .carry-photo {display:flex;align-items:center;gap:calc(var(--font-size-base,14px)*.75);flex-wrap:wrap;}
+#carry-capture-view .carry-photo img {width:180px;max-width:100%;height:auto;}
+#carry-capture-view [data-role="legend-target"] {color:var(--viz-series-2);}
+#carry-capture-view [data-role="legend-depth"] {color:var(--muted-foreground);}
+@media(max-width:450px){#carry-capture-view .carry-scene {height:350px;}}
+</style>
+<script>__KINEMATICS__</script>
+<script>__RENDERER__</script>
+<script>__VIEWER__</script>

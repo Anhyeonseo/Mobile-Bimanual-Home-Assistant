@@ -22,6 +22,9 @@ static int32_t s1_previous_output_urad[12];
 #include "right_servo_bus.h"
 #include "servo_bus.h"
 #include "timebase.h"
+#if HOST_S3_STATIONARY_PICK
+#include "s3_platform_snapshot.h"
+#endif
 #include "actuator_core/buffered_command_route.h"
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
 #include "bimanual_servo_dispatch.h"
@@ -2578,6 +2581,10 @@ static void Host_ValidateV2StreamOpen(const actuator_frame_t *request)
 #if HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD && HOST_BIMANUAL_DMA_DISPATCH_BUILD
 static bool Host_PrepareArmMotionReference(void)
 {
+    #if HOST_S3_STATIONARY_PICK
+    if(!MobileArmObserver_Suspend())return false;
+    S3Platform_Enable(true);
+#endif
     if (!MobileBoard_PrepareArmMotion(host_v2_shadow_executor_anchor_urad)) return false;
     if (!MobileArmObserver_HasStarted()) return true;
     uint16_t left[6], right[6]; uint8_t failed;
@@ -2749,8 +2756,41 @@ static uint8_t Host_V2TickReached(uint32_t now, uint32_t target)
 }
 #endif
 
-static void Host_RequestV2CoordinatedStop(void)
+#if HOST_S3_STATIONARY_PICK
+static uint32_t s3_first_stop_line, s3_first_stop_tick, s3_first_stop_flags;
+static uint32_t s3_stop_dispatch_count, s3_stop_tracking_count, s3_read_window_deferrals;
+static bool s3_first_stop_recorded;
+static uint32_t Host_S3RuntimeFlags(void)
 {
+    return (host_v2_executor_clock_active ? 1U : 0U) |
+        (host_v2_terminal_settle_active ? 2U : 0U) |
+        ((!host_v2_executor_clock_active && !host_v2_terminal_settle_active &&
+          host_v2_shadow_anchor_ready && !host_stop_latched) ? 4U : 0U) |
+        (host_stop_latched ? 8U : 0U) |
+        (BimanualTrackingFeedback_Pending() ? 16U : 0U) |
+        (MobileArmObserver_OwnsFeedback() ? 32U : 0U);
+}
+static void Host_RecordS3Stop(uint32_t line)
+{
+    if (s3_first_stop_recorded) return;
+    s3_first_stop_recorded = true;
+    s3_first_stop_line = line;
+    s3_first_stop_tick = HAL_GetTick();
+    s3_first_stop_flags = Host_S3RuntimeFlags();
+    const actuator_bimanual_dispatch_snapshot_t *d = BimanualServoDispatch_GetSnapshot();
+    const BimanualTrackingFeedbackSnapshot *t = BimanualTrackingFeedback_GetSnapshot();
+    s3_stop_dispatch_count = d ? d->completed_count : 0U;
+    s3_stop_tracking_count = t ? t->completed_pairs : 0U;
+}
+#define Host_RequestV2CoordinatedStop() Host_RequestV2CoordinatedStopAt(__LINE__)
+static void Host_RequestV2CoordinatedStopAt(uint32_t line)
+#else
+static void Host_RequestV2CoordinatedStop(void)
+#endif
+{
+#if HOST_S3_STATIONARY_PICK
+    Host_RecordS3Stop(line);
+#endif
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
     BimanualServoDispatch_LatchFault();
     host_v2_coordinated_stop_pending = 1U;
@@ -2764,7 +2804,9 @@ static void Host_RequestV2CoordinatedStop(void)
 static uint8_t Host_PerformV2CoordinatedStop(uint8_t dispatch_fault)
 {
     uint8_t status = 0U;
-
+#if HOST_S3_STATIONARY_PICK
+    if(!MobileArmObserver_Suspend())status=1U;
+#endif
     if (dispatch_fault != 0U)
     {
         BimanualServoDispatch_LatchFault();
@@ -2927,7 +2969,7 @@ static uint32_t Host_V2TrackingCompletedPairs(void)
     return (tracking == NULL) ? 0U : tracking->completed_pairs;
 }
 
-static void Host_ServiceV2TrackingFeedback(void)
+static void Host_ServiceV2TrackingFeedback(bool allow_start)
 {
     if (MobileBoard_StopActive() || MobileArmObserver_OwnsFeedback()) return;
     BimanualTrackingFeedbackSample sample;
@@ -3041,7 +3083,7 @@ static void Host_ServiceV2TrackingFeedback(void)
     }
 
     dispatch = BimanualServoDispatch_GetSnapshot();
-    if (BimanualTrackingFeedback_CanStart() &&
+    if (allow_start && BimanualTrackingFeedback_CanStart() &&
         (dispatch != NULL) && !dispatch->active && !dispatch->faulted &&
         host_v2_stream_executor.output_valid &&
 #if HOST_BIMANUAL_TERMINAL_SETTLE_BUILD
@@ -3061,15 +3103,30 @@ static void Host_ServiceV2TrackingFeedback(void)
           (host_v2_stream_executor.diagnostics.state ==
            ACTUATOR_V2_EXECUTOR_SUCCEEDED))))
     {
-        const uint8_t joint = host_v2_tracking_next_joint;
-        if (BimanualTrackingFeedback_Start(
+        uint8_t joint = host_v2_tracking_next_joint;
+#if HOST_S3_STATIONARY_PICK
+        /* The same cooperative loop services feedback BEFORE the executor.
+         * An idle UART does not mean a read fits before the next 5 ms output.
+         * Never start a new read while that event is pending or with less than
+         * the existing 4 ms reply deadline, 200 us bounded retirement and
+         * 250 us launch margin remaining. Output timing and stale
+         * feedback limits remain unchanged; a late read is deferred, not sent. */
+        if (host_v2_executor_clock_active && !ControlTick_ReadWindowAvailable(4450U))
+        {
+            if (s3_read_window_deferrals != UINT32_MAX) s3_read_window_deferrals++;
+            return;
+        }
+        joint=S3Platform_Select(joint);
+#endif
+        HAL_StatusTypeDef started = BimanualTrackingFeedback_Start(
                 joint,
                 HAL_GetTick(),
                 host_v2_last_left_raw,
                 host_v2_last_right_raw,
-                host_v2_output_urad[joint],
-                host_v2_output_urad[
-                    joint + SINGLE_ARM_JOINT_COUNT]) != HAL_OK)
+                host_v2_output_urad[joint % SINGLE_ARM_JOINT_COUNT],
+                host_v2_output_urad[(joint % SINGLE_ARM_JOINT_COUNT) + SINGLE_ARM_JOINT_COUNT]);
+        if (started == HAL_BUSY) return; /* No request sent; retry in a later read slot. */
+        if (started != HAL_OK)
         {
             Host_RequestV2CoordinatedStop();
             return;
@@ -3081,8 +3138,8 @@ static void Host_ServiceV2TrackingFeedback(void)
             host_v2_tracking_last_dispatch_completed =
                 dispatch->completed_count;
         }
-        host_v2_tracking_next_joint = (uint8_t)(
-            (joint + 1U) % SINGLE_ARM_JOINT_COUNT);
+        if(joint < SINGLE_ARM_JOINT_COUNT)
+            host_v2_tracking_next_joint = (uint8_t)((joint + 1U) % SINGLE_ARM_JOINT_COUNT);
     }
 
 #if HOST_BIMANUAL_RESIDENT_FINITE_BUILD
@@ -3123,6 +3180,14 @@ static void Host_ServiceV2TrackingFeedback(void)
             );
             host_v2_shadow_anchor_ready = 1U;
             host_v2_terminal_settle_active = 0U;
+#if HOST_S3_STATIONARY_PICK
+            /* Contact prevents reaching the squeeze goal. Reopening a stream
+             * from the measured jaw would release pressure at each segment.
+             * Position/settling evidence remains measured above. Retain only
+             * the two commanded jaw anchors; do not relax arm tracking. */
+            host_v2_shadow_executor_anchor_urad[5] = host_v2_output_urad[5];
+            host_v2_shadow_executor_anchor_urad[11] = host_v2_output_urad[11];
+#endif
             BimanualTrackingFeedback_End();
             MobileArmObserver_Resume();
         }
@@ -3157,6 +3222,19 @@ static void Host_ServiceV2TrackingFeedback(void)
 }
 #endif
 
+#if HOST_S3_STATIONARY_PICK
+static bool Host_V2OutputReady(const ControlTickEvent *event)
+{
+    /* DMA can complete between the ordinary feedback poll and TIM6 firing.
+     * Consume that reply now, without admitting another read. A genuinely
+     * pending/failed read or missed tick still stops before any new output. */
+    Host_ServiceV2TrackingFeedback(false);
+    return !host_stop_latched && !host_v2_coordinated_stop_pending &&
+        event->missed_count == 0U && BimanualServoDispatch_Ready() &&
+        !BimanualTrackingFeedback_Pending();
+}
+#endif
+
 static void Host_ServiceV2Executor(void)
 {
 #if HOST_BIMANUAL_DMA_DISPATCH_BUILD
@@ -3171,12 +3249,16 @@ static void Host_ServiceV2Executor(void)
     {
         return;
     }
+#if HOST_S3_STATIONARY_PICK
+    if (!Host_V2OutputReady(&event))
+#else
     if ((event.missed_count != 0U) ||
         (BimanualServoDispatch_Ready() == 0U)
 #if HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD
         || (BimanualTrackingFeedback_Pending() != 0U)
 #endif
        )
+#endif
     {
         Host_RequestV2CoordinatedStop();
         return;
@@ -3841,11 +3923,19 @@ static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
 #if HOST_DEVICE_INVENTORY_BUILD
 static bool Host_InventoryPermitted(void)
 {
-    return host_stop_latched == 0U && host_binary_servos_configured == 0U &&
+    return
+#if !HOST_S3_STATIONARY_PICK
+        host_stop_latched == 0U &&
+#endif
+        !MobileArmObserver_OwnsFeedback() && host_binary_servos_configured == 0U &&
         host_right_arm_output_active == 0U && host_binary_motion.active == 0U &&
         Host_BufferedExecutionIsActive() == 0U && host_v2_executor_ready != 0U &&
         host_v2_executor_clock_active == 0U &&
-        host_v2_stream_executor.diagnostics.state == ACTUATOR_V2_EXECUTOR_CLOSED &&
+        (host_v2_stream_executor.diagnostics.state == ACTUATOR_V2_EXECUTOR_CLOSED
+#if HOST_S3_STATIONARY_PICK
+         || host_stop_latched != 0U
+#endif
+        ) &&
         !MobileBoard_IsConfigured() && !MobileBoard_StopActive();
 }
 #endif
@@ -3929,6 +4019,60 @@ static void Host_HandleBinaryFrame(
         case ACTUATOR_V2_MSG_MOBILE_REQUEST:
         {
             actuator_frame_t response;
+#if HOST_S3_STATIONARY_PICK
+            if(request->payload_length==36 && request->payload[0]=='A' && request->payload[1]=='F'){
+                bool valid=request->flags==0;
+                for(unsigned i=2;i<36;i++)if(request->payload[i])valid=false;
+                memset(&response,0,sizeof(response));
+                response.message_type=ACTUATOR_V2_MSG_MOBILE_RESPONSE;
+                response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();
+                response.payload_length=1;response.payload[0]=2;
+                if(valid){
+                    uint32_t values[17]={1U};
+                    Servo_InMotionFailureCopy(values+1);
+                    RightServoBus_InMotionFailureCopy(values+9);
+                    response.payload[0]=0;response.payload_length=69;
+                    for(unsigned j=0;j<17;j++)for(unsigned b=0;b<4;b++)
+                        response.payload[1+j*4+b]=(uint8_t)(values[j]>>(8*b));
+                }
+                (void)Host_SendBinaryFrame(&response);break;
+            }
+            if(request->payload_length==36 && request->payload[0]=='A' && request->payload[1]=='R'){
+                bool valid=request->flags==0;
+                for(unsigned i=2;i<36;i++)if(request->payload[i])valid=false;
+                memset(&response,0,sizeof(response));
+                response.message_type=ACTUATOR_V2_MSG_MOBILE_RESPONSE;
+                response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();
+                response.payload_length=1;response.payload[0]=2;
+                if(valid){
+                    uint32_t values[9]={1U,Host_S3RuntimeFlags(),HAL_GetTick(),s3_first_stop_line,
+                        s3_first_stop_tick,s3_first_stop_flags,s3_stop_dispatch_count,
+                        s3_stop_tracking_count,s3_read_window_deferrals};
+                    response.payload[0]=0;response.payload_length=37;
+                    for(unsigned j=0;j<9;j++)for(unsigned b=0;b<4;b++)
+                        response.payload[1+j*4+b]=(uint8_t)(values[j]>>(8*b));
+                }
+                (void)Host_SendBinaryFrame(&response);break;
+            }
+            if(request->payload_length==36 && request->payload[0]=='A' && request->payload[1]=='P'){
+                memset(&response,0,sizeof(response));response.message_type=ACTUATOR_V2_MSG_MOBILE_RESPONSE;
+                response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();response.payload_length=1;
+                response.payload[0]=2;
+                bool valid=request->flags==0 && request->payload[2]<=2;
+                for(unsigned i=3;i<36;i++)if(request->payload[i])valid=false;
+                if(valid){
+                    uint8_t op=request->payload[2];bool ok=true;
+                    if(op && (host_v2_executor_clock_active || host_v2_terminal_settle_active))ok=false;
+                    if(ok && op==1){
+                        if(host_stop_latched)ok=false;
+                        else { S3Platform_Enable(true);MobileArmObserver_Resume(); }
+                    }
+                    if(ok && op==2){ok=MobileArmObserver_Suspend();S3Platform_Enable(false);}
+                    if(ok){response.payload[0]=0;S3Platform_Copy(HAL_GetTick(),response.payload+1);response.payload_length=45;}
+                }
+                (void)Host_SendBinaryFrame(&response);break;
+            }
+#endif
             if(request->payload_length==36 && request->payload[0]=='A' && request->payload[1]=='E') {
                 memset(&response,0,sizeof(response));response.message_type=ACTUATOR_V2_MSG_MOBILE_RESPONSE;
                 response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();response.payload_length=1;
@@ -4722,7 +4866,10 @@ void BinaryControl_Service(void)
     Host_ServiceBinaryMotion();
 #if HOST_PROTOCOL_V2_EXECUTOR_VALIDATION_BUILD
 #if HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD
-    Host_ServiceV2TrackingFeedback();
+    Host_ServiceV2TrackingFeedback(true);
+#if HOST_S3_STATIONARY_PICK
+    if(!host_stop_latched && !MobileArmObserver_Poll())Host_RequestV2CoordinatedStop();
+#endif
 #endif
     Host_ServiceV2Executor();
 #endif
@@ -4778,6 +4925,10 @@ uint8_t BinaryControl_StopIsLatched(void)
 
 void BinaryControl_LatchStop(void)
 {
+#if HOST_S3_STATIONARY_PICK
+    /* Preserve before cleanup changes bus ownership/diagnostic counters. */
+    Host_RecordS3Stop(0U);
+#endif
     MobileBoard_RequestStop();
     MobileServoOutput_Stop();
     actuator_lift_endpoint_stop(MobileBoard_LiftEndpoint());

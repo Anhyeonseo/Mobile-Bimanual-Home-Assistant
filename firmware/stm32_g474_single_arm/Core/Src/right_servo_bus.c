@@ -1,7 +1,12 @@
 #include "right_servo_bus.h"
+#include "servo_dma_cursor.h"
 #include "actuator_core/device_inventory.h"
 #include "single_arm_config.h"
 #include "servo_transport.h"
+#if HOST_S3_STATIONARY_PICK
+#include "servo_feedback_completion.h"
+#include "timebase.h"
+#endif
 #include "actuator_core/sts3215_packet.h"
 
 #if HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD
@@ -33,6 +38,11 @@ static UART_HandleTypeDef *right_servo_uart = NULL;
 static uint32_t right_service_token;
 #if HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD
 static uint32_t right_feedback_token;
+#if HOST_S3_STATIONARY_PICK
+static uint32_t right_servo_telemetry_failure[8];
+void RightServoBus_InMotionFailureCopy(uint32_t out[8])
+{ memcpy(out, right_servo_telemetry_failure, sizeof(right_servo_telemetry_failure)); }
+#endif
 #endif
 static RightServoDiscoverySnapshot right_servo_snapshot = {0};
 
@@ -58,6 +68,9 @@ typedef struct
     uint32_t started_at_ms;
     uint8_t request[RIGHT_SERVO_REQUEST_SIZE];
     ServoRxWindow window;
+#if HOST_S3_STATIONARY_PICK
+    ServoFeedbackCompletion completion;
+#endif
 } RightServoTelemetry;
 
 static volatile uint8_t right_servo_rx_ring[
@@ -82,35 +95,12 @@ static uint8_t RightServo_TelemetryDmaActive(void)
 
 static uint32_t RightServo_TelemetryProducerAbsolute(void)
 {
-    uint32_t interrupt_mask;
-    uint32_t wraps;
-    uint16_t remaining;
-    uint32_t pending_tc;
-    uint32_t absolute;
-
     if (RightServo_TelemetryDmaActive() == 0U)
     {
         return 0U;
     }
-    interrupt_mask = __get_PRIMASK();
-    __disable_irq();
-    wraps = right_servo_rx_wrap_count;
-    remaining = (uint16_t)__HAL_DMA_GET_COUNTER(right_servo_uart->hdmarx);
-    pending_tc = __HAL_DMA_GET_FLAG(
-        right_servo_uart->hdmarx,
-        __HAL_DMA_GET_TC_FLAG_INDEX(right_servo_uart->hdmarx));
-    if ((pending_tc != 0U) && (remaining != 0U))
-    {
-        wraps++;
-    }
-    absolute = (wraps * RIGHT_SERVO_TELEMETRY_RING_CAPACITY) +
-        (RIGHT_SERVO_TELEMETRY_RING_CAPACITY - remaining);
-    __DMB();
-    if (interrupt_mask == 0U)
-    {
-        __enable_irq();
-    }
-    return absolute;
+    return ServoDmaCursor_Read(right_servo_uart->hdmarx,
+        &right_servo_rx_wrap_count, RIGHT_SERVO_TELEMETRY_RING_CAPACITY);
 }
 
 static HAL_StatusTypeDef RightServo_TelemetryFail(HAL_StatusTypeDef status)
@@ -231,6 +221,16 @@ RightServoReadStatus RightServoBus_ReadInventoryBlock(uint8_t id, unsigned block
     return RightServo_ReadData(id, device_inventory_address(block), device_inventory_length(block), data);
 }
 
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+HAL_StatusTypeDef RightServoBus_HoldRead(uint8_t id,uint8_t address,uint8_t length,uint8_t *data)
+{
+    if(id<1 || id>6 || !data || !((address==33 && length==1) || (address==40 && length==8) ||
+       ((address==3 || address==56) && length==4)))
+        return HAL_ERROR;
+    return RightServo_ReadData(id,address,length,data)==RIGHT_SERVO_READ_OK?HAL_OK:HAL_ERROR;
+}
+#endif
+
 static RightServoReadStatus RightServo_ReadPosition(
     uint8_t servo_id, uint16_t *position)
 {
@@ -292,6 +292,15 @@ static HAL_StatusTypeDef RightServo_WriteData(
     if (status == HAL_OK && ended != HAL_OK) return HAL_BUSY;
     return status;
 }
+
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+HAL_StatusTypeDef RightServoBus_HoldSetupWrite(uint8_t id,uint8_t address,const uint8_t *data,uint8_t length)
+{
+    /* Exact packet permission is independently enforced by ServoTransport. */
+    if(id<1 || id>6 || !data || !((address==40 && length==1) || (address==42 && length==2)))return HAL_ERROR;
+    return RightServo_WriteData(id,address,data,length);
+}
+#endif
 
 #if HOST_BIMANUAL_CALIBRATION_ONLY || HOST_S2_OBSERVER_ONLY
 HAL_StatusTypeDef RightServoBus_CalibrationRead(uint8_t id, uint8_t address,
@@ -848,9 +857,15 @@ HAL_StatusTypeDef RightServoBus_PreparePeriodicReader(void)
 
 HAL_StatusTypeDef RightServoBus_InMotionTelemetryBegin(void)
 {
+#if HOST_S3_STATIONARY_PICK
+    if (right_feedback_token != 0U || right_servo_telemetry.enabled) return HAL_BUSY;
+    uint32_t *setup_token = &right_feedback_token;
+#else
+    uint32_t *setup_token = &right_service_token;
+#endif
     if (right_reader_shared || !ServoTransport_ServiceAllowed())
     {
-        if (!ServoTransport_BeginReadOnly(right_servo_uart, &right_service_token)) return HAL_BUSY;
+        if (!ServoTransport_BeginReadOnly(right_servo_uart, setup_token)) return HAL_BUSY;
         HAL_StatusTypeDef status = HAL_ERROR;
         if (RightServo_TelemetryDmaActive() && !right_servo_telemetry.enabled &&
             !right_servo_uart_async_errors && !right_servo_dma_async_error)
@@ -859,15 +874,15 @@ HAL_StatusTypeDef RightServoBus_InMotionTelemetryBegin(void)
             memset(&right_servo_telemetry_snapshot, 0, sizeof(right_servo_telemetry_snapshot));
             right_servo_telemetry.enabled = 1U; status = HAL_OK;
         }
-        if (ServoTransport_End(right_servo_uart, right_service_token, false) != HAL_OK) return HAL_ERROR;
-        right_service_token = 0U;
+        if (ServoTransport_End(right_servo_uart, *setup_token, false) != HAL_OK) return HAL_ERROR;
+        *setup_token = 0U;
         return status;
     }
-    if (!ServoTransport_BeginService(right_servo_uart, ACTUATOR_BUS_WORK_FEEDBACK, &right_service_token))
+    if (!ServoTransport_BeginService(right_servo_uart, ACTUATOR_BUS_WORK_FEEDBACK, setup_token))
         return HAL_BUSY;
     HAL_StatusTypeDef status = RightServoBus_InMotionTelemetryBeginOwned();
-    HAL_StatusTypeDef ended = ServoTransport_End(right_servo_uart, right_service_token, status != HAL_OK);
-    if (ended == HAL_OK) right_service_token = 0U;
+    HAL_StatusTypeDef ended = ServoTransport_End(right_servo_uart, *setup_token, status != HAL_OK);
+    if (ended == HAL_OK) *setup_token = 0U;
     if (status == HAL_OK && ended != HAL_OK) return HAL_BUSY;
     return status;
 }
@@ -914,7 +929,11 @@ uint8_t RightServoBus_InMotionTelemetryCanStart(void)
 
 uint8_t RightServoBus_InMotionTelemetryPending(void)
 {
-    return (right_servo_telemetry.state != RIGHT_SERVO_TELEMETRY_IDLE) ?
+    return
+#if HOST_S3_STATIONARY_PICK
+        right_feedback_token != 0U ||
+#endif
+        (right_servo_telemetry.state != RIGHT_SERVO_TELEMETRY_IDLE) ?
         1U : 0U;
 }
 
@@ -951,6 +970,10 @@ static HAL_StatusTypeDef RightServoBus_InMotionTelemetryStartOwned(
     }
     ServoRxWindow_Init(
         &telemetry->window, telemetry->servo_id, 2U, transaction_start);
+    telemetry->state = RIGHT_SERVO_TELEMETRY_TX_PENDING;
+#if HOST_S3_STATIONARY_PICK
+    ServoFeedbackCompletion_Start(&telemetry->completion, Timebase_NowUs(), RightServo_TelemetryProducerAbsolute());
+#endif
     if (ServoTransport_TransmitIT(
             right_servo_uart, right_feedback_token,
             telemetry->request,
@@ -958,7 +981,7 @@ static HAL_StatusTypeDef RightServoBus_InMotionTelemetryStartOwned(
     {
         return RightServo_TelemetryFail(HAL_ERROR);
     }
-    telemetry->state = RIGHT_SERVO_TELEMETRY_TX_PENDING;
+
     right_servo_telemetry_snapshot.requested_samples++;
     return HAL_OK;
 }
@@ -1095,6 +1118,23 @@ HAL_StatusTypeDef RightServoBus_InMotionTelemetryPoll(
     uint32_t now_ms,
     const uint16_t commanded_positions[RIGHT_SERVO_BUS_JOINT_COUNT])
 {
+#if HOST_S3_STATIONARY_PICK
+    if (right_feedback_token == 0U) return HAL_OK;
+    ServoFeedbackCompletion *completion = &right_servo_telemetry.completion;
+    uint32_t uart_errors = right_servo_uart_async_errors | right_servo_uart->ErrorCode;
+    uint32_t dma_errors = right_servo_dma_async_error | (right_servo_uart->hdmarx ? right_servo_uart->hdmarx->ErrorCode : 0U);
+    uint32_t phase = completion->completing ? 3U : (right_servo_telemetry.tx_completed ? 2U : 1U);
+    HAL_StatusTypeDef parsed = completion->completing ? completion->result :
+        RightServoBus_InMotionTelemetryPollOwned(now_ms, commanded_positions);
+    HAL_StatusTypeDef result = ServoFeedbackCompletion_Poll(completion, right_servo_uart, &right_feedback_token,
+        parsed, Timebase_NowUs(), RightServo_TelemetryProducerAbsolute(),
+        RightServo_TelemetryDmaActive() && right_servo_uart_async_errors == 0U && right_servo_uart->ErrorCode == 0U && right_servo_dma_async_error == 0U && right_servo_uart->hdmarx->ErrorCode == 0U, right_servo_telemetry.tx_completed != 0U);
+    ServoFeedbackCompletion_Record(completion, right_servo_telemetry_failure, now_ms,
+        right_servo_telemetry.joint_index, parsed == HAL_TIMEOUT ? parsed : result,
+        (uint32_t)right_servo_telemetry.window.parser.last_reject |
+            ((uint32_t)right_servo_telemetry.window.parser.servo_status << 8), uart_errors, dma_errors, phase);
+    return result;
+#else
     HAL_StatusTypeDef status = RightServoBus_InMotionTelemetryPollOwned(now_ms, commanded_positions);
     if (right_feedback_token != 0U && status != HAL_OK && status != HAL_BUSY)
     {
@@ -1110,5 +1150,6 @@ HAL_StatusTypeDef RightServoBus_InMotionTelemetryPoll(
         if (status == HAL_OK && ended != HAL_OK) return ended;
     }
     return status;
+#endif
 }
 #endif

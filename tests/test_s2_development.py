@@ -88,6 +88,34 @@ def test_development_never_passes_strict_acceptance(setup):
     with pytest.raises(ValueError):dev.validate(p,g)
 
 
+def test_operator_camera_height_shift_is_base_z_only_and_applied_once(setup):
+    g,p,_,_=setup
+    installation=json.loads((ROOT/'config/home_assistant/installation.development.json').read_text())
+    choice=installation['d415']['development_transform_choice']
+    nominal=s2.rigid(choice['base_from_optical']);adjusted=dev.camera_transform(choice)
+    assert choice['operator_height_adjustment']['offset_m']==-.0091
+    np.testing.assert_allclose(adjusted[:3,:3],nominal[:3,:3],atol=0)
+    for point in ([0,0,.4],[.1,-.1,.6],[-.2,.2,1.]):
+        delta=adjusted@np.r_[point,1]-nominal@np.r_[point,1]
+        np.testing.assert_allclose(delta,[0,0,-.0091,0],atol=1e-12)
+    np.testing.assert_allclose(p['base_from_optical'],adjusted,atol=1e-12)
+    np.testing.assert_allclose(dev.build(ROOT)['base_from_optical'],adjusted,atol=1e-12)
+    assert not p['strict_commissioning_passed'] and not p['camera_height_adjustment']['measured_extrinsic']
+    bad=deepcopy(p);bad['base_from_optical'][2][3]-=.0091
+    bad['calibration_id']='s2-dev-'+s2.digest({k:v for k,v in bad.items() if k!='calibration_id'})[:24]
+    with pytest.raises(ValueError,match='height adjustment differs'):dev.validate(bad,g)
+
+
+@pytest.mark.parametrize('fault',['unconfirmed','wrong_axis','oversize'])
+def test_camera_height_adjustment_requires_bounded_explicit_evidence(fault):
+    choice=deepcopy(json.loads((ROOT/'config/home_assistant/installation.development.json').read_text())['d415']['development_transform_choice'])
+    adjustment=choice['operator_height_adjustment']
+    if fault=='unconfirmed':adjustment['operator_confirmed']=False
+    if fault=='wrong_axis':adjustment['axis']='x'
+    if fault=='oversize':adjustment['offset_m']=-.1
+    with pytest.raises(ValueError):dev.camera_transform(choice)
+
+
 def next_snapshot(snap):
     s=deepcopy(snap);s['sequence']+=1;s['capture_id']='capture-'+str(s['sequence'])
     for k in ['camera_time_s','lift_time_s','received_s']:s[k]+=.05
@@ -181,3 +209,30 @@ def test_viewer_uses_same_mounts_reference_and_prismatic_axis(setup):
         np.testing.assert_allclose(js['frames']['camera'],p['base_from_optical'])
     text=v.viewer.render(data)
     assert '/*__S2_' not in text and len(text.encode())<1_000_000
+
+
+@pytest.mark.parametrize('side', ['left','right'])
+def test_control_model_conversion_preserves_home_and_continuous_encoder_branch(setup, side):
+    from home_robot_tasks import s2_geometry as geo
+    geometry, profile, _, _ = setup
+    arm = profile['arms'][side]
+    ranges = json.loads((ROOT/'config/home_assistant/arm_ranges.development.json').read_text())['arms'][side]
+    for j in geo.JOINTS:
+        m = arm['alignment'][j]
+        assert m['raw_to_control_sign'] == ranges[j]['positive_raw_direction']
+        assert m['control_to_model_sign'] == (-1 if j in ('elbow','wrist_flex','gripper') else 1)
+        assert geo.model_angle_from_raw(arm['reference_raw'][j],m,j) == pytest.approx(arm['reference_model_rad'][j])
+        for raw in (-1,0,200,500,2048,4095,4096,4097):
+            angle = geo.model_angle_from_raw(raw,m,j)
+            control = geo.control_from_model(angle,m)
+            assert control == pytest.approx(ranges[j]['positive_raw_direction']*(raw-2048)*np.pi/2048)
+            assert geo.model_from_control(control,m) == pytest.approx(angle)
+            assert 2048+round(ranges[j]['positive_raw_direction']*control*2048/np.pi) == raw
+        assert geo.model_angle_from_raw(500,m,j)-geo.model_angle_from_raw(200,m,j) == pytest.approx(300*np.pi/2048)
+    raw = {s:dict(profile['arms'][s]['reference_raw']) for s in geo.ARMS}
+    raw[side]['elbow'] += 30
+    raw[side]['gripper'] += 30
+    result = dev.evaluate(profile,geometry,raw,.51)
+    for j in ('elbow','gripper'):
+        assert result['model_joint_positions_si'][f'{side}_model_{j}'] == pytest.approx(arm['reference_model_rad'][j]+30*np.pi/2048)
+    assert result['motion_authorized'] is False

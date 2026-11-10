@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import struct
 import math
+from collections import deque
 from functools import wraps
 from threading import RLock
 import time
 from typing import Any
+from serial import SerialTimeoutException
 
 from .stream_protocol_v2 import (
     BimanualDispatchDiagnosticsV2,
@@ -76,6 +78,9 @@ class StreamValidationTransportV2:
         self._timeout_s = response_timeout_s
         self._sequence = 1
         self._rx_residual = bytearray()
+        self._write_timeout_count = 0
+        self._write_timeout_events = deque(maxlen=20)
+        self._uncertain_write = None
 
     @staticmethod
     def _now_ms() -> int:
@@ -95,17 +100,37 @@ class StreamValidationTransportV2:
     ) -> tuple[int, int]:
         sequence = self._next_sequence()
         sender_time_ms = self._now_ms()
-        self._write_packet(
-            encode_frame_v2(
-                FrameV2(
-                    message_type=message_type,
-                    sequence=sequence,
-                    sender_time_ms=sender_time_ms,
-                    payload=payload,
-                )
+        packet = encode_frame_v2(
+            FrameV2(
+                message_type=message_type,
+                sequence=sequence,
+                sender_time_ms=sender_time_ms,
+                payload=payload,
             )
         )
+        started = time.monotonic()
+        try:
+            self._write_packet(packet)
+        except SerialTimeoutException as exc:
+            # POSIX pyserial can raise *after* os.write queued the whole frame.
+            # Do not resend any bytes or assume delivery. The caller must still
+            # receive the CRC-valid, sequence/type-matched response within its
+            # existing receive deadline and validate the command's result.
+            self._write_timeout_count += 1
+            self._uncertain_write = dict(sequence=sequence,message_type=message_type.name,
+                packet_bytes=len(packet),elapsed_s=time.monotonic()-started,
+                error=str(exc),resolution='awaiting_response')
+            self._write_timeout_events.append(self._uncertain_write)
         return sequence, sender_time_ms
+
+    def write_diagnostics(self) -> dict:
+        return dict(timeout_count=self._write_timeout_count,
+                    events=[dict(event) for event in self._write_timeout_events])
+
+    def _resolve_uncertain_write(self,sequence,resolution):
+        if self._uncertain_write is not None and self._uncertain_write['sequence']==sequence:
+            self._uncertain_write['resolution']=resolution
+            self._uncertain_write=None
 
     def _write_packet(self, packet: bytes) -> None:
         # Serial.write uses the configured finite write timeout. Do not flush:
@@ -143,7 +168,11 @@ class StreamValidationTransportV2:
         )
         observed: list[str] = []
         while time.monotonic() < deadline:
-            packet = self._read_packet()
+            try:
+                packet = self._read_packet()
+            except Exception:
+                self._resolve_uncertain_write(sequence,'receive_error')
+                raise
             if packet is None:
                 continue
             try:
@@ -151,9 +180,11 @@ class StreamValidationTransportV2:
             except Exception:
                 continue
             if frame.sequence == sequence and frame.message_type is message_type:
+                self._resolve_uncertain_write(sequence,'matching_response')
                 return frame
             if len(observed) < 8:
                 observed.append(f"{frame.message_type.name}#{frame.sequence}")
+        self._resolve_uncertain_write(sequence,'response_timeout')
         raise StreamResponseTimeoutError(
             f"timeout waiting for {message_type.name} sequence={sequence} "
             f"observed={observed or 'none'}"
@@ -243,6 +274,30 @@ class StreamValidationTransportV2:
         sequence, _ = self._send(StreamMessageTypeV2.DEVICE_INVENTORY_REQUEST, packet)
         response = self._receive(sequence, StreamMessageTypeV2.DEVICE_INVENTORY_RESPONSE)
         return decode_inventory(response.payload, bus, motor_id)
+
+    @_serialized
+    def stationary_platform(self, operation=0):
+        """S3-only cached telemetry / idle reader control, never a motor write."""
+        from .stationary_telemetry import request, decode
+        sequence, _ = self._send(StreamMessageTypeV2.MOBILE_REQUEST, request(operation))
+        response = self._receive(sequence, StreamMessageTypeV2.MOBILE_RESPONSE)
+        return decode(response.payload)
+
+    @_serialized
+    def stationary_feedback_failures(self):
+        """Cached first motor-read failure on each bus; no hardware access."""
+        from .stationary_telemetry import failure_request, decode_failures
+        sequence, _ = self._send(StreamMessageTypeV2.MOBILE_REQUEST, failure_request())
+        response = self._receive(sequence, StreamMessageTypeV2.MOBILE_RESPONSE)
+        return decode_failures(response.payload)
+
+    @_serialized
+    def stationary_runtime(self):
+        """Cached readiness and first-stop record; no motor reads or writes."""
+        from .stationary_telemetry import runtime_request, decode_runtime
+        sequence, _ = self._send(StreamMessageTypeV2.MOBILE_REQUEST, runtime_request())
+        response = self._receive(sequence, StreamMessageTypeV2.MOBILE_RESPONSE)
+        return decode_runtime(response.payload)
 
     @_serialized
     def get_state(self) -> StateV2:

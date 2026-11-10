@@ -159,7 +159,7 @@
       "next_step": "S2 synchronized acquisition; precise extrinsic refinement during S3"
     },
     "development_transform_choice": {
-      "status": "nominal_model_retained_by_operator",
+      "status": "nominal_with_operator_height_adjustment",
       "source": "operator decision after rough checkerboard comparison, 2026-11-05",
       "parent_frame": "base_link",
       "child_frame": "color_camera_optical_frame",
@@ -194,9 +194,21 @@
       "use": "development reference and visualization; not accepted hardware coordinate profile",
       "measured_extrinsic": false,
       "coordinate_use_allowed": false,
-      "motion_authorized": false
+      "motion_authorized": false,
+      "operator_height_adjustment": {
+        "frame": "base_link",
+        "axis": "z",
+        "offset_m": -0.0091,
+        "operator_confirmed": true,
+        "requested_on": "2026-11-11",
+        "source": "operator requested observed 80.91 cm versus actual 80.00 cm registration correction",
+        "reference_observed_height_m": 0.8091,
+        "reference_measured_height_m": 0.8,
+        "measured_extrinsic": false,
+        "physical_validation": "pending_with_updated_grasp"
+      }
     },
-    "precision_validation_schedule": "deferred to S3 physical pick tests per operator; nominal model retained, not measured extrinsic"
+    "precision_validation_schedule": "operator-requested -9.1 mm base-Z registration applied; full extrinsic calibration and physical validation remain separate"
   },
   "lift": {
     "geometry": "config/home_assistant/lift_geometry.measured.json",

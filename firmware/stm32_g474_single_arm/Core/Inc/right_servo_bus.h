@@ -6,6 +6,10 @@
 #include <stdint.h>
 
 HAL_StatusTypeDef RightServoBus_PreparePeriodicReader(void);
+/* Only linked by the wheel/hold candidate: mode and command reads, no writes. */
+HAL_StatusTypeDef RightServoBus_HoldSetupWrite(uint8_t id,uint8_t address,const uint8_t *data,uint8_t length);
+HAL_StatusTypeDef RightServoBus_HoldRead(uint8_t id, uint8_t address,
+                                       uint8_t length, uint8_t *data);
 /* Only linked in the isolated centering image; no goal/enable/config primitive. */
 HAL_StatusTypeDef RightServoBus_CalibrationRead(uint8_t id, uint8_t address,
                                                uint8_t length, uint8_t *data);
@@ -221,6 +225,10 @@ void RightServoBus_InMotionTelemetryOnRxEvent(
 void RightServoBus_InMotionTelemetryOnUartError(UART_HandleTypeDef *uart);
 const RightServoInMotionTelemetrySnapshot *
 RightServoBus_InMotionTelemetryGetSnapshot(void);
+#endif
+
+#if HOST_S3_STATIONARY_PICK
+void RightServoBus_InMotionFailureCopy(uint32_t out[8]);
 #endif
 
 #endif /* RIGHT_SERVO_BUS_H */

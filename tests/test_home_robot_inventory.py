@@ -50,3 +50,12 @@ def test_environment_capture_is_allowlisted(tmp_path, monkeypatch):
     report = inventory.collect(tmp_path)
     assert report["ros"]["environment"]["ROS_DISTRO"] == "test-distribution"
     assert "secret-not-for-inventory" not in json.dumps(report)
+
+
+def test_bad_usb_descriptor_does_not_hide_other_device_metadata(tmp_path):
+    usb=tmp_path/'sys/bus/usb/devices/1-1';usb.mkdir(parents=True)
+    (usb/'idVendor').write_text('0483')
+    (usb/'product').write_bytes(b'\xff')
+    row=inventory.collect(tmp_path)['usb']['entries'][0]
+    assert row['idVendor']['value']=='0483'
+    assert row['product']=={'status':'unavailable','reason':'UnicodeDecodeError'}

@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "record_kind": "development_arm_ranges",
+  "status": "LEFT_CAPTURED_RIGHT_COPIED_BY_OPERATOR_REQUEST",
+  "zero_raw": 2048,
+  "raw_units_per_turn": 4096,
+  "turn_urad": 6283185,
+  "hardware_enabled": false,
+  "firmware_limit_authorized": false,
+  "arms": {
+    "left": {
+      "base": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": 1017,
+        "maximum_unwrapped_raw": 3112,
+        "positive_raw_direction": 1,
+        "minimum_urad": -1581534,
+        "maximum_urad": 1632155,
+        "range_source": "left_hand_guided_capture",
+        "measured_on_this_arm": true,
+        "source_report_sha256": "c1c1691d7bb9902aae1a481f006e6e9dfedbee201166535bcbb4be803aa412b7",
+        "source_samples_sha256": "0c2d3fdb7ee404f1ae1f97090dadd6de422f19c1782f5c7c44a6c2ec53cbe39c"
+      },
+      "shoulder": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": 1875,
+        "maximum_unwrapped_raw": 4229,
+        "positive_raw_direction": 1,
+        "minimum_urad": -265379,
+        "maximum_urad": 3345612,
+        "range_source": "left_hand_guided_capture",
+        "measured_on_this_arm": true,
+        "source_report_sha256": "1b0886f214bc1fed192621325555611ea4ac907315a0c08ee9910a0e65700868",
+        "source_samples_sha256": "517794176ffffdaa8b6a6694502cf28e66712b22b3aa5d20b6b0eb8dcd477db0"
+      },
+      "elbow": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": 138,
+        "maximum_unwrapped_raw": 2245,
+        "positive_raw_direction": -1,
+        "minimum_urad": -302194,
+        "maximum_urad": 2929903,
+        "range_source": "left_hand_guided_capture",
+        "measured_on_this_arm": true,
+        "source_report_sha256": "33e89a2871652c5fc8a9031bcefd639516a16cbce41096efde0400d7a7dd7e05",
+        "source_samples_sha256": "543f8d7a0b770d0ce3530060a0b88579ac257e238c651e4fbb4b61a7a372b3c9"
+      },
+      "wrist_flex": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": -105,
+        "maximum_unwrapped_raw": 2175,
+        "positive_raw_direction": -1,
+        "minimum_urad": -194816,
+        "maximum_urad": 3302660,
+        "range_source": "left_hand_guided_capture",
+        "measured_on_this_arm": true,
+        "source_report_sha256": "bfc5ba59a077fd2909dc3a23c29e937521c26f9601394adadd0d5f1c48f2b5cd",
+        "source_samples_sha256": "b1c258501ceb85b1b1fefd42f5953286ca942f388df6ebea88052f5f6b4733a7"
+      },
+      "wrist_roll": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": -723,
+        "maximum_unwrapped_raw": 2927,
+        "positive_raw_direction": 1,
+        "minimum_urad": -4250661,
+        "maximum_urad": 1348369,
+        "range_source": "left_hand_guided_capture",
+        "measured_on_this_arm": true,
+        "source_report_sha256": "83a942c9c01915ab64d52ca8243c65b81536976b51f49cb105a0fe06b4a5a7d1",
+        "source_samples_sha256": "884cdae3e4bbf82948fb0d70cae3ed353e943971f53dbb3897300a6986f1ac76"
+      },
+      "gripper": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": 1936,
+        "maximum_unwrapped_raw": 3182,
+        "positive_raw_direction": -1,
+        "minimum_urad": -1739534,
+        "maximum_urad": 171806,
+        "range_source": "left_hand_guided_capture",
+        "measured_on_this_arm": true,
+        "source_report_sha256": "156d68a57a6820ea885b0020657ffd48ee234992e180d1c8e8045e295d3e9ebb",
+        "source_samples_sha256": "b031af5b776ad269b68b2f5ded536d5c18f0e10b8fa5194968a92f013ae899c1",
+        "opening_raw_direction": 1,
+        "closing_raw_direction": -1,
+        "maximum_open_raw": 3182
+      }
+    },
+    "right": {
+      "base": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": 1017,
+        "maximum_unwrapped_raw": 3112,
+        "positive_raw_direction": 1,
+        "minimum_urad": -1581534,
+        "maximum_urad": 1632155,
+        "range_source": "copied_from_left_by_operator_request",
+        "measured_on_this_arm": false,
+        "source_report_sha256": "c1c1691d7bb9902aae1a481f006e6e9dfedbee201166535bcbb4be803aa412b7",
+        "source_samples_sha256": "0c2d3fdb7ee404f1ae1f97090dadd6de422f19c1782f5c7c44a6c2ec53cbe39c"
+      },
+      "shoulder": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": 1875,
+        "maximum_unwrapped_raw": 4229,
+        "positive_raw_direction": 1,
+        "minimum_urad": -265379,
+        "maximum_urad": 3345612,
+        "range_source": "copied_from_left_by_operator_request",
+        "measured_on_this_arm": false,
+        "source_report_sha256": "1b0886f214bc1fed192621325555611ea4ac907315a0c08ee9910a0e65700868",
+        "source_samples_sha256": "517794176ffffdaa8b6a6694502cf28e66712b22b3aa5d20b6b0eb8dcd477db0"
+      },
+      "elbow": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": 138,
+        "maximum_unwrapped_raw": 2245,
+        "positive_raw_direction": -1,
+        "minimum_urad": -302194,
+        "maximum_urad": 2929903,
+        "range_source": "copied_from_left_by_operator_request",
+        "measured_on_this_arm": false,
+        "source_report_sha256": "33e89a2871652c5fc8a9031bcefd639516a16cbce41096efde0400d7a7dd7e05",
+        "source_samples_sha256": "543f8d7a0b770d0ce3530060a0b88579ac257e238c651e4fbb4b61a7a372b3c9"
+      },
+      "wrist_flex": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": -105,
+        "maximum_unwrapped_raw": 2175,
+        "positive_raw_direction": -1,
+        "minimum_urad": -194816,
+        "maximum_urad": 3302660,
+        "range_source": "copied_from_left_by_operator_request",
+        "measured_on_this_arm": false,
+        "source_report_sha256": "bfc5ba59a077fd2909dc3a23c29e937521c26f9601394adadd0d5f1c48f2b5cd",
+        "source_samples_sha256": "b1c258501ceb85b1b1fefd42f5953286ca942f388df6ebea88052f5f6b4733a7"
+      },
+      "wrist_roll": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": -723,
+        "maximum_unwrapped_raw": 2927,
+        "positive_raw_direction": 1,
+        "minimum_urad": -4250661,
+        "maximum_urad": 1348369,
+        "range_source": "copied_from_left_by_operator_request",
+        "measured_on_this_arm": false,
+        "source_report_sha256": "83a942c9c01915ab64d52ca8243c65b81536976b51f49cb105a0fe06b4a5a7d1",
+        "source_samples_sha256": "884cdae3e4bbf82948fb0d70cae3ed353e943971f53dbb3897300a6986f1ac76"
+      },
+      "gripper": {
+        "coordinate": "unwrapped_raw",
+        "minimum_unwrapped_raw": 1936,
+        "maximum_unwrapped_raw": 3182,
+        "positive_raw_direction": -1,
+        "minimum_urad": -1739534,
+        "maximum_urad": 171806,
+        "range_source": "copied_from_left_by_operator_request",
+        "measured_on_this_arm": false,
+        "source_report_sha256": "156d68a57a6820ea885b0020657ffd48ee234992e180d1c8e8045e295d3e9ebb",
+        "source_samples_sha256": "b031af5b776ad269b68b2f5ded536d5c18f0e10b8fa5194968a92f013ae899c1",
+        "opening_raw_direction": 1,
+        "closing_raw_direction": -1,
+        "maximum_open_raw": 3182
+      }
+    }
+  },
+  "calibration": {
+    "left": {
+      "centered_sha256": "ef92aba963229f563e41ae791efc29b1eb9410eea686c032de10d92848c17dd7",
+      "persistence_sha256": "1312385b4c96658e34b374ab9150b82dd715b9c98336b9583b156c4dce314354",
+      "offsets_raw": [
+        1196,
+        1570,
+        2247,
+        3385,
+        337,
+        595
+      ]
+    },
+    "right": {
+      "centered_sha256": "c07da5d54b7ef1fe090f1902fc63f1833a53c759aa69694fc6f3ada69d7ef800",
+      "persistence_sha256": "97c72de67aa87030a66ad8751911d977e0af38fb32b6284c0898484b0040dfbd",
+      "offsets_raw": [
+        1432,
+        2042,
+        3496,
+        3350,
+        3565,
+        1100
+      ]
+    }
+  },
+  "scope": "Per-joint attainable ranges with other joints repositioned; not collision-free joint combinations",
+  "right_policy": "Copy left intervals and prior direction convention verbatim; no right-arm range measurement",
+  "home_branch_alignment_verified": false
+}

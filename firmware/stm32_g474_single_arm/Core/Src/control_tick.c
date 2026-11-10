@@ -160,3 +160,18 @@ bool ControlTick_PeekEpoch(uint32_t *epoch_us)
     if (mask == 0U) __enable_irq();
     return valid;
 }
+
+bool ControlTick_ReadWindowAvailable(uint32_t budget_us)
+{
+    const uint32_t mask = __get_PRIMASK();
+    __disable_irq();
+    const uint32_t elapsed = Timebase_NowUs() - previous_started_us;
+    bool available = previous_started_valid && budget_us != 0U &&
+        elapsed < CONTROL_TICK_PERIOD_US &&
+        budget_us < CONTROL_TICK_PERIOD_US - elapsed;
+#if HOST_BIMANUAL_DMA_DISPATCH_BUILD
+    available = available && !control_tick_pending;
+#endif
+    if (mask == 0U) __enable_irq();
+    return available;
+}

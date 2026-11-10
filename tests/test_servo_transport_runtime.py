@@ -47,7 +47,7 @@ def harness(tmp_path_factory):
     return binary
 
 
-@pytest.mark.parametrize("scenario", range(15))
+@pytest.mark.parametrize("scenario", range(17))
 def test_board_transport_and_dispatch_fault_scenarios(harness, scenario):
     subprocess.run([str(harness), str(scenario)], check=True)
 

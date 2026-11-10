@@ -7,6 +7,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+#include "wheel_hold_monitor.h"
+#include "wheel_hold_setup.h"
+#endif
 #define LEASE_MS 400u
 static UART_HandleTypeDef *host;
 static bool armed, fault, stop_confirmed;
@@ -47,6 +51,11 @@ static bool write_checked(uint8_t id,uint8_t addr,const uint8_t *v,uint8_t n){
  * Any invalid sweep resets all counters. Never retry a drive write here. */
 static bool wait_stopped(const char *phase){
     uint32_t start=HAL_GetTick();wait_elapsed_ms=0;
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    int first[3]={0},low[3]={0},high[3]={0};
+    uint32_t stable_since[3]={0};
+    bool stable[3]={false};
+#endif
     for(unsigned i=0;i<3;i++)evidence[i].quiet=0;
     do{
         bool all=true,valid_round=true;
@@ -62,12 +71,38 @@ static bool wait_stopped(const char *phase){
             }
             e->goal=values[0];e->torque=values[1];e->speed=values[2];e->position=values[3];
             bool quiet=!failed_reg&&speed_zero(e->goal)&&e->torque==0&&speed_zero(e->speed);
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+            /* Use the same encoder-based stationary evidence at startup and
+             * STOP as in hold setup. Low-resolution speed reports +/-50 do
+             * not imply rotation when the encoder is stable for 400 ms. */
+            quiet=!failed_reg&&speed_zero(e->goal)&&e->torque==0&&
+                e->speed>=0&&(e->speed&0x7fff)<=50&&e->position>=0&&e->position<=4095;
+            if(quiet){
+                if(!stable[i]){stable[i]=true;stable_since[i]=HAL_GetTick();
+                    first[i]=e->position;low[i]=high[i]=0;}
+                int delta=e->position-first[i];
+                if(delta>2048)delta-=4096;
+                if(delta< -2048)delta+=4096;
+                if(delta<low[i])low[i]=delta;
+                if(delta>high[i])high[i]=delta;
+                if(high[i]-low[i]>8){stable[i]=false;quiet=false;}
+            }else stable[i]=false;
+#endif
             e->quiet=quiet ? e->quiet+1 : 0;
             if(!quiet)observe_problem(phase,id,e,failed_reg,failed_status,(uint32_t)(HAL_GetTick()-start));
             if(failed_reg)valid_round=false;
-            if(e->quiet<3){if(all){bad_id=id;observed_speed=e->speed;speed_status=statuses[2];}all=false;}
+            bool enough=e->quiet>=3;
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+            enough=enough&&stable[i]&&(uint32_t)(HAL_GetTick()-stable_since[i])>=400u;
+#endif
+            if(!enough){if(all){bad_id=id;observed_speed=e->speed;speed_status=statuses[2];}all=false;}
         }
-        if(!valid_round)for(unsigned i=0;i<3;i++)evidence[i].quiet=0;
+        if(!valid_round)for(unsigned i=0;i<3;i++){
+            evidence[i].quiet=0;
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+            stable[i]=false;
+#endif
+        }
         wait_elapsed_ms=(uint32_t)(HAL_GetTick()-start);
         if(wait_elapsed_ms>=1000u)break;
         if(all&&valid_round)return true;
@@ -85,6 +120,15 @@ static void reply(const char *type){
         type,armed?"true":"false",fault?"true":"false",(unsigned long)session,
         (unsigned long)sequence,reason,first_failure,first_failed_id,
         stop_confirmed?"true":"false",bad_id,observed_speed,speed_status);
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    n+=snprintf(line+n,sizeof(line)-(unsigned)n,
+        ",\"hold_confirmed\":%s,\"hold_reason\":\"%s\",\"hold_failed_slot\":%u,\"hold_samples\":%lu",
+        WheelHold_Confirmed()?"true":"false",WheelHold_Reason(),WheelHold_FailedSlot(),
+        (unsigned long)WheelHold_Samples());
+    n+=snprintf(line+n,sizeof(line)-(unsigned)n,
+        ",\"lift_position_raw\":%d,\"lift_target_raw\":%d",
+        WheelHold_LiftPosition(),WheelHold_LiftTarget());
+#endif
     if(strcmp(type,"ack")){
         n+=snprintf(line+n,sizeof(line)-(unsigned)n,
             ",\"wait_elapsed_ms\":%lu,\"first_failure_wait_ms\":%lu",
@@ -121,6 +165,15 @@ static void stop_all(bool latch,const char *why){
     for(unsigned i=0;i<3;i++)if(Servo_WriteData(actuator_mobile_axis_id(i),40,zero,1)!=HAL_OK)sent=false;
     bool quiet=wait_stopped("STOP");
     stop_confirmed=sent&&quiet;
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    /* Before hold setup, wheel STOP prepares the power-on wheel torque state
+     * without claiming that the arms are held. Once captured, verify the
+     * existing hold normally. Never write an arm/lift STOP or torque-disable. */
+    if(WheelHold_HasBaseline() && !WheelHold_VerifyAll()){
+        fault=true;
+        if(!strcmp(first_failure,"NONE"))first_failure=WheelHold_Reason();
+    }
+#endif
     if(!stop_confirmed){
         fault=true;reason="STOP_UNCONFIRMED_CUT_MOTOR_POWER";
         if(!strcmp(first_failure,"NONE")){first_failure=reason;first_failed_id=bad_id;first_failure_wait_ms=wait_elapsed_ms;}
@@ -157,11 +210,19 @@ static bool frame_crc(unsigned prefix,unsigned total){
     return used==total && command[prefix]==' ' && hex(command+prefix+1,4,&v) && v==crc16(command,prefix);
 }
 static void enable(uint32_t nonce){
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    WheelSetup_Cancel();
+#endif
     if(armed){fail("DUPLICATE_ARM");return;}
     if(fault){reply("fault");return;}
     bad_id=0;observed_speed=-1;speed_status=-1;stop_confirmed=false;
     first_failure="NONE";first_failed_id=0;
     first_observation=(FirstObservation){0};wait_elapsed_ms=first_failure_wait_ms=0;
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    /* Snapshot current goals, NOT measured positions. A loaded gripper's
+     * setpoint may intentionally be beyond its contact position. */
+    if(!WheelHold_Capture()){reason=WheelHold_Reason();reply("error");return;}
+#endif
     for(unsigned i=0;i<3;i++){
         uint8_t id=actuator_mobile_axis_id(i),ident[4];bad_id=id;
         if(Servo_ReadData(id,3,4,ident)!=HAL_OK || ident[0]!=9 || ident[1]!=3 || ident[2]!=id || ident[3]!=0){fail("IDENTITY");return;}
@@ -182,6 +243,9 @@ static void enable(uint32_t nonce){
         bad_id=actuator_mobile_axis_id(i);
         if(!write_checked((uint8_t)bad_id,40,&one,1)){fail("TORQUE_ENABLE");return;}
     }
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    if(!WheelHold_VerifyAll()){fail("HOLD_CHANGED_DURING_ARM");return;}
+#endif
     session=nonce;sequence=0;last_command=HAL_GetTick();armed=true;bad_id=0;reason="ARMED_ZERO";
     reply("armed");
 }
@@ -193,6 +257,14 @@ static void drive(uint32_t nonce,uint32_t seq,char motion){
     if(motion!='Z'&&!MobileBench_Pattern(motion,speeds)){fail("INVALID_MOTION");return;}
     /* Timestamp reception, never the end of slow bus transactions. */
     last_command=HAL_GetTick();sequence=seq;stop_confirmed=false;
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    /* Host uses stop-and-wait: the complete command is here and the next
+     * command is not sent until ACK. Do blocking motor reads only in this
+     * window, never between bytes of the polling host UART. At 20 Hz all
+     * 13 held axes are refreshed in about 650 ms, within the 1200 ms limit.
+     * Host silence is still handled independently by the 400 ms watchdog. */
+    if(!WheelHold_Poll()){fail(WheelHold_Reason());return;}
+#endif
     for(unsigned i=0;i<3;i++){
         if(!lease_ok())return;
         uint8_t id=actuator_mobile_axis_id(i);bad_id=id;
@@ -207,9 +279,32 @@ static void drive(uint32_t nonce,uint32_t seq,char motion){
 }
 static void dispatch(void){
     uint32_t nonce,seq;
-    if(!strcmp(command,"STOP")){stop_all(false,"OPERATOR_STOP");reply("stopped");return;}
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    if(used==18 && (!memcmp(command,"PREP ",5) || !memcmp(command,"HSET ",5)) &&
+       frame_crc(13,18) && hex(command+5,8,&nonce)){
+        if(armed || fault){reason="SETUP_REQUIRES_IDLE";reply("error");return;}
+        bool apply=command[0]=='H';
+        bool ok=apply?WheelSetup_Apply(nonce):WheelSetup_Plan(nonce);
+        if(apply && !ok)fault=true;
+        char result[2048];WheelSetup_Describe(result,sizeof(result),ok);send(result);return;
+    }
+    if(!strcmp(command,"HOLD")){
+        /* An armed/faulted session must never silently rebind changed goals. */
+        bool held=(armed||fault)?WheelHold_VerifyAll():WheelHold_Capture();
+        reason=held?"HOLD_UNCHANGED":WheelHold_Reason();reply("hold");return;
+    }
+#endif
+    if(!strcmp(command,"STOP")){
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+        WheelSetup_Cancel();
+#endif
+        stop_all(false,"OPERATOR_STOP");reply("stopped");return;}
     if(!strcmp(command,"INFO")){
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+        send("{\"firmware\":\"mobile-base-hold-teleop-v7\",\"host_baud\":921600,\"servo_baud\":1000000,\"ids\":[7,8,9,10],\"max_raw\":200,\"watchdog_ms\":400,\"hold_monitor\":true,\"held_axes\":13,\"arm_lift_writes\":\"explicit_setup_only\",\"hold_setup\":true}\r\n");return;
+#else
         send("{\"firmware\":\"mobile-base-teleop-v4\",\"host_baud\":921600,\"servo_baud\":1000000,\"ids\":[7,8,9,10],\"max_raw\":200,\"watchdog_ms\":400}\r\n");return;
+#endif
     }
     if(used==17 && !memcmp(command,"ARM ",4) && frame_crc(12,17) && hex(command+4,8,&nonce) && nonce){enable(nonce);return;}
     if(used==26 && !memcmp(command,"D ",2) && command[10]==' ' && command[19]==' ' &&
@@ -225,6 +320,11 @@ void SingleArmApp_Init(UART_HandleTypeDef *h,UART_HandleTypeDef *servo){
     first_observation=(FirstObservation){0};wait_elapsed_ms=first_failure_wait_ms=0;
     for(unsigned i=0;i<3;i++)evidence[i]=(WheelEvidence){-1,-1,-1,-1,0};
     ServoBus_Init(servo,NULL,NULL); /* no motor writes at boot */
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    extern UART_HandleTypeDef huart4;
+    WheelHold_Init(&huart4);
+    WheelSetup_Init();
+#endif
 }
 void SingleArmApp_Process(void){
     (void)lease_ok();

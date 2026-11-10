@@ -48,6 +48,6 @@ def test_host_backups_before_write_and_verifies_all(tmp_path):
 @pytest.mark.parametrize('defect',['uncertain','drift','backup_failure'])
 def test_host_aborts_without_retry(tmp_path,monkeypatch,defect):
     path=tmp_path/'receipt.json';link=FakeLink(path,fail=defect=='uncertain',drift=defect=='drift')
-    if defect=='backup_failure':monkeypatch.setattr(cli,'save',lambda *_: (_ for _ in ()).throw(OSError('disk full')))
+    if defect=='backup_failure':monkeypatch.setattr('os.fsync',lambda *_: (_ for _ in ()).throw(OSError('disk full')))
     with pytest.raises((RuntimeError,TimeoutError,OSError)):cli.run(link,path,center=True)
     assert len([c for c in link.calls if c.startswith('CENTER')])==int(defect=='uncertain')

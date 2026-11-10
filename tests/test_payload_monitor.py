@@ -78,3 +78,20 @@ def test_contradiction_between_task_polls_restarts_payload_dwell(source):
     assert not sample(m, 4, .2).conditions['load_retained']
     assert m.carrying
     assert sample(m, 5, .35).conditions['load_retained']
+
+
+def test_contact_allows_a_probe_only_after_two_independent_samples():
+    m = monitor()
+    m.expect('grasp', 'remote', 0)
+    for seq, t in enumerate((0., .15), 1):
+        m.observe_grip(GripMeasurement(seq, t, 15, 40, True), t)
+        m.observe_vision(PayloadObservation(seq, t, 'remote', 'contact'), t)
+        proof = m.proof(t)
+        assert proof.conditions['probe_contact_live']
+        assert proof.conditions['contact_plausible'] == (seq == 2)
+        assert not any(proof.conditions[k] for k in ('payload_safe', 'load_retained', 'grasp_verified'))
+        assert not m.carrying
+    assert not m.proof(.41).conditions['probe_contact_live']
+    m.observe_grip(GripMeasurement(3, .42, 15, 40, True), .42)
+    m.observe_vision(PayloadObservation(3, .42, 'other-object', 'contact'), .42)
+    assert not m.proof(.42).conditions['contact_plausible']

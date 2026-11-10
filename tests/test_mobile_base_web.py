@@ -22,6 +22,19 @@ def test_hold_continues_without_repeated_keydown_until_release():
     assert state.desired(10.02) == "Z"
 
 
+def test_ten_minutes_of_browser_heartbeats_have_no_session_time_limit():
+    state=controller()
+    now=0.0
+    for seq in range(1,6001):
+        now+=.15 if seq%100==0 else .1
+        motion='FZLZAZBZRZDZ'[(seq//40)%12]
+        assert state.update('a'*16,seq,motion,now)
+        assert state.desired(now+.05)==motion
+    assert now>=600 and not state.expired
+    assert state.desired(now+.251)=='Z'
+    assert not state.update('a'*16,6001,'F',now+.26)
+
+
 def test_browser_loss_and_stale_frame_cannot_extend_motion():
     state = controller(); assert state.update("a" * 16, 1, "F", .1)
     assert state.desired(.36) == "Z"

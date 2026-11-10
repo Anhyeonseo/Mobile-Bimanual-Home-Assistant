@@ -4,7 +4,7 @@ Device identity and calibration fingerprints are evidence for S2, not an
 extrinsic calibration, synchronized arm snapshot, or motion authorization.
 """
 from copy import deepcopy
-from . import s2_commissioning as s2
+from . import s2_geometry as s2
 import numpy as np
 
 
@@ -33,6 +33,38 @@ def match_observed_identity(observed, reference):
     return {'method':'exact identity/intrinsics/rotation/scale; translation roundoff <= 2e-9 m',
             'maximum_translation_difference_m':maximum,'observed_camera_device':deepcopy(actual),
             'reference_camera_device':deepcopy(expected)}
+
+
+def near_depth_profile(profile, baseline, measured):
+    """Bind the *measured* 640x360 D415 mode to the same fixed color optical frame."""
+    if profile['camera_device'] != baseline['camera_device'] or profile.get('motion_authorized') is not False:
+        raise ValueError('read-only profile and its original D415 reference required')
+    identity = profile['camera_device']
+    if (identity['factory_calibration_sha256'] != s2.digest(baseline['sdk_calibration'])
+            or identity['stream_profile_id'] != 'rgbd-v1-' + s2.digest(baseline['profiles'])):
+        raise ValueError('original D415 reference fingerprint mismatch')
+    expected = deepcopy(baseline)
+    native = expected['sdk_calibration']['native_depth_intrinsics']
+    stream = expected['profiles']['depth']
+    if stream != dict(width=1280, height=720, fps=30, format='z16') or (native['width'], native['height']) != (1280,720):
+        raise ValueError('expected original D415 depth mode')
+    # On this device the SDK reports the exact half-scale native intrinsics in this mode.
+    # Keep the color/registered intrinsics, scale and extrinsics; verify against a separate SDK observation.
+    stream.update(width=640, height=360)
+    native.update(width=640, height=360)
+    for k in ('fx','fy','ppx','ppy'):
+        native[k] /= 2
+    expected['camera_device'].update(stream_profile_id='rgbd-v1-'+s2.digest(expected['profiles']),
+                                     factory_calibration_sha256=s2.digest(expected['sdk_calibration']))
+    if measured['profiles'] != expected['profiles']:
+        raise ValueError('different RGB or native depth stream')
+    match_observed_identity(measured, expected)
+    near = deepcopy(profile)
+    near['base_profile_id'] = near.pop('calibration_id')
+    near['near_depth_reference_sha256'] = s2.digest(measured)
+    near['camera_device'] = deepcopy(measured['camera_device'])
+    near['calibration_id'] = 's2-dev-'+s2.digest(near)[:24]
+    return near
 
 
 def intrinsics(value):

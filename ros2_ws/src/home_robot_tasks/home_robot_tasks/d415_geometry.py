@@ -8,7 +8,7 @@ import re
 import xml.etree.ElementTree as ET
 
 import numpy as np
-from .s2_commissioning import origin
+from .s2_geometry import origin
 
 
 def nominal_model(config_path):
