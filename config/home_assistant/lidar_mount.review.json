@@ -39,5 +39,14 @@
     "statement": "장착 위치나 각도는 내가 대강 보기엔 맞아"
   },
   "official_model": "config/home_assistant/lds01_official_geometry.json",
-  "mount_confirmation_scope": "approximate visual agreement only; not a measured extrinsic calibration"
+  "mount_confirmation_scope": "official-geometry placement + actual sensor/model occlusion comparison + approximate operator visual confirmation; not precision extrinsic calibration",
+  "setup_method": {
+    "summary": "공식 STL로 장착 위치 후보를 계산한 뒤, 실제 젯슨 라이다 스캔과 모델의 가림 구간을 비교해 방향을 선정하고 사용자의 육안 확인을 받아 정한 명목 장착 설정.",
+    "position_basis": "공식 Mini 1 앞쪽 바퀴 케이스 상단면과 공식 LDS-01 형상으로 XYZ 후보 계산. 실제 장착 위치와의 대략적인 일치는 사용자 육안 확인.",
+    "physical_comparison_performed": true,
+    "physical_comparison_method": "리프트 최하단에서 수집한 실제 스캔 41회 중 마지막 20회의 각도별 유효 거리 중앙값 및 미수신 구간을 원본 베이스·이동부 STL 광선 교차 결과와 비교.",
+    "direction_selection": "모델 가림 87방향 중 실제 미수신과의 일치가 yaw=0도에서는 1개, yaw=180도에서는 87개로 관측되어 180도를 명목 방향으로 선정.",
+    "operator_review": "이 실물 비교를 반영한 시각화에 대해 사용자가 장착 위치·각도가 대략 맞다고 확인.",
+    "scope": "실물 스캔 비교를 반영한 명목 설정이며, XYZ·각도의 정밀 수치 보정이나 절대 거리 정확도 검증은 아님."
+  }
 }
