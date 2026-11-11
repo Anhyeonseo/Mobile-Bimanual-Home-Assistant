@@ -1,11 +1,11 @@
 {
-  "mode": "mount_review_only",
+  "mode": "operator_reviewed_nominal_mount",
   "hardware_enabled": false,
   "lift": "operator reported lowest; CAD lower-contact pose",
   "arms": "current pose unknown; omitted from geometry comparison",
-  "mount_confirmed": false,
+  "mount_confirmed": true,
   "range_calibration_applied": false,
-  "mount_basis": "area-weighted top cap of front wheel/motor case from original CAD triangles; provisional STL flange z=-17.8 mm; yaw=180 deg suggested by missing-ray overlap, unconfirmed",
+  "mount_basis": "area-weighted top cap of front wheel/motor case from original CAD triangles; provisional STL flange z=-17.8 mm; yaw=180 deg supported by missing-ray overlap and approximate operator visual confirmation",
   "case_top_cad_m": [
     -0.0017785700212713121,
     -0.15086473981701323,
@@ -28,12 +28,16 @@
   "missing_inside_model_shadow": 87,
   "orientation_evidence": "Missingness overlap supports a review candidate, not exact yaw or range bias.",
   "accuracy_qualified": false,
-  "limitation": "Self-hit residual is conditional on unconfirmed mount/pose. Environment geometry is unknown; no metric range calibration or model alignment is inferred.",
+  "limitation": "Operator visually accepts nominal placement. Precise translation/rotation and range accuracy remain unmeasured; no metric calibration or motion authorization is inferred.",
   "missing_inside_shadow_at_yaw_zero": 1,
   "user_confirmed": {
     "mount_region": "case above the front wheel",
     "lift_lowest": true,
-    "exact_mount_transform": false
+    "exact_mount_transform": false,
+    "approximate_position_and_orientation": true,
+    "confirmation_local_date": "2026-11-12",
+    "statement": "장착 위치나 각도는 내가 대강 보기엔 맞아"
   },
-  "official_model": "config/home_assistant/lds01_official_geometry.json"
+  "official_model": "config/home_assistant/lds01_official_geometry.json",
+  "mount_confirmation_scope": "approximate visual agreement only; not a measured extrinsic calibration"
 }
