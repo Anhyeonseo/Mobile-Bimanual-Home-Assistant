@@ -23,9 +23,12 @@ def main(args=None):
             msg.info.resolution=nav.resolution;msg.info.width=nav.width;msg.info.height=nav.height
             msg.info.origin.position.x=nav.ox;msg.info.origin.position.y=nav.oy;msg.info.origin.position.z=nav.floor_z
             msg.info.origin.orientation.w=1.;msg.data=occupancy_values(document);publishers[key].publish(msg)
-    timer=node.create_timer(1.,publish);publish()
-    node.get_logger().info('Saved geometry only: localization and live clearance still required; revision '+manifest['revision'])
-    try:rclpy.spin(node)
+    # A subscriber may receive the initial map and request shutdown immediately.
+    # Include initial publication and logging in the same cleanup scope as spin.
+    try:
+        timer=node.create_timer(1.,publish);publish()
+        node.get_logger().info('Saved geometry only: localization and live clearance still required; revision '+manifest['revision'])
+        rclpy.spin(node)
     except (KeyboardInterrupt,ExternalShutdownException):pass
     finally:node.destroy_node();rclpy.try_shutdown()
 

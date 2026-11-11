@@ -1,5 +1,7 @@
 # S4 로컬 준비와 현장 인수
 
+젯슨 준비의 후속 결과는 [S4_JETSON_PREPARATION.md](S4_JETSON_PREPARATION.md)에 기록한다. 아래는 로컬 준비 당시의 범위다.
+
 2026-11-11. S3 완료 판정은 유지한다. 이번 작업은 **젯슨 접속과 실물 동작 없이** S4a 지도·주행과 S4b 작업 위치 선정·집기·운반·놓기의 로컬 구현 및 검증을 진행한 것이다. S4 실물 완료 판정은 아직 하지 않는다.
 
 ## 구현한 연결
@@ -35,7 +37,7 @@
 
 ## 재현
 
-저장소 루트에서 실행한다. Python 의존성은 기존 `requirements/offline.lock.txt`와 `requirements/s2-observation.txt`를 사용한다. ROS 검증 환경은 Ubuntu 24.04 / Jazzy이며 설치할 Debian 패키지 목록은 `requirements/s4-ros-jazzy.txt`에 있다. 젯슨의 OS/ROS 버전은 이번 작업에서 확인하지 않았다. PC의 실행 파일을 ARM64 젯슨으로 복사하는 방식은 사용하지 않는다.
+저장소 루트에서 실행한다. Python 의존성은 기존 `requirements/offline.lock.txt`와 `requirements/s2-observation.txt`를 사용한다. ROS 검증 환경은 Ubuntu 24.04 / Jazzy이며 설치할 Debian 패키지 목록은 `requirements/s4-ros-jazzy.txt`에 있다. 로컬 준비 당시에는 젯슨의 OS/ROS 버전을 확인하지 않았으며, 이후 확인 결과와 별도 설치 경로는 젯슨 준비 기록을 따른다. PC의 실행 파일을 ARM64 젯슨으로 복사하는 방식은 사용하지 않는다.
 
 ```bash
 python -m pytest -c config/pytest.ini --rootdir=. -q

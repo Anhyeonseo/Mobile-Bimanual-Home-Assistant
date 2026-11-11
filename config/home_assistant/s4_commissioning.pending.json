@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "stage": "S4",
-  "mode": "local_preparation",
+  "mode": "jetson_preparation",
   "hardware_enabled": false,
-  "jetson_connected": false,
+  "jetson_connected": true,
   "local_ros_distribution": "jazzy",
-  "target_os": null,
-  "target_ros_distribution": null,
+  "target_os": "Ubuntu 24.04.4 LTS (aarch64)",
+  "target_ros_distribution": "jazzy",
   "last_known_s3": {
     "accepted": true,
     "release": "s3-stationary-9d2fd662e718",
@@ -58,6 +58,19 @@
     "This document is a pending measurement inventory, never a runtime enable token.",
     "S3 acceptance is preserved. The 5 mm closing setting is not calibrated force.",
     "A successful local simulation does not satisfy a physical acceptance item.",
-    "No device, SSH, upload, flash, power change or motor action is performed by local preparation."
-  ]
+    "2026-11-11: source and isolated runtime uploaded over SSH; camera and synthetic ROS checks performed. No controller reset, firmware flash, power change, or motor command."
+  ],
+  "target_observed_on": "2026-11-11",
+  "target_environment": {
+    "jetpack": "7.2.1-b49",
+    "l4t": "39.2.1",
+    "python": "3.12.3",
+    "runtime_scope": "user-owned isolated prefix; not an active robot service",
+    "lidar_connected": false,
+    "controller_stop_latched": true,
+    "controller_firmware": "0x00024911",
+    "controller_reset_or_flashed": false,
+    "motor_commands_sent": 0,
+    "report": "docs/S4_JETSON_PREPARATION.md"
+  }
 }
