@@ -96,7 +96,7 @@ def dispatch(gateway, method, path, body, authorization, permit):
     if len(parts) == 5 and parts[:3] == ['v1', 'assistant', 'scans'] and method == 'POST':
         session_id, action = parts[3:]
         scan = service.scan.get(session_id)
-        if scan.get('autonomous') and action in {'pause', 'resume', 'review', 'discard'}:
+        if scan.get('autonomous') and action in {'pause', 'resume', 'review', 'discard', 'save_exit'}:
             fields(body, ())
             if action == 'resume':
                 if not isinstance(permit, str) or gateway.permits.get(permit, 0) <= gateway.now():

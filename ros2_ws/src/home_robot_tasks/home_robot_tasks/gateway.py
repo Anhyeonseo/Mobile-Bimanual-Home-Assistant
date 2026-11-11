@@ -106,12 +106,12 @@ class Gateway:
         with self.lock:
             self.faulted = True
             self.permits.clear()
-            if self.assistant is not None:
-                survey = self.assistant.survey
-                if survey.session_id and self.assistant.scan.get(survey.session_id)['status'] == 'SCANNING':
-                    survey.action(survey.session_id, 'pause', self.now())
             if self.app.lease.owner:
                 self.app.cancel(self.app.lease.owner, self.now())
+            if self.assistant is not None:
+                survey = self.assistant.survey
+                if survey.session_id and survey.pending != 'save_exit' and self.assistant.scan.get(survey.session_id)['status'] == 'SCANNING':
+                    survey.action(survey.session_id, 'pause', self.now())
 
     def now(self):
         return time.monotonic() - self.started

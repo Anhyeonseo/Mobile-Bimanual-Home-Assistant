@@ -36,6 +36,9 @@ const reasons = {
   payload_recovery_required: '이전 작업의 물체 상태 확인이 필요해요.',
   fresh_request_permit_required: '실행 요청 시간이 지났어요. 상태를 확인한 뒤 다시 눌러 주세요.',
   selected_object_does_not_match_request: '현재 요청 조건과 맞지 않는 물체예요.',
+  save_exit_in_progress: '정지와 저장을 마칠 때까지 기다려 주세요.',
+  no_valid_mapping_checkpoint: '온전한 저장 기록을 찾지 못했습니다. 기존 기록은 보존하고 있습니다.',
+  checkpoint_map_or_calibration_changed: '설치 보정이 바뀌어 이전 기록을 바로 이어갈 수 없습니다.',
   scan_not_scanning: '스캔을 시작하거나 이어한 뒤 기록을 넣어 주세요.',
   gateway_fault_latched: '서버에서 문제가 확인됐어요. 상태와 로그를 확인해야 해요.'
 };
@@ -57,6 +60,8 @@ function buttons() {
   const scan = selectedScan(), s = scan?.status;
   $('start-scan').disabled = busy || active || state?.scans.some(v => ['SCANNING', 'PAUSED', 'REVIEW'].includes(v.status));
   $('scan-demo').disabled = busy || s !== 'SCANNING'; $('pause-scan').disabled = busy || s !== 'SCANNING';
+  $('save-exit-scan').disabled = busy || !scan?.autonomous || !['SCANNING', 'PAUSED', 'REVIEW'].includes(s) || ['STOPPING','SAVING','SAVED_FOR_EXIT'].includes(scan?.survey_state);
+  $('resume-scan').textContent = scan?.resume_checks_required || scan?.simulated_shutdown_ready ? '이전 지도 이어 만들기' : '이어하기';
   $('resume-scan').disabled = busy || s !== 'PAUSED'; $('review-scan').disabled = busy || !['SCANNING', 'PAUSED'].includes(s) || !scan?.map_document;
   $('save-scan').disabled = busy || s !== 'REVIEW'; $('discard-scan').disabled = busy || !['SCANNING', 'PAUSED', 'REVIEW'].includes(s);
   $('map-file').disabled = busy || s !== 'SCANNING' || !!scan?.autonomous; $('observation-file').disabled = busy || s !== 'SCANNING' || !!scan?.autonomous;
@@ -125,6 +130,8 @@ function render() {
     if (scan.coverage) description += ` · 지도 범위 내 ${Math.round(scan.coverage.known_grid_fraction * 100)}% 관측`;
     if (scan.autonomous) description += ` · ${scan.survey_state === 'STOPPING' ? '정지 확인 중' : scan.survey_state === 'RETURNING' ? '출발점으로 돌아가는 중' : '자동 탐색 ' + scan.survey_legs + '구간'} (가상 집)`;
     if (scan.map_document && !scan.autonomous) description += scan.navigation_ready ? ' · 높이 장애물 반영 지도 포함' : ' · 높이 관측 대기 — 주행용 지도 미완성';
+    const recovery = {SAVING:'지도를 안전하게 저장하고 있어요', SAVED_FOR_EXIT:'저장 완료 · 가상 실행 종료 준비 완료', SAVE_FAILED:'저장 실패 · 전원을 유지해 주세요', RECOVERY_REQUIRED:'이전 지도 복구 · 현재 상태 확인 필요'};
+    if (recovery[scan.survey_state]) description += ' · ' + recovery[scan.survey_state];
     $('scan-status').textContent = description;
     $('scan-hints').replaceChildren(...scan.hints.map(h => el('div', h, 'hint')));
     if (scan.coverage) $('scan-hints').append(el('div', scan.coverage.note, 'hint'));
@@ -192,6 +199,6 @@ $('refresh-demo').onclick = () => action(async () => { await api('/v1/assistant/
 $('localize-demo').onclick = () => action(async () => { await api('/v1/assistant/localize-simulation', {xy_m: [1.5, 1.5]}); preview = null; $('plan').hidden = true; });
 for (const tab of ['task', 'scan']) $(tab + '-tab').onclick = () => { for (const other of ['task', 'scan']) { $(other + '-panel').hidden = other !== tab; $(other + '-tab').classList.toggle('selected', other === tab); $(other + '-tab').setAttribute('aria-selected', String(other === tab)); } drawMap(); };
 $('scan-form').onsubmit = event => { event.preventDefault(); action(async () => { const permit = (await api('/v1/permit')).permit; const result = await api('/v1/assistant/surveys', {session_id: 'scan-' + crypto.randomUUID(), name: $('scan-name').value}, permit); scanId = result.session_id; }); };
-for (const [id, name] of [['scan-demo', 'demo'], ['pause-scan', 'pause'], ['resume-scan', 'resume'], ['review-scan', 'review'], ['save-scan', 'save'], ['discard-scan', 'discard']]) $(id).onclick = () => scanAction(name);
+for (const [id, name] of [['scan-demo', 'demo'], ['save-exit-scan', 'save_exit'], ['pause-scan', 'pause'], ['resume-scan', 'resume'], ['review-scan', 'review'], ['save-scan', 'save'], ['discard-scan', 'discard']]) $(id).onclick = () => scanAction(name);
 for (const [id, endpoint, key] of [['map-file', 'map', 'map_document'], ['observation-file', 'observe', 'observation']]) $(id).onchange = event => action(async () => { const file = event.target.files[0]; if (!file) return; if (file.size > 120000) throw new Error('file_too_large'); const data = JSON.parse(await file.text()); await api(`/v1/assistant/scans/${scanId}/${endpoint}`, {[key]: data}); event.target.value = ''; });
 new ResizeObserver(drawMap).observe($('home-map'));

@@ -8,6 +8,9 @@ from collections import deque
 from copy import deepcopy
 import math
 import hashlib
+import uuid
+
+from .mapping_checkpoint import MappingCheckpoints, ResumeEvidence
 
 from .fetch import InvalidTask
 from .navigation import NavigationMap
@@ -91,6 +94,19 @@ class SimulatedHomeSurvey:
         self.started_s = None
         self.submitting = False
         self.returning = False
+        self.boot_id = 'boot-' + uuid.uuid4().hex
+        self.checkpoints = MappingCheckpoints(service.store)
+        self.readiness_provider = self._simulation_readiness
+        self.resume_requested_s = None
+        for scan in service.scan.sessions():
+            if scan.get('autonomous') and scan['status'] not in {'SAVED', 'DISCARDED'}:
+                try:
+                    self.checkpoints.restore_scan(scan['session_id'], service.context)
+                except InvalidTask as error:
+                    scan.update(status='PAUSED', survey_state='RECOVERY_REQUIRED',
+                        power_disconnect_allowed=False, simulated_shutdown_ready=False,
+                        recovery_error=str(error), resume_checks_required=True)
+                    service.store.save_record('scan', scan['session_id'], scan)
 
     def start(self, session_id, name, now_s):
         s, app = self.service, self.service.app
@@ -121,48 +137,125 @@ class SimulatedHomeSurvey:
         self.service.store.save_record('scan', self.session_id, scan)
         return scan
 
+    def _simulation_readiness(self, now_s, revision):
+        app = self.service.app
+        # Read the CURRENT simulation plant, never the checkpoint pose. A
+        # commissioned implementation must inject measured readiness instead.
+        from .fake_robot import FakeRobot
+        if not isinstance(app.adapter, FakeRobot) or not app.exact_goal_simulation:
+            raise InvalidTask('survey_sensor_adapter_not_commissioned')
+        failed = app.adapter.false_conditions
+        return ResumeEvidence(self.boot_id, now_s-app.adapter.stale_by_s, revision,
+            self.service.context.calibration_id, tuple(getattr(app.adapter, 'xy', app.xy)),
+            'localized' not in failed, 'hardware_ready' not in failed,
+            'arm_in_transport_pose' not in failed, 'lift_in_transport_position' not in failed,
+            app.lease.owner is None and 'base_stopped' not in failed and
+            'lift_stopped' not in failed and abs(getattr(app.adapter, 'velocity', 0.)) < 1e-8,
+            'simulation')
+
+    def _attach(self, session_id):
+        scan = self.service.scan.get(session_id)
+        if scan.get('recovery_error'):
+            raise InvalidTask(scan['recovery_error'])
+        self.session_id = session_id
+        self.sensor = HiddenSyntheticHouse(self.reference_document)
+        self.start_xy = tuple(scan['start_xy'])
+        self.visited = {tuple(c) for c in scan.get('visited_cells', [])}
+        if scan.get('map_document'):
+            self.sensor.rows = [list(r) for r in scan['map_document']['rows']]
+            self.sensor.sequence = scan.get('sensor_sequence', 0)
+        self.child_id, self.pending, self.returning = None, None, False
+
+    def _resume(self, now_s):
+        app, scan = self.service.app, self.service.scan.get(self.session_id)
+        if app.lease.owner or app.adapter.mode != 'simulation':
+            raise InvalidTask('scan_cannot_resume')
+        current_map = scan.get('map_document') or self.reference_document
+        try:
+            evidence = self.readiness_provider(now_s, current_map['revision'])
+            if not isinstance(evidence, ResumeEvidence):
+                raise InvalidTask('typed_resume_evidence_required')
+            xy = evidence.check(boot_id=self.boot_id, map_revision=current_map['revision'],
+                calibration_id=self.service.context.calibration_id,
+                requested_s=self.resume_requested_s, now_s=now_s, mode='simulation')
+            nav = NavigationMap(current_map)
+            nav._cell(*xy)
+        except InvalidTask:
+            return self._save(survey_state='RECOVERY_REQUIRED', resume_checks_required=True,
+                hints=['현재 위치와 센서·팔·리프트 상태를 확인하지 못했습니다. 이동하지 않고 기다립니다.'])
+        app.replace_map(nav, now_s)
+        app.localize_simulated(xy, now_s)
+        old_context = scan['context']
+        self._save(context=self.service.context.to_dict(), restored_from_context=old_context,
+            captures=[], surface_views=[], navigation_build=None, navigation_map_document=None,
+            navigation_ready=False, power_disconnect_allowed=False, simulated_shutdown_ready=False,
+            resume_checks_required=False, exit_requested=False, recovery_error=None)
+        self.service.scan.resume(self.session_id)
+        self.started_s, self.resume_requested_s = now_s, None
+        return self._save(survey_state='OBSERVING', hints=['현재 상태를 확인했습니다. 주변을 새로 관측하며 이어갑니다.'])
+
     def action(self, session_id, action, now_s):
-        if session_id != self.session_id or self.sensor is None:
-            scan = self.service.scan.get(session_id)
-            app = self.service.app
-            if not scan.get('autonomous') or scan['status'] != 'PAUSED' or app.lease.owner:
-                raise InvalidTask('paused_survey_required')
-            if action in {'review', 'discard', 'pause'}:
-                return getattr(self.service.scan, action)(session_id)
-            if action != 'resume' or app.adapter.mode != 'simulation' or not app.exact_goal_simulation:
-                raise InvalidTask('survey_sensor_adapter_not_commissioned')
-            self.session_id = session_id
-            self.sensor = HiddenSyntheticHouse(self.reference_document)
-            self.start_xy = tuple(scan['start_xy'])
-            self.started_s = now_s
-            self.visited = {tuple(c) for c in scan.get('visited_cells', [])}
-            if scan.get('map_document'):
-                self.sensor.rows = [list(r) for r in scan['map_document']['rows']]
-                self.sensor.sequence = scan.get('sensor_sequence', 0)
-                app.replace_map(NavigationMap(scan['map_document']), now_s)
-                app.localize_simulated(tuple(scan.get('last_confirmed_xy', self.start_xy)), now_s)
-            self.child_id, self.pending, self.returning = None, None, False
         app, scan = self.service.app, self.service.scan.get(session_id)
+        if not scan.get('autonomous') or scan['status'] not in {'SCANNING', 'PAUSED', 'REVIEW'}:
+            raise InvalidTask('active_survey_required')
+        if self.pending == 'save_exit' and action != 'save_exit':
+            raise InvalidTask('save_exit_in_progress')
+        if session_id != self.session_id or self.sensor is None:
+            if app.lease.owner:
+                raise InvalidTask('robot_busy')
+            self._attach(session_id)
         if action == 'resume':
             if scan['status'] != 'PAUSED' or app.lease.owner:
                 raise InvalidTask('scan_cannot_resume')
-            # The synthetic plant stops at the last confirmed pose; real
-            # integration must obtain measured pose, never copy this shortcut.
-            app.localize_simulated(app.xy, now_s)
-            self.pending = None
-            self.service.scan.resume(session_id)
-            return self._save(survey_state='OBSERVING')
-        if action not in {'pause', 'review', 'discard'}:
+            self.resume_requested_s = now_s
+            self._save(power_disconnect_allowed=False, simulated_shutdown_ready=False)
+            return self._resume(now_s)
+        if action not in {'pause', 'review', 'discard', 'save_exit'}:
             raise InvalidTask('unsupported_survey_action')
+        self.resume_requested_s = None
+        if action == 'save_exit' and scan.get('simulated_shutdown_ready'):
+            return scan
         self.pending = action
+        if action == 'save_exit':
+            self._save(exit_requested=True, simulated_shutdown_ready=False, power_disconnect_allowed=False)
         if self.child_id and app.lease.owner == self.child_id:
             app.cancel(self.child_id, now_s)
-            return self._save(survey_state='STOPPING', hints=['멈춘 것을 확인한 뒤 요청을 반영합니다.'])
+            return self._save(survey_state='STOPPING', hints=['멈춘 것을 확인한 뒤 지도를 저장합니다.' if action == 'save_exit'
+                                                           else '멈춘 것을 확인한 뒤 요청을 반영합니다.'])
+        if app.lease.owner:
+            raise InvalidTask('robot_busy')
         return self._finish_action()
+
+    def _checkpoint(self):
+        result = self.checkpoints.save(self.session_id, stopped=self.service.app.lease.owner is None)
+        # Read back all assets; disk errors never result in a ready indication.
+        verified = self.checkpoints.load(self.session_id)
+        if verified['checkpoint_id'] != result['checkpoint_id']:
+            raise InvalidTask('checkpoint_readback_failed')
+        self._save(checkpoint_id=result['checkpoint_id'], checkpoint_fallback_used=False)
+        return result
 
     def _finish_action(self):
         action, self.pending = self.pending, None
         self.child_id = None
+        if action == 'save_exit':
+            try:
+                scan = self.service.scan.get(self.session_id)
+                if not scan.get('map_document'):
+                    observed, _ = self.sensor.capture(self.service.app.xy)
+                    self.service.scan.ingest_map(self.session_id, observed)
+                self._save(status='PAUSED', survey_state='SAVING', power_disconnect_allowed=False)
+                saved = self._checkpoint()
+                if not saved['durable']:
+                    raise InvalidTask('persistent_storage_required_for_exit')
+            except Exception:
+                self._save(status='PAUSED', survey_state='SAVE_FAILED', simulated_shutdown_ready=False,
+                    power_disconnect_allowed=False, hints=['저장을 완료하지 못했습니다. 전원을 유지하고 저장을 다시 시도해 주세요.'])
+                return self.service.scan.get(self.session_id)
+            return self._save(status='PAUSED', survey_state='SAVED_FOR_EXIT', exit_requested=False,
+                simulated_shutdown_ready=True, power_disconnect_allowed=False,
+                hints=['이전 지도 이어 만들기로 재개할 수 있도록 저장했습니다.',
+                       '가상 실행 종료 준비가 끝났습니다. 실제 로봇의 전원 차단 허가는 아닙니다.'])
         scan = getattr(self.service.scan, action)(self.session_id)
         return self._save(survey_state=scan['status'], hints=[
             '현재까지의 지도는 보관했습니다. 이어하기로 다시 둘러볼 수 있습니다.'
@@ -173,6 +266,13 @@ class SimulatedHomeSurvey:
             return
         s, app = self.service, self.service.app
         scan = s.scan.get(self.session_id)
+        if scan['status'] == 'PAUSED' and self.resume_requested_s is not None:
+            if now_s-self.resume_requested_s > 5:
+                self.resume_requested_s = None
+                self._save(hints=['현재 상태 확인을 마치지 못했습니다. 준비되면 이전 지도 이어 만들기를 다시 눌러 주세요.'])
+            else:
+                self._resume(now_s)
+            return
         if scan['status'] != 'SCANNING':
             return
         if self.child_id:
@@ -202,6 +302,7 @@ class SimulatedHomeSurvey:
         self.visited.add(nav._cell(*app.xy))
         self._save(last_confirmed_xy=list(app.xy), visited_cells=[list(c) for c in sorted(self.visited)],
                    sensor_sequence=self.sensor.sequence)
+        self._checkpoint()
         view = next_view(observed, app.xy, self.visited)
         scan = s.scan.get(self.session_id)
         limit = scan['survey_legs'] >= 64 or now_s-self.started_s >= 1200
@@ -215,7 +316,7 @@ class SimulatedHomeSurvey:
         else:
             goal = view['xy']
         leg = scan['survey_legs']+1
-        rid = f'{self.session_id[:64]}-leg-{leg}'
+        rid = f'{self.session_id[:48]}-{uuid.uuid4().hex[:12]}-leg-{leg}'
         # Durable workflow identity precedes any executor effect.
         self._save(survey_state='RETURNING' if self.returning else 'EXPLORING',
                    survey_legs=leg, child_request_id=rid,

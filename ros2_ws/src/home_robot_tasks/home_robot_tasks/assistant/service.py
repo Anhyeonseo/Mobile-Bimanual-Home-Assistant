@@ -51,6 +51,8 @@ class AssistantService:
                         'external_meaning_input': True, 'semantic_api_connected': False,
                         'furniture_replay_mapping': True, 'live_furniture_mapping': False,
                         'autonomous_survey_simulation': True, 'autonomous_survey_hardware': False,
+                        'mapping_save_exit': True, 'mapping_restart_resume': True,
+                        'physical_poweroff': False,
                         'live_slam': False, 'camera_extrinsics_verified': False,
                         'physical_manipulation': False, 'synthetic_workflow': True},
                     pending=['실제 설치·센서 사양 확인', '공통 펌웨어 실물 검증',

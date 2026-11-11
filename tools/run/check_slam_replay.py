@@ -120,6 +120,26 @@ def main():
         if response.result!=0:raise RuntimeError('SLAM graph save failed')
         graph_files=[graph.with_suffix('.data'),graph.with_suffix('.posegraph')]
         if not all(f.is_file() and f.stat().st_size>0 for f in graph_files):raise RuntimeError('graph files absent')
+        from home_robot_tasks.assistant.contracts import Context
+        from home_robot_tasks.assistant.world import WorldStore
+        from home_robot_tasks.assistant.scanning import ScanManager
+        from home_robot_tasks.mapping_checkpoint import MappingCheckpoints
+        checkpoint_db=a.output/'restart-checkpoint.db'
+        checkpoint_store=WorldStore(checkpoint_db)
+        try:
+            checkpoint_context=Context(document['map_id'],document['revision'],'synthetic-map-calibration','before-restart')
+            checkpoint_scans=ScanManager(checkpoint_store,checkpoint_context)
+            checkpoint_scans.start('graph-restart','Interrupted SLAM',mode='replay')
+            checkpoint_scans.ingest_map('graph-restart',document)
+            MappingCheckpoints(checkpoint_store).save('graph-restart',stopped=True,
+                graph={'slam.data':graph.with_suffix('.data').read_bytes(),
+                       'slam.posegraph':graph.with_suffix('.posegraph').read_bytes()})
+        finally:checkpoint_store.close()
+        checkpoint_store=WorldStore(checkpoint_db)
+        try:
+            graph=MappingCheckpoints(checkpoint_store).materialize_graph('graph-restart',a.output/'restored-graph')
+        finally:checkpoint_store.close()
+        report['pose_graph_loaded_from_atomic_checkpoint']=True
         scan_enabled[0]=False;stop();maps.clear();phase='reload_start'
         launch(2);phase='deserialize'
         request=DeserializePoseGraph.Request(filename=str(graph),match_type=1)
@@ -159,6 +179,14 @@ def main():
                 mapping.depth(depth,intrinsics,pose,observed_s=float(frame),now_s=float(frame),
                     frame=profile.frame,calibration_id=profile.calibration,clock_id=context.clock_id,motion_qualified=True)
             mapping.finish(now_s=9.,output=bundle)
+            checkpoints=MappingCheckpoints(store)
+            checkpoints.save('slam-depth',stopped=True,graph={
+                'slam.data':graph.with_suffix('.data').read_bytes(),
+                'slam.posegraph':graph.with_suffix('.posegraph').read_bytes()})
+            recovered=checkpoints.load('slam-depth')
+            if not any(n.startswith('depth/') for n in recovered['assets']):
+                raise RuntimeError('native depth missing from restart checkpoint')
+            report['full_mapping_checkpoint_verified']=True
             volume=mapping.scan.archived_volume('slam-depth')
             if volume.fresh(9.):raise RuntimeError('archive improperly authorized live clearance')
             metadata,saved=read_bundle(bundle)
