@@ -9,6 +9,57 @@ import tarfile
 ROOT=Path(__file__).resolve().parents[2]
 
 
+def package_s4_inspection(destination):
+    """Reuse the S2 backup installer for the isolated, read-only mobile image."""
+    build=ROOT/'build/s1-lift-measurement'
+    cache=dict(line.split('=',1) for line in (build/'CMakeCache.txt').read_text().splitlines()
+               if '=' in line and not line.startswith(('#','//')))
+    if (cache.get('MOBILE_BUS_INSPECTION_ONLY:BOOL')!='ON'
+            or cache.get('ACTUATOR_MOBILE_FIRST_ID:STRING')!='7'
+            or cache.get('MOBILE_BOARD_PROFILE_HEADER:FILEPATH')!=''):
+        raise ValueError('explicit read-only inspection build required')
+    if any(value=='ON' and key!='MOBILE_BUS_INSPECTION_ONLY:BOOL'
+           and key.endswith(('_ONLY:BOOL','_CANDIDATE:BOOL')) for key,value in cache.items()):
+        raise ValueError('inspection package cannot contain another controller variant')
+    firmware=build/'stm32_g474_single_arm.hex'
+    sources=[p for p in (ROOT/'firmware/stm32_g474_single_arm/Core').rglob('*') if p.suffix in ('.c','.h')]
+    if any(p.stat().st_mtime>firmware.stat().st_mtime for p in sources):
+        raise ValueError('rebuild inspection firmware after source changes')
+    paths=['tools/run/probe_mobile_bus.py','tools/diagnostics/analyze_wheel_capture.py']
+    for package_name in ('home_robot_tasks','so101_arm_bridge'):
+        paths += [str(p.relative_to(ROOT)) for p in (ROOT/'ros2_ws/src'/package_name/package_name).glob('*.py')]
+    files={p:(ROOT/p).read_bytes() for p in paths}
+    files['firmware.hex']=firmware.read_bytes()
+    files['build.json']=(json.dumps(dict(preset='home-assistant-s1-lift-measurement',
+        motor_writes_permitted=False,source_sha256={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}),indent=2)+'\n').encode()
+    templates={n:(ROOT/'tools/setup/s2_deployment'/n).read_bytes() for n in ('flash.sh','program.cfg','verify-backup.py')}
+    templates['flash.sh']=templates['flash.sh'].replace(
+        b'test "${1:-}" = --motor-power-off-confirmed || exit 2',
+        b'case "${1:-}" in\n  --motor-power-off-confirmed|--load-supported-motor-power-retained) ;;\n  *) echo "Confirm supported arms and lowest/secured lift before controller reset." >&2; exit 2 ;;\nesac')
+    templates['flash.sh']=templates['flash.sh'].replace(b'mkdir -p "$logs"\n',b'').replace(
+        b"sudo -p 'S2 authentication: ' -v",
+        b"sudo -p 'S4 inspection authentication: ' -v\nmkdir -p \"$logs\"")
+    templates['program.cfg']=templates['program.cfg'].replace(b'flash write_image erase',
+        b'if {[file size @DIAGNOSTICS@/preflash-full.bin] != 524288} {error "Incomplete firmware backup"}\nflash write_image erase')
+    checksum=lambda raw:hashlib.sha256(raw).hexdigest()
+    name='s4-inspection-'+checksum(json.dumps({k:checksum(v) for k,v in sorted({**files,**templates}.items())},sort_keys=True).encode())[:12]
+    remote='/home/hyper/robot/releases/'+name
+    logs='/home/hyper/robot/shared/diagnostics/s4-inspection/'+name
+    for key,raw in templates.items():
+        files[key]=raw.replace(b'@RELEASE@',remote.encode()).replace(b'@DIAGNOSTICS@',logs.encode()).replace(b'@FIRMWARE_SHA256@',checksum(files['firmware.hex']).encode())
+    files['release.json']=(json.dumps(dict(release=name,firmware='mobile-bus-inspection-v2',
+        wheel_samples_supported=True,motor_writes_permitted=False,flashed=False,
+        requires_controller_reset=True,requires_supported_mechanism=True,
+        replaces_active_controller_after_explicit_install=True,
+        not_navigation_firmware=True,files_sha256={k:checksum(v) for k,v in sorted(files.items())}),indent=2)+'\n').encode()
+    files['SHA256SUMS']=''.join(checksum(v)+'  '+k+'\n' for k,v in sorted(files.items())).encode()
+    destination.mkdir(parents=True,exist_ok=False);folder=destination/name
+    for name_,raw in files.items():
+        path=folder/name_;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(raw)
+    with tarfile.open(destination/(name+'.tar.gz'),'w:gz') as archive:archive.add(folder,arcname=name)
+    return folder
+
+
 def package(destination,preview=None):
     destination.mkdir(parents=True,exist_ok=False)
     paths=[ROOT/'tools/run/stationary_pick.py']
@@ -102,6 +153,7 @@ def package_s4(destination):
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--preview-bundle',type=Path)
-    p.add_argument('--stage',choices=('s3','s4'),default='s3');a=p.parse_args()
-    if a.stage=='s4' and a.preview_bundle:p.error('S4 source package does not take a stationary preview')
-    print(package_s4(a.output) if a.stage=='s4' else package(a.output,a.preview_bundle))
+    p.add_argument('--stage',choices=('s3','s4','s4-inspection'),default='s3');a=p.parse_args()
+    if a.stage!='s3' and a.preview_bundle:p.error('S4 package does not take a stationary preview')
+    if a.stage=='s4-inspection':print(package_s4_inspection(a.output))
+    else:print(package_s4(a.output) if a.stage=='s4' else package(a.output,a.preview_bundle))

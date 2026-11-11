@@ -42,6 +42,7 @@ def main():
     p.add_argument('--driver-prefix', type=Path)
     p.add_argument('--sensor-frames', action='store_true', help='publish reviewed nominal sensor TFs in the isolated diagnostic domain')
     p.add_argument('--rgbd', action='store_true', help='also capture the actual D415, including unaligned native depth')
+    p.add_argument('--require-receipt-timing', action='store_true', help='check host receipt estimate and reversed ray-time ordering')
     a = p.parse_args()
     if not 4 <= a.seconds <= 120:
         p.error('seconds must be within 4..120')
@@ -181,12 +182,22 @@ def main():
                       maximum_gap_s=max(gaps), minimum_gap_s=min(gaps),
                       mean_gap_s=sum(gaps)/len(gaps), health=health.report(),
                       missing_sector_observed=any(r['ranges'][:6] == [None]*6 and r['valid'] == 354 for r in records))
+        if a.require_receipt_timing:
+            timing_ok = all(r['time_increment'] < 0 and
+                abs(360*r['time_increment']+r['scan_time']) < 1e-6 and
+                0 <= r['arrival']-r['observed_s'] <= .3 for r in records)
+            report['receipt_timing'] = dict(passed=timing_ok,
+                basis='host serial receipt minus packet serialization; negative offsets in increasing-angle array',
+                hardware_exposure_latency_calibrated=False,
+                maximum_first_ray_age_s=max(r['arrival']-r['observed_s'] for r in records))
         if a.fault == 'sensor_loss':
             report['passed'] = not report['health']['scan_ready'] and time.monotonic() - records[-1]['arrival'] > .5
         else:
             report['passed'] = report['gaps_over_035'] == 0 and report['health']['scan_ready']
             if a.fault == 'missing_last':
                 report['passed'] &= report['missing_sector_observed']
+        if a.require_receipt_timing:
+            report['passed'] &= timing_ok
         if tf_buffer is not None:
             import numpy as np
             from home_robot_tasks.ros_rgbd_source import quaternion_transform

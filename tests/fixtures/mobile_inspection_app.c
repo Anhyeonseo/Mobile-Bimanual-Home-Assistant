@@ -5,6 +5,7 @@
 static UART_HandleTypeDef host, servo;
 static const unsigned char *input;
 static unsigned remaining, reads;
+uint32_t HAL_GetTick(void) {static uint32_t tick;return tick++;}
 static int fail_identity, fail_reference, skip_service;
 static ServoBusHealth health;
 static ServoBusDiagnostics diag;
@@ -30,7 +31,7 @@ HAL_StatusTypeDef Servo_ReadData(uint8_t id,uint8_t address,uint8_t length,uint8
     health.transaction_count++;
     memset(&diag,0,sizeof(diag));
     assert((address==3&&length==4)||(address==33&&length==1)||
-           (address==40&&length==1)||(address==56&&length==2));
+           (address==40&&length==1)||(address==56&&(length==2||length==4)));
     if((fail_identity|| (fail_reference&&id==1))&&address==3) {
         diag.reason=SERVO_BUS_FAILURE_RX_TIMEOUT;return HAL_TIMEOUT;
     }
@@ -60,5 +61,12 @@ int main(void) {
     feed("LIFT\n");
     assert(reads==before+4&&strstr(output,"\"id\":10"));
     assert(strstr(output,"\"read_sequence\":")&&!strstr(output,"\"id\":7"));
+    before=reads;output[0]=0;feed("WHEELS\n");
+    assert(reads==before+3&&strstr(output,"\"sequence\":1"));
+    assert(strstr(output,"\"id\":7")&&strstr(output,"\"id\":9")&&!strstr(output,"\"id\":10"));
+    assert(strstr(output,"\"position_raw\":0")&&strstr(output,"\"speed_raw\":0"));
+    skip_service=1;output[0]=0;feed("WHEELS\n");
+    assert(strstr(output,"\"sequence\":2")&&strstr(output,"\"ok\":false"));
+    assert(strstr(output,"\"speed_raw\":-1")&&strstr(output,"\"motor_write_commands\":0"));
     return 0;
 }

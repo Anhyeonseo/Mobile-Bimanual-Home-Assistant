@@ -13,7 +13,7 @@ from . import s2_development, s2_geometry
 from .s2_urdf import _rpy
 
 
-def sensor_frames(root, mount, *, depth_to_color=None):
+def sensor_frames(root, mount, *, depth_to_color=None, navigation_root=False):
     root = Path(root)
     geometry = s2_geometry.load_geometry(root/'config/home_assistant/official_geometry.json')
     profile = s2_development.released_profile(root, geometry)
@@ -38,6 +38,10 @@ def sensor_frames(root, mount, *, depth_to_color=None):
     frames = [('base_link', 'base_footprint', floor),
               ('base_link', 'lidar_a', lidar),
               ('base_link', profile['source_frame'], s2_geometry.rigid(profile['base_from_optical']))]
+    if navigation_root:
+        # RosBaseIO supplies odom -> base_footprint. Do not give that link a
+        # second parent when the observation-only tree is used for navigation.
+        frames[0] = ('base_footprint', 'base_link', np.linalg.inv(floor))
     if depth_to_color is not None:
         color_from_depth = np.eye(4)
         color_from_depth[:3, :3] = np.asarray(depth_to_color['rotation_column_major']).reshape(3, 3, order='F')
@@ -59,6 +63,6 @@ def sensor_frames(root, mount, *, depth_to_color=None):
                 mount_setup_method=mount['setup_method'], transforms=result)
 
 
-def load_sensor_frames(root, *, depth_to_color=None):
+def load_sensor_frames(root, *, depth_to_color=None, navigation_root=False):
     mount = json.loads((Path(root)/'config/home_assistant/lidar_mount.review.json').read_text())
-    return sensor_frames(root, mount, depth_to_color=depth_to_color)
+    return sensor_frames(root, mount, depth_to_color=depth_to_color, navigation_root=navigation_root)

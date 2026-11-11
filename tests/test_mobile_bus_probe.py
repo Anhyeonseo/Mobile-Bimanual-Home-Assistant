@@ -74,3 +74,31 @@ def test_failed_reference_preserves_mobile_results():
     report=module.probe(port,True)
     assert not report["reference_read_ok"] and not report["all_reads_ok"]
     assert report["motors"]==motors
+
+
+def wheel_replies():
+    return [{'wheels':'begin','sequence':7},
+        *[dict(id=i,ok=True,hal_status=0,started_tick_ms=100,ended_tick_ms=102,
+               position_raw=4090,speed_raw=0x800a) for i in (7,8,9)],
+        {'wheels':'end','motor_write_commands':0}]
+
+
+def test_wheel_sampling_retains_device_ticks_and_signed_raw_without_commands():
+    port=Port(wheel_replies())
+    result=module.wheel_sample(port,INFO|{'wheel_samples_supported':True})
+    assert port.writes==[b'WHEELS\n']
+    assert result['wheels'][0]['speed_raw']==0x800a
+    assert result['wheels'][0]['started_tick_ms']==100
+
+
+def test_old_inspection_image_is_not_sent_new_command():
+    port=Port([])
+    with pytest.raises(RuntimeError):module.wheel_sample(port,INFO)
+    assert not port.writes
+
+
+@pytest.mark.parametrize('change',[{'ok':False,'speed_raw':-1},{'id':10},
+    {'ended_tick_ms':90},{'position_raw':4096},{'speed_raw':65536}])
+def test_bad_wheel_sample_does_not_become_a_zero_measurement(change):
+    replies=wheel_replies();replies[1].update(change)
+    with pytest.raises(ValueError):module.wheel_sample(Port(replies),INFO|{'wheel_samples_supported':True})

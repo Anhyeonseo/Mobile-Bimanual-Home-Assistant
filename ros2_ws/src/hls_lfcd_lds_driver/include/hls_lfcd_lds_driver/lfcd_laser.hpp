@@ -49,6 +49,7 @@ class LFCDLaser
 {
 public:
   uint16_t rpms;  ///< @brief RPMS derived from the rpm bytes in an LFCD packet
+  double index_zero_steady_s = 0.;  // Host serial estimate, not hardware exposure time.
   /**
   * @brief Constructs a new LFCDLaser attached to the given serial port
   * @param port The string for the serial port device to attempt to connect to, e.g. "/dev/ttyUSB0"

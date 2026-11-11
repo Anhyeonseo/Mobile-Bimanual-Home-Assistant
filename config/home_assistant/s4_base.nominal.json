@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "mode": "nominal_review_only",
+  "hardware_enabled": false,
+  "motion_authorized": false,
+  "source_sha256": {
+    "config/home_assistant/official_geometry.json": "f306d536f9073d231993b87c6859af886fed1f3832ec5f657bab2a684cb3cb63",
+    "config/home_assistant/s2_coordinates.development.json": "8ac55807b8a20abec68f833f15bb04c30f1d2ca90424cb126185cd0cc66557f6",
+    "tools/diagnostics/s2_viewer/meshes.json": "115a74533411499ae7bcc73f1682e03cc091e107e20ddb08bd2daca7fc4275a8",
+    "tools/run/pulse_mobile_base.py": "c89c4ba50f1ca9ed4375d6c0afddda759624dad837b0303c89d708e2b0233963"
+  },
+  "base_frame": "base_footprint",
+  "wheel_order": [
+    7,
+    8,
+    9
+  ],
+  "wheels": [
+    {
+      "motor_id": 7,
+      "cad_joint": "wheel2",
+      "x_m": -0.08785833333333333,
+      "y_m": 0.15569846666666665,
+      "rolling_angle_rad": -2.62638898038469,
+      "radius_m": 0.04949552193284035
+    },
+    {
+      "motor_id": 8,
+      "cad_joint": "wheel1",
+      "x_m": -0.09102633333333333,
+      "y_m": -0.15373153333333334,
+      "rolling_angle_rad": -0.5391036732051034,
+      "radius_m": 0.04949552193284035
+    },
+    {
+      "motor_id": 9,
+      "cad_joint": "wheel3",
+      "x_m": 0.17888466666666666,
+      "y_m": -0.001966933333333333,
+      "rolling_angle_rad": 1.5553197052538774,
+      "radius_m": 0.04949552193284035
+    }
+  ],
+  "unit_twist_wheel_rates": {
+    "forward": [
+      -17.581234708002512,
+      17.338319450187836,
+      0.31267482597088575
+    ],
+    "left": [
+      -9.95468023947113,
+      -10.371988776084718,
+      20.2014283401247
+    ],
+    "counterclockwise": [
+      3.611972900848973,
+      3.609570542162013,
+      3.6143407853514558
+    ]
+  },
+  "radius_basis": "original full STL wheel contact at nominal CAD axle poses, not the measured floor-to-chassis correction",
+  "nominal_vs_referenced_floor_difference_m": 0.02070447806715965,
+  "raw_per_rad_s": null,
+  "command_gain": null,
+  "braking_m_s2": null,
+  "pending": [
+    "verify actual wheel/ID direction",
+    "encoder speed-unit fit under movement",
+    "command versus measured speed gain",
+    "lidar/localization displacement versus wheel odometry",
+    "floor braking and slip",
+    "shared controller bus timing and arm/lift hold"
+  ]
+}

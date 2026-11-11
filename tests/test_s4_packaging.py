@@ -35,3 +35,34 @@ def test_s4_source_release_is_hashed_and_contains_no_implicit_flash(tmp_path,mon
     with tarfile.open(folder.parent/(folder.name+'.tar.gz')) as archive:
         assert all(n.startswith(folder.name+'/') or n==folder.name for n in archive.getnames())
     assert not (folder/'flash.sh').exists()
+
+
+def test_s4_inspection_package_reuses_backup_and_has_no_automatic_install(tmp_path,monkeypatch):
+    import os
+    root=tmp_path/'source';build=root/'build/s1-lift-measurement';build.mkdir(parents=True)
+    cache='MOBILE_BUS_INSPECTION_ONLY:BOOL=ON\nACTUATOR_MOBILE_FIRST_ID:STRING=7\nMOBILE_BOARD_PROFILE_HEADER:FILEPATH=\n'
+    (build/'CMakeCache.txt').write_text(cache)
+    paths=['tools/run/probe_mobile_bus.py','tools/diagnostics/analyze_wheel_capture.py',
+           'ros2_ws/src/home_robot_tasks/home_robot_tasks/review.py',
+           'ros2_ws/src/so101_arm_bridge/so101_arm_bridge/serial_port.py',
+           'firmware/stm32_g474_single_arm/Core/Src/mobile_bus_inspection_app.c']
+    for name in paths:
+        p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('// fixture\n')
+        os.utime(p,(1,1))
+    for name in ('flash.sh','program.cfg','verify-backup.py'):
+        p=root/'tools/setup/s2_deployment'/name;p.parent.mkdir(parents=True,exist_ok=True)
+        p.write_bytes((packaging.ROOT/'tools/setup/s2_deployment'/name).read_bytes())
+    (build/'stm32_g474_single_arm.hex').write_text(':00000001FF\n')
+    monkeypatch.setattr(packaging,'ROOT',root)
+    folder=packaging.package_s4_inspection(tmp_path/'out')
+    manifest=json.loads((folder/'release.json').read_text())
+    assert not manifest['motor_writes_permitted'] and not manifest['flashed'] and manifest['not_navigation_firmware']
+    assert '--load-supported-motor-power-retained' in (folder/'flash.sh').read_text()
+    installer=(folder/'flash.sh').read_text()
+    assert installer.index('S4 inspection authentication')<installer.index('mkdir -p "$logs"')
+    program=(folder/'program.cfg').read_text()
+    assert program.index('dump_image')<program.index('Incomplete firmware backup')<program.index('flash write_image erase')
+    assert 'boot-journal-after.bin' in program
+    (build/'CMakeCache.txt').write_text(cache+'MOBILE_WHEEL_PULSE_ONLY:BOOL=ON\n')
+    import pytest
+    with pytest.raises(ValueError,match='another controller'):packaging.package_s4_inspection(tmp_path/'bad')

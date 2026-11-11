@@ -19,7 +19,12 @@
     "new_residual_compensation_applied": false
   },
   "measurement_inputs": {
-    "wheel_geometry_and_raw_speed_scale": null,
+    "wheel_geometry_and_raw_speed_scale": {
+      "status": "nominal_geometry_and_read_only_capture_prepared_actual_scale_unmeasured",
+      "geometry": "config/home_assistant/s4_base.nominal.json",
+      "raw_per_rad_s": null,
+      "hardware_enabled": false
+    },
     "lidar_base_extrinsics": {
       "status": "operator_reviewed_nominal_not_precision_calibrated",
       "evidence": "config/home_assistant/lidar_mount.review.json",
@@ -66,7 +71,7 @@
     "A successful local simulation does not satisfy a physical acceptance item.",
     "2026-11-11: source and isolated runtime uploaded over SSH; camera and synthetic ROS checks performed. No controller reset, firmware flash, power change, or motor command."
   ],
-  "target_observed_on": "2026-11-11",
+  "target_observed_on": "2026-11-12",
   "target_environment": {
     "jetpack": "7.2.1-b49",
     "l4t": "39.2.1",
@@ -83,12 +88,15 @@
     "lidar_evidence": "config/home_assistant/lidar_device.connected.observed.json",
     "lidar_ros_scan_received": true,
     "lidar_cadence_qualified": true,
-    "lidar_cadence_scope": "stationary 60 seconds; patched driver, 291 frames, max gap 0.201263 s, no gaps over 0.35 s; moving timing/load unqualified",
+    "lidar_cadence_scope": "stationary concurrent RGB-D 60 seconds; 291 lidar frames, max gap 0.201432 s, no gaps over 0.35 s; moving timing/load unqualified",
     "replacement_lidar_mount_fixed_user_confirmed": true,
     "mobile_endpoint_available": false,
     "mobile_endpoint_inspection": "protocol-v2 HELLO and read-only mobile queries; S3 0x00024911 does not attach mobile endpoint",
     "stationary_sensor_tf_and_concurrent_capture_passed": true,
-    "sensor_observation_evidence": "config/home_assistant/s4_sensors.connected.observed.json"
+    "sensor_observation_evidence": "config/home_assistant/s4_sensors.connected.observed.json",
+    "preflight_evidence": "config/home_assistant/s4_preflight.prepared.json",
+    "lidar_timestamp_basis": "host serial receipt estimate; negative per-ray offsets; USB/device latency and moving deskew uncalibrated",
+    "controller_replacement_requires_admin_authentication": true
   },
   "operator_reported_state": {
     "local_date": "2026-11-12",

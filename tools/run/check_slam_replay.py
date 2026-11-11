@@ -21,6 +21,7 @@ sys.path.insert(0,str(ROOT/'ros2_ws/src/home_robot_tasks'))
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--output',type=Path,default=ROOT/'output/s4-local/slam')
+    p.add_argument('--reverse-ray-timing',action='store_true',help='exercise signed ray-time metadata used by the LDS driver')
     a=p.parse_args();a.output=a.output.resolve();a.output.mkdir(parents=True,exist_ok=True)
     import rclpy
     from rclpy.qos import QoSProfile,DurabilityPolicy
@@ -53,6 +54,7 @@ def main():
         msg=LaserScan();msg.header.stamp=now;msg.header.frame_id='laser';msg.angle_min=-math.pi
         msg.angle_increment=math.tau/360;msg.angle_max=math.pi-msg.angle_increment
         msg.range_min=.12;msg.range_max=3.5;msg.scan_time=.1
+        if a.reverse_ray_timing:msg.time_increment=-msg.scan_time/360
         msg.ranges=[]
         for i in range(360):
             angle=msg.angle_min+i*msg.angle_increment;dx,dy=math.cos(angle),math.sin(angle)
@@ -65,7 +67,8 @@ def main():
         if moving[0]:index[0]+=1
     node.create_timer(.1,publish)
     phase='startup';service_namespace='/offline_s4'
-    process=None;slam_active=False;logs=[];report=dict(mode='real_slam_synthetic_scan_tf',hardware_commands=0,physical_map_verified=False,passed=False)
+    process=None;slam_active=False;logs=[];report=dict(mode='real_slam_synthetic_scan_tf',hardware_commands=0,
+        reverse_ray_timing=a.reverse_ray_timing,physical_deskew_verified=False,physical_map_verified=False,passed=False)
     def until(predicate,seconds):
         deadline=time.monotonic()+seconds
         while not predicate():

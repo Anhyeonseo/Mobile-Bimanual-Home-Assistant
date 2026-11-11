@@ -36,6 +36,7 @@
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <boost/asio.hpp>
 #include <hls_lfcd_lds_driver/lfcd_laser.hpp>
+#include <hls_lfcd_lds_driver/scan_timing.hpp>
 #include <chrono>
 #include <cerrno>
 #include <fcntl.h>
@@ -124,10 +125,11 @@ bool LFCDLaser::poll(sensor_msgs::msg::LaserScan::SharedPtr scan)
   scan->ranges.assign(frame->ranges.begin(), frame->ranges.end());
   scan->intensities.assign(frame->intensities.begin(), frame->intensities.end());
   rpms = static_cast<uint16_t>(frame->rpm);
-  // Preserve upstream timing metadata. Moving-scan timestamp/deskew remains
-  // a separate commissioning item; this patch qualifies framing and cadence.
-  scan->time_increment = static_cast<float>(1.0 / (frame->rpm * 6));
-  scan->scan_time = static_cast<float>(60.0 / frame->rpm);
+  const auto timing = scan_timing(*frame, received);
+  if (!timing) {return false;}
+  index_zero_steady_s = timing->index_zero_steady_s;
+  scan->time_increment = static_cast<float>(timing->time_increment_s);
+  scan->scan_time = static_cast<float>(timing->scan_time_s);
   return true;
 }
 }  // namespace hls_lfcd_lds
@@ -165,7 +167,10 @@ int main(int argc, char ** argv)
       auto scan = std::make_shared<sensor_msgs::msg::LaserScan>();
       scan->header.frame_id = frame_id;
       if (!laser.poll(scan)) {continue;}
-      scan->header.stamp = node->now();
+      const double steady_now = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+      scan->header.stamp = node->now() - rclcpp::Duration::from_seconds(
+        steady_now - laser.index_zero_steady_s);
       laser_pub->publish(*scan);
     }
     laser.close();

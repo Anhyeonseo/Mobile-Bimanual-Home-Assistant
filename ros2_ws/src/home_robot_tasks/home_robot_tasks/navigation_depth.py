@@ -14,6 +14,19 @@ from .fetch import InvalidTask
 from .navigation import number
 
 
+def native_endpoints(depth, valid, intrinsics, transform):
+    """Project already validated rectified native pixels, without occupancy claims.
+
+    The live caller separately enforces identity, freshness and motion quality.
+    Offline inspection can reuse the geometry without manufacturing those gates.
+    """
+    fx,fy,cx,cy=intrinsics
+    vv,uu=np.nonzero(valid)
+    z=depth[vv,uu]
+    xyz=np.column_stack(((uu-cx)*z/fx,(vv-cy)*z/fy,z))
+    return xyz@transform[:3,:3].T+transform[:3,3]
+
+
 @dataclass(frozen=True)
 class DepthProfile:
     frame: str
@@ -119,10 +132,7 @@ class DepthVolume:
                 raise InvalidTask('insufficient valid depth')
             # All accepted pixels are used. Decimation, if needed, must preserve
             # nearest obstacles and match the supplied intrinsics upstream.
-            vv, uu = np.nonzero(valid)
-            z = depth[vv,uu]
-            xyz = np.column_stack(((uu-cx)*z/fx, (vv-cy)*z/fy, z))
-            points = xyz@transform[:3,:3].T + transform[:3,3]
+            points = native_endpoints(depth,valid,(fx,fy,cx,cy),transform)
             origin = transform[:3,3]
             hits, cleared = set(), set()
             low = math.floor(p.minimum_height_m/p.resolution_m)

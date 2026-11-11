@@ -158,8 +158,8 @@ jobs:
           colcon build --base-paths ros2_ws/src --packages-select so101_interfaces so101_arm_bridge home_robot_tasks hls_lfcd_lds_driver
           source install/setup.bash
           python3 tools/run/check_fetch_ros_ports.py
-          python3 tools/run/check_lds01_driver.py --output output/lds-missing-sector
-          python3 tools/run/check_lds01_driver.py --fault sensor_loss --output output/lds-sensor-loss
+          python3 tools/run/check_lds01_driver.py --output output/lds-missing-sector --require-receipt-timing --sensor-frames
+          python3 tools/run/check_lds01_driver.py --fault sensor_loss --output output/lds-sensor-loss --require-receipt-timing
 
   ros-integration:
     runs-on: ubuntu-24.04
@@ -188,7 +188,7 @@ jobs:
           python3 tools/run/check_moveit_planning.py --retain-moveit-plugin
           python3 tools/setup/fetch_carry_meshes.py --output output/carry-model-meshes
           python3 tools/diagnostics/check_carry_moveit.py --mobile-mesh-dir output/carry-model-meshes --output output/carry-moveit --include-place
-          python3 tools/run/check_slam_replay.py --output output/s4-slam-depth
+          python3 tools/run/check_slam_replay.py --output output/s4-slam-depth --reverse-ray-timing
           python3 tools/run/check_navigation_bridge.py | tee output/s4-navigation-bridge.json
           for fault in none scan_loss tf_loss; do
             python3 tools/run/check_nav2_closed_loop.py --fault "$fault" --output "output/nav2-$fault"

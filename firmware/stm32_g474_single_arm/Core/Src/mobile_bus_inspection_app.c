@@ -21,6 +21,9 @@ static UART_HandleTypeDef *host;
 static char command[16];
 static unsigned used;
 static uint32_t read_sequence;
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+static uint32_t wheel_sequence;
+#endif
 static int discard;
 
 static void send_line(const char *line) {
@@ -41,6 +44,9 @@ static void info(void) {
     (void)snprintf(line, sizeof(line),
         "{\"firmware\":\"%s\",\"host_baud\":921600,"
         "\"servo_baud\":1000000,\"reference_id\":1,\"motion_enabled\":false,"
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+        "\"wheel_samples_supported\":true,"
+#endif
         "\"lift_read_supported\":%s,\"ids\":[%u,%u,%u,%u]}\r\n",
         INSPECTION_NAME,
 #if HOST_MOBILE_BUS_INSPECTION_ONLY
@@ -116,6 +122,28 @@ static void scan(void) {
         report_motor(actuator_mobile_axis_id(axis), 0);
     send_line("{\"scan\":\"end\",\"motor_write_commands\":0}\r\n");
 }
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+static void wheel_sample(void) {
+    char line[320];
+    (void)snprintf(line,sizeof(line),"{\"wheels\":\"begin\",\"sequence\":%lu}\r\n",
+        (unsigned long)++wheel_sequence);
+    send_line(line);
+    for(unsigned axis=0;axis<3;axis++) {
+        uint8_t id=actuator_mobile_axis_id(axis),data[4]={0};
+        uint32_t started=HAL_GetTick();
+        HAL_StatusTypeDef status=Servo_ReadData(id,56,4,data);
+        uint32_t ended=HAL_GetTick();
+        (void)snprintf(line,sizeof(line),
+            "{\"id\":%u,\"ok\":%s,\"started_tick_ms\":%lu,\"ended_tick_ms\":%lu,"
+            "\"position_raw\":%d,\"speed_raw\":%d,\"hal_status\":%u}\r\n",
+            (unsigned)id,status==HAL_OK?"true":"false",(unsigned long)started,(unsigned long)ended,
+            status==HAL_OK?data[0]|(data[1]<<8):-1,status==HAL_OK?data[2]|(data[3]<<8):-1,
+            (unsigned)status);
+        send_line(line);
+    }
+    send_line("{\"wheels\":\"end\",\"motor_write_commands\":0}\r\n");
+}
+#endif
 #if HOST_MOBILE_WHEEL_SETUP_ONLY
 static void prepare_wheels(void) {
     MobileWheelSetupResult wheels[3];
@@ -180,6 +208,9 @@ void SingleArmApp_Init(UART_HandleTypeDef *host_uart, UART_HandleTypeDef *servo_
     host = host_uart;
     used = 0; discard = 0;
     read_sequence = 0;
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+    wheel_sequence = 0;
+#endif
     ServoBus_Init(servo_uart, NULL, NULL);
     /* Boot only initializes UART/DMA bookkeeping. No servo transactions. */
     info();
@@ -196,6 +227,7 @@ void SingleArmApp_Process(void) {
         else if (!discard && !strcmp(command, "SCAN")) scan();
 #if HOST_MOBILE_BUS_INSPECTION_ONLY
         else if (!discard && !strcmp(command, "LIFT")) report_motor(ACTUATOR_LIFT_ID, 0);
+        else if (!discard && !strcmp(command, "WHEELS")) wheel_sample();
 #endif
 #if HOST_MOBILE_WHEEL_SETUP_ONLY
         else if (!discard && !strcmp(command, "PREPARE_WHEELS")) prepare_wheels();

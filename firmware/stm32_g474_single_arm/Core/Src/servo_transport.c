@@ -322,7 +322,9 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
         !((data[5] == 3 && data[6] == 4) ||
           (data[5] == 33 && data[6] == 1) ||
           (data[5] == 40 && data[6] == 1) ||
-          (data[5] == 56 && data[6] == 2))) return false;
+          (data[5] == 56 && data[6] == 2) ||
+          (data[2] >= ACTUATOR_WHEEL_0_ID && data[2] <= ACTUATOR_WHEEL_2_ID &&
+           data[5] == 56 && data[6] == 4))) return false;
 #else
     if (!bus->read_only) return true;
 #endif

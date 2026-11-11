@@ -71,6 +71,15 @@ def test_native_retention_requires_image_capture():
         Capture({'camera_device': {}}, retain_native_depth=True)
 
 
+def test_navigation_tree_leaves_footprint_free_for_measured_odometry_parent():
+    stationary = load_sensor_frames(ROOT)['transforms']
+    navigation = load_sensor_frames(ROOT, navigation_root=True)['transforms']
+    assert not any(t['child']=='base_footprint' for t in navigation)
+    assert navigation[0]['parent']=='base_footprint' and navigation[0]['child']=='base_link'
+    np.testing.assert_allclose(np.array(navigation[0]['matrix']) @ stationary[0]['matrix'], np.eye(4))
+    assert navigation[1:] == stationary[1:]
+
+
 def test_native_capture_keeps_full_frame_and_bounded_copies(monkeypatch):
     from unittest.mock import MagicMock
     from home_robot_tasks import s2_rgbd_acquisition as acquisition

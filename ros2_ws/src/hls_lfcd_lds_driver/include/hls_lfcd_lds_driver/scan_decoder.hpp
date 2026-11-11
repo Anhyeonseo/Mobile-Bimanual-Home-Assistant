@@ -18,6 +18,8 @@ struct DecodedScan
   unsigned sectors = 0;
   double rpm = 0.;
   double first_received = 0.;
+  double last_received = 0.;
+  unsigned last_sector = 0;
 };
 
 class ScanDecoder
@@ -116,6 +118,8 @@ private:
       return std::nullopt;
     }
     last_ = index;
+    scan_.last_received = received;
+    scan_.last_sector = index;
     scan_.rpm += (p[2] | (p[3] << 8)) / 10.;
     ++scan_.sectors;
     for (unsigned k = 0; k < 6; ++k) {
