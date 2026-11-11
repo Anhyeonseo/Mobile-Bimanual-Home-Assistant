@@ -20,7 +20,13 @@
   },
   "measurement_inputs": {
     "wheel_geometry_and_raw_speed_scale": null,
-    "lidar_base_extrinsics": null,
+    "lidar_base_extrinsics": {
+      "status": "operator_reviewed_nominal_not_precision_calibrated",
+      "evidence": "config/home_assistant/lidar_mount.review.json",
+      "basis": "official geometry placement, actual scan/model occlusion comparison, approximate operator visual confirmation",
+      "stationary_tf_implementation": "home_robot_tasks.s4_sensor_frames",
+      "precision_accuracy_qualified": false
+    },
     "lidar_range_and_cadence": null,
     "transport_body_payload_envelope": null,
     "braking_and_floor_traction": null,
@@ -78,6 +84,18 @@
     "lidar_ros_scan_received": true,
     "lidar_cadence_qualified": true,
     "lidar_cadence_scope": "stationary 60 seconds; patched driver, 291 frames, max gap 0.201263 s, no gaps over 0.35 s; moving timing/load unqualified",
-    "replacement_lidar_mount_fixed_user_confirmed": true
+    "replacement_lidar_mount_fixed_user_confirmed": true,
+    "mobile_endpoint_available": false,
+    "mobile_endpoint_inspection": "protocol-v2 HELLO and read-only mobile queries; S3 0x00024911 does not attach mobile endpoint",
+    "stationary_sensor_tf_and_concurrent_capture_passed": true,
+    "sensor_observation_evidence": "config/home_assistant/s4_sensors.connected.observed.json"
+  },
+  "operator_reported_state": {
+    "local_date": "2026-11-12",
+    "motor_power": "ON",
+    "arms_supported": true,
+    "lift_lowest": true,
+    "grippers_empty": true,
+    "scope": "operator confirmation for this stationary inspection, not reusable live travel interlocks"
   }
 }

@@ -2,7 +2,8 @@
 """Exercise the installed LDS driver: virtual serial by default, explicit --port for hardware.
 
 Reuses the official executable and navigation health gate. Only sensor start/pause
-commands are sent; no base/controller interfaces or assumed mounting TF exist here.
+commands are sent; no base/controller interfaces exist here. Optional reviewed
+sensor TFs and native RGB-D capture are stationary observation only.
 """
 import argparse
 import hashlib
@@ -39,11 +40,15 @@ def main():
     p.add_argument('--port', help='explicit CP210x port: starts the physical lidar')
     p.add_argument('--fault', choices=('none', 'missing_last', 'sensor_loss'), default='missing_last')
     p.add_argument('--driver-prefix', type=Path)
+    p.add_argument('--sensor-frames', action='store_true', help='publish reviewed nominal sensor TFs in the isolated diagnostic domain')
+    p.add_argument('--rgbd', action='store_true', help='also capture the actual D415, including unaligned native depth')
     a = p.parse_args()
     if not 4 <= a.seconds <= 120:
         p.error('seconds must be within 4..120')
     if a.port and a.fault != 'none':
         p.error('hardware capture requires --fault none')
+    if a.rgbd and (not a.port or not a.sensor_frames):
+        p.error('RGB-D capture requires an explicit lidar port and --sensor-frames')
     if os.environ.get('ROS_AUTOMATIC_DISCOVERY_RANGE') != 'LOCALHOST':
         p.error('set ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST before this diagnostic')
     a.output.mkdir(parents=True, exist_ok=False)
@@ -88,12 +93,16 @@ def main():
         records.append(dict(arrival=now, stamp=stamp, observed_s=observed,
                             count=len(values), valid=sum(math.isfinite(v) and m.range_min <= v <= m.range_max for v in values),
                             ranges=[v if math.isfinite(v) else None for v in values],
+                            frame=m.header.frame_id, angle_min=m.angle_min, angle_increment=m.angle_increment,
                             scan_time=m.scan_time, time_increment=m.time_increment,
                             health_error=error))
 
     node.create_subscription(LaserScan, 'scan', receive, qos_profile_sensor_data)
     log = (a.output/'driver.log').open('w')
     proc = None
+    camera = None
+    camera_records = []
+    tf_buffer = None
     commands = bytearray()
     index = 0
     next_packet = None
@@ -102,6 +111,34 @@ def main():
                   moving_mapping_qualified=False, driver_path=str(executable),
                   driver_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(), passed=False)
     try:
+        if a.rgbd:
+            import numpy as np
+            from home_robot_tasks.s2_rgbd_acquisition import Capture
+            profile = json.loads((ROOT/'config/home_assistant/s2_coordinates.development.json').read_text())
+            reference = json.loads((ROOT/'config/home_assistant/camera_device.observed.json').read_text())
+            camera = Capture(profile, reference_evidence=reference, retain_frame=True, retain_native_depth=True)
+            camera.__enter__()
+        if a.sensor_frames:
+            from home_robot_tasks.s4_sensor_frames import load_sensor_frames
+            from geometry_msgs.msg import TransformStamped
+            from tf2_ros import Buffer, TransformListener, StaticTransformBroadcaster
+            metadata = camera.images[camera.buffer[-1]['capture_id']][2] if camera else None
+            frame_report = load_sensor_frames(ROOT, depth_to_color=metadata['depth_to_color'] if metadata else None)
+            tf_buffer = Buffer()
+            listener = TransformListener(tf_buffer, node)
+            broadcaster = StaticTransformBroadcaster(node)
+            messages = []
+            for entry in frame_report['transforms']:
+                message = TransformStamped()
+                message.header.stamp = node.get_clock().now().to_msg()
+                message.header.frame_id, message.child_frame_id = entry['parent'], entry['child']
+                for key, value in zip(('x', 'y', 'z'), entry['translation_m']):
+                    setattr(message.transform.translation, key, value)
+                for key, value in zip(('x', 'y', 'z', 'w'), entry['quaternion_xyzw']):
+                    setattr(message.transform.rotation, key, value)
+                messages.append(message)
+            broadcaster.sendTransform(messages)
+            report['sensor_frames'] = frame_report
         proc = subprocess.Popen([str(executable), '--ros-args', '-r', '__ns:=/lds_commissioning',
                                  '-p', 'port:='+port, '-p', 'frame_id:=lidar_a'], stdout=log, stderr=subprocess.STDOUT)
         started = time.monotonic()
@@ -128,6 +165,15 @@ def main():
                     index += 1
                     next_packet += 1 / 300
             rclpy.spin_once(node, timeout_sec=.001)
+            if camera:
+                record, (color, aligned, metadata) = camera.next_frame()
+                native = camera.native_depth_images[record['capture_id']]
+                depth_m = native * metadata['depth_scale_m']
+                valid = (depth_m >= .12) & (depth_m <= 4.)
+                camera_records.append(dict(capture_id=record['capture_id'],
+                    color_time_s=record['color_time_s'], depth_time_s=record['depth_time_s'],
+                    native_valid_fraction=float(valid.mean()),
+                    native_row_band_valid_fractions=[float(b.mean()) for b in np.array_split(valid, 3)]))
         if len(records) < 5:
             raise RuntimeError('insufficient scans')
         gaps = [b['observed_s'] - x['observed_s'] for x, b in zip(records, records[1:])]
@@ -141,8 +187,35 @@ def main():
             report['passed'] = report['gaps_over_035'] == 0 and report['health']['scan_ready']
             if a.fault == 'missing_last':
                 report['passed'] &= report['missing_sector_observed']
+        if tf_buffer is not None:
+            import numpy as np
+            from home_robot_tasks.ros_rgbd_source import quaternion_transform
+            checks = []
+            for entry in frame_report['transforms']:
+                actual = tf_buffer.lookup_transform(entry['parent'], entry['child'], rclpy.time.Time()).transform
+                error = float(np.max(np.abs(np.array(quaternion_transform(actual.translation, actual.rotation)) - entry['matrix'])))
+                checks.append(dict(parent=entry['parent'], child=entry['child'], maximum_matrix_error=error))
+            # Verify the composed floor-to-lidar path, not just each direct edge.
+            actual = tf_buffer.lookup_transform('base_footprint', 'lidar_a', rclpy.time.Time()).transform
+            report['tf_lookup_checks'] = checks
+            report['scan_height_above_floor_m'] = actual.translation.z
+            # SDK rotation entries are float32: quaternion conversion removes
+            # their tiny orthogonality roundoff. This is not a metric tolerance.
+            report['tf_matrix_roundoff_limit'] = 1e-7
+            report['passed'] &= all(c['maximum_matrix_error'] < 1e-7 for c in checks)
+        if camera:
+            gaps = [b['depth_time_s']-x['depth_time_s'] for x, b in zip(camera_records, camera_records[1:])]
+            report['rgbd'] = dict(frames=len(camera_records), native_shape=list(native.shape),
+                maximum_depth_gap_s=max(gaps) if gaps else None,
+                minimum_native_valid_fraction=min(r['native_valid_fraction'] for r in camera_records),
+                calibration_equivalence=record['calibration_equivalence'],
+                physical_sync_qualified=False, full_height_travel_coverage_qualified=False)
+            report['passed'] &= len(camera_records) >= 5 and bool(gaps) and 0 < min(gaps) <= max(gaps) < .2
+            np.savez_compressed(a.output/'rgbd-last.npz', color_bgr=color, aligned_depth=aligned, native_depth=native)
+            (a.output/'rgbd-metadata.json').write_text(json.dumps(metadata, indent=2)+'\n')
     except Exception as e:
         report['error'] = str(e)
+        report['passed'] = False
     finally:
         if proc is not None and proc.poll() is None:
             proc.send_signal(signal.SIGINT)
@@ -156,6 +229,13 @@ def main():
                     proc.kill(); proc.wait()
         report['driver_exit_code'] = proc.returncode if proc else None
         report['passed'] &= report['driver_exit_code'] == 0
+        if camera:
+            try:
+                camera.__exit__(None,None,None)
+            except Exception as e:
+                report['camera_cleanup_error'] = str(e)
+                report['passed'] = False
+            (a.output/'rgbd-frames.json').write_text(json.dumps(camera_records)+'\n')
         if master is not None:
             try:
                 while True:

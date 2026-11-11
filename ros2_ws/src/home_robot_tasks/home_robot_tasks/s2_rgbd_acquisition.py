@@ -40,12 +40,16 @@ def association(record,camera):
 
 class Capture:
     """Owns only camera streaming/options; restores changed options on exit."""
-    def __init__(self,profile,reference_evidence=None,*,retain_frame=False):
+    def __init__(self,profile,reference_evidence=None,*,retain_frame=False,retain_native_depth=False):
         self.expected=profile['camera_device'];self.pipeline=None;self.started=False;self.saved=[];self.buffer=[]
         self.reference=reference_evidence
         self.last_matched=None
         self.retain_frame=retain_frame
         self.images={}
+        if retain_native_depth and not retain_frame:
+            raise ValueError('native depth retention requires retained RGB-D frames')
+        self.retain_native_depth=retain_native_depth
+        self.native_depth_images={}
         if self.reference is not None and self.reference['camera_device']!=self.expected:
             raise ValueError('camera reference does not match profile')
     def __enter__(self):
@@ -124,11 +128,16 @@ class Capture:
             self.images[record['capture_id']]=(np.asanyarray(color.get_data()).copy(),
                                                np.asanyarray(aligned.get_data()).copy(),m)
             self.images={c['capture_id']:self.images[c['capture_id']] for c in self.buffer if c['capture_id'] in self.images}
+            if self.retain_native_depth:
+                self.native_depth_images[record['capture_id']]=np.asanyarray(depth.get_data()).copy()
+                self.native_depth_images={c['capture_id']:self.native_depth_images[c['capture_id']]
+                                          for c in self.buffer if c['capture_id'] in self.native_depth_images}
         return record
     def retain_matched(self, camera):
         images=self.images[camera['capture_id']]
         self.retain_frame=False
         self.images.clear()
+        self.native_depth_images.clear()
         return images
     def next_frame(self, timeout_ms=1000):
         """Continuous consumer API; exposure time stays separate from arrival."""
