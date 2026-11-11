@@ -1,0 +1,33 @@
+<div id="s4-lidar-mount-review">
+<style>
+#s4-lidar-mount-review {--s2-lift-moving:var(--viz-series-3);display:grid;gap:calc(var(--font-size-base)*.7)}
+#s4-lidar-mount-review .stage{position:relative;height:470px}
+#s4-lidar-mount-review canvas,#s4-lidar-mount-review svg{position:absolute;inset:0;width:100%;height:100%}
+#s4-lidar-mount-review canvas{pointer-events:none}
+#s4-lidar-mount-review svg{touch-action:none;cursor:grab}
+#s4-lidar-mount-review svg text{fill:var(--foreground);paint-order:stroke;stroke:var(--background);stroke-width:3px;stroke-linejoin:round}
+#s4-lidar-mount-review .legend{display:flex;flex-wrap:wrap;gap:1em}
+#s4-lidar-mount-review .mark{display:inline-block;width:.7em;height:.7em;margin-right:.4em;background:var(--viz-series-2)}
+#s4-lidar-mount-review .obs{background:var(--viz-series-1);border-radius:50%}
+@media(max-width:480px){#s4-lidar-mount-review .stage{height:390px}}
+</style>
+<h3>앞쪽 바퀴 케이스 위 · LDS-01 장착 후보</h3>
+<div class="text-small">리프트 최하단 · 실제 팔 자세 미반영 · 장착 위치·방향 확인 전</div>
+<div class="viz-controls" aria-label="시점 선택">
+<button class="btn" type="button" data-view="mount" aria-pressed="true">장착부 확대</button>
+<button class="btn" type="button" data-view="side" aria-pressed="false">측면</button>
+<button class="btn" type="button" data-view="robot" aria-pressed="false">전체 모델</button>
+<button class="btn" type="button" data-view="scan" aria-pressed="false">실제 거리점</button>
+</div>
+<div class="stage"><canvas aria-hidden="true"></canvas><svg role="img" aria-label="공식 Mini 1 형상 위의 LDS-01 장착 후보와 최하단 리프트 및 실측 스캔"><title>라이다 장착 위치 확인</title></svg></div>
+<div class="legend text-small"><span><i class="mark"></i>공식 LDS-01 형상</span><span><i class="mark obs"></i>실제 거리점</span><span>모델 격자 10cm · 거리점 격자 1m · 앞 +X</span></div>
+<div class="text-small tabular-nums" data-readout aria-live="polite"></div>
+<details><summary>화면에서 장착 후보 조정</summary><div class="viz-controls">
+<label class="form-label">앞뒤 조정 <output data-value="x"></output><input class="form-range" data-adjust="x" type="range" min="-50" max="50" step="1" value="0" aria-label="앞뒤 조정 밀리미터"></label>
+<label class="form-label">좌우 조정 <output data-value="y"></output><input class="form-range" data-adjust="y" type="range" min="-50" max="50" step="1" value="0" aria-label="좌우 조정 밀리미터"></label>
+<label class="form-label">높이 조정 <output data-value="z"></output><input class="form-range" data-adjust="z" type="range" min="-15" max="40" step="1" value="0" aria-label="높이 조정 밀리미터"></label>
+<label class="form-label">방향 <output data-value="yaw"></output><input class="form-range" data-adjust="yaw" type="range" min="-180" max="180" step="1" value="180" aria-label="라이다 방향 도"></label>
+</div></details>
+<script type="application/json" data-data>/*__DATA__*/</script>
+<script>/*__SCRIPT__*/</script>
+</div>

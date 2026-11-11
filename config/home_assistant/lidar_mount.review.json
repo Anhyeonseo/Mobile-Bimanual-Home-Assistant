@@ -1,0 +1,39 @@
+{
+  "mode": "mount_review_only",
+  "hardware_enabled": false,
+  "lift": "operator reported lowest; CAD lower-contact pose",
+  "arms": "current pose unknown; omitted from geometry comparison",
+  "mount_confirmed": false,
+  "range_calibration_applied": false,
+  "mount_basis": "area-weighted top cap of front wheel/motor case from original CAD triangles; provisional STL flange z=-17.8 mm; yaw=180 deg suggested by missing-ray overlap, unconfirmed",
+  "case_top_cad_m": [
+    -0.0017785700212713121,
+    -0.15086473981701323,
+    0.11560244318550648
+  ],
+  "case_top_triangle_count": 37,
+  "base_from_lidar_translation_m": [
+    0.1509994064836799,
+    -0.0017101033546046448,
+    0.09120244318550648
+  ],
+  "yaw_rad": 3.141592653589793,
+  "scan_height_above_floor_m": 0.16140244318550648,
+  "scan_source": "output/s4-lidar-fix/lift-low-mount-review/scans.json",
+  "scan_source_sha256": "b3bcf73f84167637f577febf20f7ce5cc54cb327034a978677b624bc74a0a774",
+  "frames": 41,
+  "valid_self_hit_comparisons": 0,
+  "median_self_hit_residual_m": null,
+  "model_hits_inside_minimum_range": 87,
+  "missing_inside_model_shadow": 87,
+  "orientation_evidence": "Missingness overlap supports a review candidate, not exact yaw or range bias.",
+  "accuracy_qualified": false,
+  "limitation": "Self-hit residual is conditional on unconfirmed mount/pose. Environment geometry is unknown; no metric range calibration or model alignment is inferred.",
+  "missing_inside_shadow_at_yaw_zero": 1,
+  "user_confirmed": {
+    "mount_region": "case above the front wheel",
+    "lift_lowest": true,
+    "exact_mount_transform": false
+  },
+  "official_model": "config/home_assistant/lds01_official_geometry.json"
+}
