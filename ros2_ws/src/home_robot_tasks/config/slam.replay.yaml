@@ -19,6 +19,8 @@
     max_laser_range: 3.5
     throttle_scans: 1
     minimum_time_interval: 0.05
+    # Jazzy 2.8.5: consider heading as well as translation when selecting scans.
+    check_min_dist_and_heading_precisely: true
     minimum_travel_distance: 0.03
     minimum_travel_heading: 0.05
     transform_publish_period: 0.05

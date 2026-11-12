@@ -20,7 +20,7 @@
   },
   "measurement_inputs": {
     "wheel_geometry_and_raw_speed_scale": {
-      "status": "manual_floor_translation_passed_encoder_speed_candidates_available_floor_scale_pending",
+      "status": "recorded_encoder_and_slam_compared_longer_measured_translation_pending",
       "geometry": "config/home_assistant/s4_base.nominal.json",
       "raw_per_rad_s": null,
       "hardware_enabled": false,
@@ -30,7 +30,8 @@
         621.3408978307593,
         627.4524476454882
       ],
-      "candidate_applied": false
+      "candidate_applied": false,
+      "latest_recorded_evidence": "config/home_assistant/s4_recorded_mapping.observed.json"
     },
     "lidar_base_extrinsics": {
       "status": "operator_reviewed_nominal_not_precision_calibrated",
@@ -92,7 +93,8 @@
     "2026-11-12 archive comparison 05: operator reported riding over an object; slot 7 address 33 read failure also occurred. Preserve both; exclude this trial from clean cause comparison. Sensors passed (349 scans, max gap 201.167 ms, 143 native RGB-D pairs), but drive failed. After fresh wheel stop and explicit mechanical support confirmation, controller-only reset completed without flash or motor power cycle. Subsequent read-only HOLD still fails slot 7 with sensors stopped; wheel goal zero/torque OFF verified. No new web/drive session. Right-arm indicator/cables visually normal per operator; root cause unresolved. Evidence: output/s4-full-archive-object-contact-20261112/report.json.",
     "Subsequent user-requested read-only recheck: right-arm response restored, zero read retries; HOLD fails because right-arm torque is OFF. Setup plan reads all 13 axes successfully: left six and lift torque ON, right six torque OFF, lift 3693. No hold activation or drive performed; recovery cause unconfirmed. Evidence: output/s4-full-archive-object-contact-20261112/recheck-response-restored.json.",
     "Operator confirmed supports and requested right-arm hold/retest. Existing hold-here completed SETUP_HOLD_READY; all 13 axes hold verified, fault false, zero retries, wheel stop confirmed, lift 3693. New manual session 20261112T090513Z-8d6f6d18 and concurrent lidar/native RGB-D archive 06 are prepared; physical outcome pending. No firmware installation or controller reset this step.",
-    "Full periodic native RGB-D archive retest 06 completed normally: 37.042 s, 658 ACKs, no pauses or read retries, final wheel goal zero/torque OFF and all holds confirmed, lift 3693. Commands F138/A65/D410/Z45; B/L/R absent despite general operator movement report. LDS 380 scans max gap 202.261 ms, no >350 ms gaps; RGB-D 2322 frames and 156 original pairs archived. No fault reproduced this trial; original root cause remains unresolved. Existing encoder analyzer passed record integrity but floor-travel calibration remains false. Evidence: output/s4-full-archive-retest-20261112/report.json."
+    "Full periodic native RGB-D archive retest 06 completed normally: 37.042 s, 658 ACKs, no pauses or read retries, final wheel goal zero/torque OFF and all holds confirmed, lift 3693. Commands F138/A65/D410/Z45; B/L/R absent despite general operator movement report. LDS 380 scans max gap 202.261 ms, no >350 ms gaps; RGB-D 2322 frames and 156 original pairs archived. No fault reproduced this trial; original root cause remains unresolved. Existing encoder analyzer passed record integrity but floor-travel calibration remains false. Evidence: output/s4-full-archive-retest-20261112/report.json.",
+    "2026-11-12 offline replay of full archive 06: 156 native RGB-D hashes verified; encoder path length 0.1603 m is nominal, not ground truth. Existing slam_toolbox 2.8.5 precise distance/heading option increased accepted pose messages 4 to 43. Actual recorded map graph restored through atomic checkpoint with identical cells. Internal map consistency and upper-height endpoint preview reviewed; no live map, clearance profile or raw wheel scale changed. Final encoder/SLAM mismatch about 4.95 cm and 12 degrees requires longer measured floor translations before metric calibration. See config/home_assistant/s4_recorded_mapping.observed.json."
   ],
   "target_observed_on": "2026-11-12",
   "target_environment": {

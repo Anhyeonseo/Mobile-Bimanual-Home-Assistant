@@ -18,11 +18,183 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'ros2_ws/src/home_robot_tasks'))
 
 
+def recorded_replay(a):
+    """Real captured scans and nominal encoder odometry in an isolated ROS domain."""
+    import rclpy
+    from rclpy.qos import QoSProfile, DurabilityPolicy
+    from ament_index_python.packages import get_package_prefix
+    from geometry_msgs.msg import TransformStamped, PoseWithCovarianceStamped
+    from sensor_msgs.msg import LaserScan
+    from nav_msgs.msg import OccupancyGrid
+    from lifecycle_msgs.srv import ChangeState
+    from slam_toolbox.srv import SerializePoseGraph, DeserializePoseGraph
+    from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
+    from home_robot_tasks.s4_recorded_mapping import encoder_path
+    from home_robot_tasks.map_bundle import from_occupancy_grid, write_nav2_map
+    from home_robot_tasks.navigation_fusion import TravelEnvelope
+    from home_robot_tasks.assistant.contracts import Context
+    from home_robot_tasks.assistant.world import WorldStore
+    from home_robot_tasks.assistant.scanning import ScanManager
+    from home_robot_tasks.mapping_checkpoint import MappingCheckpoints
+    if a.output.exists():raise ValueError('new output directory required')
+    a.output.mkdir(parents=True)
+    records=[json.loads(s) for s in a.teleop.read_text().splitlines()]
+    capture=json.loads((a.recorded_capture/'report.json').read_text())
+    if capture.get('passed') is not True or capture.get('teleop_finished')!=records[-1]:
+        raise ValueError('successful matching real capture required')
+    odom,encoder=encoder_path(records,json.loads((ROOT/'config/home_assistant/s4_base.nominal.json').read_text()))
+    all_scans=json.loads((a.recorded_capture/'scans.json').read_text())
+    scans=[s for s in all_scans if s['observed_s']+359*s['time_increment']>=odom[0,0] and s['observed_s']<=odom[-1,0]]
+    mount=json.loads((ROOT/'config/home_assistant/lidar_mount.review.json').read_text())
+    rclpy.init();node=rclpy.create_node('recorded_replay',namespace='/offline_s4_recorded')
+    pub=node.create_publisher(LaserScan,'scan',10);dynamic=TransformBroadcaster(node);static=StaticTransformBroadcaster(node)
+    maps=[];poses=[]
+    node.create_subscription(OccupancyGrid,'map',lambda m:maps.append(m),QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    def save_pose(m):
+        p=m.pose.pose;q=p.orientation
+        poses.append(dict(stamp=m.header.stamp.sec+m.header.stamp.nanosec/1e9,
+            xy_yaw=[p.position.x,p.position.y,math.atan2(2*q.w*q.z,1-2*q.z*q.z)]))
+    node.create_subscription(PoseWithCovarianceStamped,'pose',save_pose,10)
+    fixed=TransformStamped();fixed.header.frame_id='base_link';fixed.child_frame_id='lidar_a'
+    fixed.header.stamp=node.get_clock().now().to_msg()
+    for key,value in zip(('x','y','z'),mount['base_from_lidar_translation_m']):setattr(fixed.transform.translation,key,value)
+    fixed.transform.rotation.z=math.sin(mount['yaw_rad']/2);fixed.transform.rotation.w=math.cos(mount['yaw_rad']/2);static.sendTransform(fixed)
+    proc=None;namespace='';active=False;logs=[]
+    report=dict(mode='real_slam_recorded_scan_nominal_encoder_tf',hardware_commands=0,
+        physical_map_verified=False,floor_scale_qualified=False,whole_home_coverage_verified=False,
+        autonomous_navigation_authorized=False,passed=False,encoder=encoder,scans_selected=len(scans),
+        export_envelope_scope='placeholder needed by map document schema; not measured robot clearance',
+        source_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in
+            (a.teleop,a.recorded_capture/'scans.json',a.recorded_capture/'report.json',
+             ROOT/'config/home_assistant/s4_base.nominal.json',ROOT/'config/home_assistant/lidar_mount.review.json',
+             ROOT/'ros2_ws/src/home_robot_tasks/config/slam.replay.yaml')})
+    def until(predicate,seconds):
+        end=time.monotonic()+seconds
+        while not predicate():
+            if proc is not None and proc.poll() is not None:raise RuntimeError('SLAM process exited')
+            if time.monotonic()>end:raise TimeoutError('recorded SLAM deadline')
+            rclpy.spin_once(node,timeout_sec=.01)
+    def service(kind,name,request):
+        client=node.create_client(kind,namespace+'/'+name)
+        try:
+            until(client.service_is_ready,20);future=client.call_async(request);until(future.done,30)
+            return future.result()
+        finally:node.destroy_client(client)
+    def launch(index):
+        nonlocal proc,namespace,active
+        namespace='/offline_s4_recorded' if index==1 else '/offline_s4_recorded_reload'
+        log=(a.output/f'slam-{index}.log').open('w');logs.append(log)
+        executable=Path(get_package_prefix('slam_toolbox'))/'lib/slam_toolbox/async_slam_toolbox_node'
+        proc=subprocess.Popen([str(executable),'--ros-args','-r','__ns:='+namespace,
+            '-r','scan:=/offline_s4_recorded/scan','-r','/map:=/offline_s4_recorded/map',
+            '-r','/map_metadata:=/offline_s4_recorded/map_metadata','--params-file',
+            str(ROOT/'ros2_ws/src/home_robot_tasks/config/slam.replay.yaml')],stdout=log,stderr=subprocess.STDOUT)
+        for transition in (1,3):
+            req=ChangeState.Request();req.transition.id=transition
+            if not service(ChangeState,'slam_toolbox/change_state',req).success:raise RuntimeError('lifecycle failed')
+        active=True
+    def stop():
+        nonlocal proc,active
+        if proc is None:return
+        if active and proc.poll() is None:
+            for transition in (4,2):
+                req=ChangeState.Request();req.transition.id=transition
+                if not service(ChangeState,'slam_toolbox/change_state',req).success:raise RuntimeError('cleanup failed')
+            active=False
+        proc.send_signal(signal.SIGINT)
+        try:proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:proc.kill();proc.wait()
+        report.setdefault('process_exit_codes',[]).append(proc.returncode);proc=None
+    try:
+        launch(1)
+        from rcl_interfaces.srv import GetParameters
+        parameters=service(GetParameters,'slam_toolbox/get_parameters',GetParameters.Request(names=['check_min_dist_and_heading_precisely']))
+        report['rotation_scan_selection_enabled']=bool(parameters.values[0].bool_value)
+        if not report['rotation_scan_selection_enabled']:raise RuntimeError('rotation scan selection not enabled')
+        clock_start=node.get_clock().now().nanoseconds/1e9+.5;wall_start=time.monotonic()+.5
+        source_start=odom[0,0];i=j=0
+        def stamp(t):
+            from builtin_interfaces.msg import Time
+            ns=round((clock_start+t-source_start)*1e9);return Time(sec=ns//10**9,nanosec=ns%10**9)
+        end=wall_start+(odom[-1,0]-source_start)+2
+        while time.monotonic()<end:
+            at=source_start+time.monotonic()-wall_start
+            while i<len(odom) and odom[i,0]<=at:
+                t,x,y,yaw=odom[i];tf=TransformStamped();tf.header.stamp=stamp(t)
+                tf.header.frame_id='odom';tf.child_frame_id='base_link';tf.transform.translation.x=x;tf.transform.translation.y=y
+                tf.transform.rotation.z=math.sin(yaw/2);tf.transform.rotation.w=math.cos(yaw/2);dynamic.sendTransform(tf);i+=1
+            while j<len(scans) and scans[j]['observed_s']<=at-.1:
+                s=scans[j];msg=LaserScan();msg.header.stamp=stamp(s['observed_s']);msg.header.frame_id='lidar_a'
+                msg.angle_min=s['angle_min'];msg.angle_increment=s['angle_increment'];msg.angle_max=s['angle_min']+359*s['angle_increment']
+                msg.range_min=.12;msg.range_max=3.5;msg.scan_time=s['scan_time'];msg.time_increment=s['time_increment']
+                msg.ranges=[float('inf') if v is None else float(v) for v in s['ranges']];pub.publish(msg);j+=1
+            rclpy.spin_once(node,timeout_sec=.005)
+        until(lambda:len(maps)>=2,10)
+        # Allow processing to finish before serializing the graph.
+        deadline=time.monotonic()+2
+        until(lambda:time.monotonic()>=deadline,4)
+        grid=maps[-1]
+        def grid_dict(g):
+            return dict(width=g.info.width,height=g.info.height,resolution=g.info.resolution,
+                origin=[g.info.origin.position.x,g.info.origin.position.y],data=list(g.data))
+        original=grid_dict(grid);(a.output/'occupancy.json').write_text(json.dumps(original))
+        document=from_occupancy_grid(grid,map_id='s4-recorded-room-review',revision='recorded-06',floor_id='floor',
+            envelope=TravelEnvelope('nominal-review-only',.22,1.2),clearance_m=.03)
+        write_nav2_map(a.output,'localization',document)
+        graph=a.output/'posegraph';req=SerializePoseGraph.Request(filename=str(graph))
+        if service(SerializePoseGraph,'slam_toolbox/serialize_map',req).result!=0:raise RuntimeError('graph save failed')
+        files=[graph.with_suffix('.data'),graph.with_suffix('.posegraph')]
+        if not all(f.is_file() and f.stat().st_size for f in files):raise RuntimeError('missing graph assets')
+        db=a.output/'checkpoint.db';store=WorldStore(db)
+        try:
+            ctx=Context(document['map_id'],document['revision'],'nominal-recorded-calibration','recorded-06')
+            manager=ScanManager(store,ctx);manager.start('recorded-06','Recorded room review',mode='replay');manager.ingest_map('recorded-06',document)
+            MappingCheckpoints(store).save('recorded-06',stopped=True,graph={'slam.data':files[0].read_bytes(),'slam.posegraph':files[1].read_bytes()})
+        finally:store.close()
+        stop();maps.clear();store=WorldStore(db)
+        try:restored=MappingCheckpoints(store).materialize_graph('recorded-06',a.output/'restored-graph')
+        finally:store.close()
+        launch(2);service(DeserializePoseGraph,'slam_toolbox/deserialize_map',DeserializePoseGraph.Request(filename=str(restored),match_type=1))
+        until(lambda:bool(maps),20);loaded=grid_dict(maps[-1]);stop()
+        same=original==loaded
+        known=sum(v>=0 for v in loaded['data']);occupied=sum(v>=65 for v in loaded['data'])
+        report.update(passed=known>100 and occupied>10 and same and all(c==0 for c in report['process_exit_codes']),
+            scans_published=j,map_shape=[loaded['width'],loaded['height']],known_cells=known,occupied_cells=occupied,
+            known_area_m2=known*loaded['resolution']**2,graph_restored_from_checkpoint=True,
+            map_cells_identical_after_restart=same,slam_pose_messages=len(poses),
+            graph_sha256={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
+            replay_clock_offset_s=clock_start-source_start,
+            limitations=['recorded-room coverage only, not whole-home mapping',
+                'nominal encoder and mounting calibration; no surveyed map accuracy',
+                'process restart passed is not physical power-reconnect relocalization'])
+    except Exception as error:
+        report['error']=str(error)
+        raise
+    finally:
+        if proc is not None:
+            try:stop()
+            except Exception as error:
+                report['cleanup_error']=str(error);report['passed']=False
+                if proc is not None and proc.poll() is None:proc.kill();proc.wait()
+        for f in logs:f.close()
+        (a.output/'slam-poses.json').write_text(json.dumps(poses))
+        (a.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
+        node.destroy_node();rclpy.shutdown()
+    print(json.dumps(report))
+    return report
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--output',type=Path,default=ROOT/'output/s4-local/slam')
     p.add_argument('--reverse-ray-timing',action='store_true',help='exercise signed ray-time metadata used by the LDS driver')
-    a=p.parse_args();a.output=a.output.resolve();a.output.mkdir(parents=True,exist_ok=True)
+    p.add_argument('--recorded-capture',type=Path)
+    p.add_argument('--teleop',type=Path)
+    a=p.parse_args();a.output=a.output.resolve()
+    if a.recorded_capture:
+        if not a.teleop:p.error('--recorded-capture requires --teleop')
+        return 0 if recorded_replay(a)["passed"] else 1
+    a.output.mkdir(parents=True,exist_ok=True)
     import rclpy
     from rclpy.qos import QoSProfile,DurabilityPolicy
     from ament_index_python.packages import get_package_prefix

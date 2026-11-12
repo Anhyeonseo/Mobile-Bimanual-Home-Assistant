@@ -73,7 +73,102 @@ def review(capture, output):
     return result
 
 
+def review_moving(capture, slam, trajectory_review, output):
+    """Visual quality review only; do not ingest unqualified motion into live maps."""
+    from scipy.spatial import cKDTree
+    from home_robot_tasks.s4_recorded_mapping import interpolate, transform, pose, scan_points
+    capture,slam,trajectory_review,output=map(Path,(capture,slam,trajectory_review,output))
+    if output.exists():raise ValueError('new output directory required')
+    sr=json.loads((slam/'report.json').read_text())
+    if sr.get('passed') is not True:raise ValueError('completed SLAM checkpoint replay required')
+    saved=json.loads((slam/'occupancy.json').read_text());poses=json.loads((slam/'slam-poses.json').read_text())
+    clock=sr['replay_clock_offset_s']
+    rows=np.array([[p['stamp']-clock,*p['xy_yaw']] for p in poses]);rows[:,3]=np.unwrap(rows[:,3])
+    if len(rows)<2:raise ValueError('SLAM pose coverage insufficient')
+    with np.load(trajectory_review/'trajectories.npz') as data:odom=data['encoder']
+    baseline=transform(interpolate(odom,[rows[0,0]])[0]);inv=np.linalg.inv(baseline)
+    wheel=np.array([pose(inv@transform(p)) for p in interpolate(odom,rows[:,0])]);wheel[:,2]=np.unwrap(wheel[:,2])
+    error=rows[:,1:]-wheel
+    # Interpolate sparse map-to-odom corrections, retaining measured encoder
+    # motion between processed scans; never extrapolate beyond SLAM coverage.
+    corrections=np.array([[r[0],*pose(transform(r[1:])@np.linalg.inv(transform(p)))]
+                          for r,p in zip(rows,interpolate(odom,rows[:,0]))]);corrections[:,3]=np.unwrap(corrections[:,3])
+    def map_pose(t):
+        return transform(interpolate(corrections,[t])[0])@transform(interpolate(odom,[t])[0])
+    grid=np.array(saved['data']).reshape(saved['height'],saved['width']);resolution=saved['resolution'];origin=np.array(saved['origin'])
+    yy,xx=np.nonzero(grid>=65);occupied=origin+(np.column_stack((xx,yy))+.5)*resolution;tree=cKDTree(occupied)
+    report=json.loads((capture/'report.json').read_text())
+    transforms={x['child']:np.array(x['matrix']) for x in report['sensor_frames']['transforms']}
+    m=transforms['lidar_a'];mount=np.array([[m[0,0],m[0,1],m[0,3]],[m[1,0],m[1,1],m[1,3]],[0,0,1]])
+    distances=[];nominal_distances=[];heldout=0
+    scans=json.loads((capture/'scans.json').read_text())
+    for s in scans:
+        t=s['observed_s']
+        if not rows[0,0]<=t<=rows[-1,0] or t+359*s['time_increment']<odom[0,0]:continue
+        if np.min(abs(rows[:,0]-t))<.02:continue
+        p=scan_points(s,mount,odom);T=map_pose(t);W=inv@transform(interpolate(odom,[t])[0])
+        q=p@T[:2,:2].T+T[:2,2];distances.extend(tree.query(q)[0].tolist())
+        nominal_distances.extend(tree.query(p@W[:2,:2].T+W[:2,2])[0].tolist());heldout+=1
+    def stats(d):
+        return dict(endpoints=len(d),median_m=float(np.median(d)),p90_m=float(np.percentile(d,90)),within_10cm_fraction=float(np.mean(np.array(d)<=.1))) if len(d) else None
+    metadata=json.loads((capture/'rgbd/metadata.json').read_text());intr=metadata['native_depth_intrinsics']
+    if any(abs(v)>1e-12 for v in intr['coeffs']):raise ValueError('rectified native depth required')
+    # Static lift height is the recorded lowest setting; no invented lift motion.
+    base_from_depth=transforms['color_camera_optical_frame']@transforms['depth_camera_optical_frame']
+    base_from_depth[2,3]-=transforms['base_footprint'][2,3]
+    voxels=[];covered=0
+    for line in (capture/'rgbd/frames.jsonl').read_text().splitlines():
+        frame=json.loads(line);t=frame['depth_time_s']
+        if not rows[0,0]<=t<=rows[-1,0]:continue
+        path=(capture/'rgbd'/frame['file']).resolve()
+        if not path.is_relative_to((capture/'rgbd').resolve()):raise ValueError('invalid archive path')
+        if hashlib.sha256(path.read_bytes()).hexdigest()!=frame['sha256']:raise ValueError('archive changed')
+        with np.load(path,allow_pickle=False) as image:depth=image['native_depth'].astype(float)*metadata['depth_scale_m']
+        valid=np.zeros(depth.shape,dtype=bool);valid[::8,::8]=True;valid&=(depth>=.12)&(depth<=3.5)
+        p=native_endpoints(depth,valid,[intr[k] for k in ('fx','fy','ppx','ppy')],base_from_depth)
+        p=p[(p[:,2]>=0)&(p[:,2]<=1.5)];T=map_pose(t);p[:,:2]=p[:,:2]@T[:2,:2].T+T[:2,2]
+        voxels.append(np.unique(np.floor(p/.05).astype(int),axis=0));covered+=1
+    cells=np.unique(np.vstack(voxels),axis=0) if voxels else np.empty((0,3),dtype=int)
+    points=(cells+.5)*.05;above=points[points[:,2]>report['scan_height_above_floor_m']+.05]
+    inside=np.floor((above[:,:2]-origin)/resolution).astype(int);valid=(inside[:,0]>=0)&(inside[:,0]<grid.shape[1])&(inside[:,1]>=0)&(inside[:,1]<grid.shape[0]);inside=inside[valid]
+    free_cells=np.unique(inside[grid[inside[:,1],inside[:,0]]==0],axis=0)
+    result=dict(mode='offline_recorded_map_quality_preview',hardware_commands=0,live_map_modified=False,
+        physical_accuracy_verified=False,depth_motion_qualified=False,navigation_authorized=False,
+        slam_pose_count=len(rows),slam_pose_time_coverage_s=float(rows[-1,0]-rows[0,0]),
+        maximum_slam_pose_gap_s=float(np.max(np.diff(rows[:,0]))),
+        nominal_path_length_m=sr['encoder']['path_length_m'],
+        nominal_endpoint_displacement_m=float(np.linalg.norm(sr['encoder']['final_pose'][:2])),
+        compared_encoder_pose=wheel[-1].tolist(),compared_slam_pose=rows[-1,1:].tolist(),
+        scan_vs_encoder_final_translation_difference_m=float(np.linalg.norm(error[-1,:2])),
+        scan_vs_encoder_final_heading_difference_deg=float(np.rad2deg(error[-1,2])),
+        heldout_scans=heldout,heldout_endpoint_to_map=stats(distances),nominal_endpoint_to_map=stats(nominal_distances),
+        depth_preview_frames=covered,preview_voxels=len(cells),above_lidar_voxels=len(above),
+        lidar_free_cells_with_upper_depth_endpoints=len(free_cells),
+        limitations=['map fit is internal consistency, not an independent surveyed distance',
+          'map-to-odom corrections interpolated between online SLAM poses; not a final optimized graph trajectory',
+          '8-pixel stride is for preview only; original full-resolution native depth retained',
+          'upper endpoints are review candidates; no free space, obstacle clearing or semantic labels inferred'])
+    output.mkdir(parents=True);(output/'report.json').write_text(json.dumps(result,indent=2)+'\n');np.savez_compressed(output/'preview.npz',depth_voxels=cells,slam_poses=rows,wheel_poses=wheel)
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    fig,axes=plt.subplots(1,3,figsize=(15,5));extent=[origin[0],origin[0]+grid.shape[1]*resolution,origin[1],origin[1]+grid.shape[0]*resolution]
+    display=np.where(grid<0,0,np.where(grid>=65,2,1))
+    for ax in axes[:2]:ax.imshow(display,origin='lower',extent=extent,cmap=ListedColormap(['#aeb8c2','#fafafa','#17222c']),vmin=0,vmax=2);ax.set(xlabel='X (m)',ylabel='Y (m)',aspect='equal')
+    axes[0].plot(rows[:,1],rows[:,2],c='#008a76',label='SLAM pose');axes[0].set_title('Recorded lidar map / 5 cm cells');axes[0].legend()
+    axes[1].scatter(above[:,0],above[:,1],s=.6,c='#cf711f',alpha=.35);axes[1].set_title('Upper depth endpoints / preview only')
+    t=rows[:,0]-rows[0,0];axes[2].plot(t,np.rad2deg(wheel[:,2]),label='Wheel yaw');axes[2].plot(t,np.rad2deg(rows[:,3]),label='SLAM yaw');axes[2].set(xlabel='Time (s)',ylabel='Yaw (degrees)',title='Rotation consistency');axes[2].grid(alpha=.2);axes[2].legend()
+    fig.suptitle('Recorded-data review — no autonomous navigation approval');fig.tight_layout();fig.savefig(output/'map-review.png',dpi=160);plt.close(fig)
+    return result
+
+
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--capture',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    args=p.parse_args();print(json.dumps(review(args.capture,args.output)))
+    p.add_argument('--slam-review',type=Path);p.add_argument('--trajectory-review',type=Path)
+    args=p.parse_args()
+    if args.slam_review:
+        if not args.trajectory_review:p.error('--trajectory-review required')
+        print(json.dumps(review_moving(args.capture,args.slam_review,args.trajectory_review,args.output)))
+    else:print(json.dumps(review(args.capture,args.output)))

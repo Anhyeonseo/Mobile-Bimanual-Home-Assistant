@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "observed_on": "2026-11-12",
+  "mode": "offline_real_record_review",
+  "hardware_enabled": false,
+  "motion_authorized": false,
+  "source_session": "20261112T090513Z-8d6f6d18",
+  "source_sha256": {
+    "output/s4-full-archive-retest-20261112/drive-session.jsonl": "cf0a355e9161c410fb856d0611d039c597e583a527f281e57a0013152c92a5ee",
+    "output/s4-full-archive-retest-20261112/capture/scans.json": "dac968cca33920c94ed84e1ec2d618440abce0f903526e76ff11f80de1643d37",
+    "output/s4-full-archive-retest-20261112/capture/report.json": "8780cce8f02d556956432018344d8dbc11512cfaf767e6348be4b4505e5942f6",
+    "/home/an-hyeonseo/Documents/GitHub/SO101-Can-Towel-Manipulation/workspaces/home-assistant/config/home_assistant/s4_base.nominal.json": "4fa49114f728311efabeca52cc88b99af376f5c44b05eb156c76f50a6ed81d7d",
+    "/home/an-hyeonseo/Documents/GitHub/SO101-Can-Towel-Manipulation/workspaces/home-assistant/config/home_assistant/lidar_mount.review.json": "3f55f03cf85fdfa5f09f856f32c0c4310e10fa31af9d80c6de34e1e3e6ce1e0e"
+  },
+  "native_archive_verified": 156,
+  "encoder_path_length_m": 0.16031646154848403,
+  "encoder_endpoint_displacement_m": 0.12087275816291246,
+  "floor_scale_qualified": false,
+  "adjacent_icp_accepted": false,
+  "adjacent_icp_reason": "accumulated motion disagrees with encoders and first/last overlap is insufficient",
+  "slam_rotation_option": "check_min_dist_and_heading_precisely",
+  "slam_pose_counts_before_after": [
+    4,
+    43
+  ],
+  "slam_map_shape": [
+    108,
+    111
+  ],
+  "slam_known_area_m2": 12.897500384375455,
+  "checkpoint_map_identical_after_restart": true,
+  "physical_power_restart_tested": false,
+  "quality": {
+    "mode": "offline_recorded_map_quality_preview",
+    "hardware_commands": 0,
+    "live_map_modified": false,
+    "physical_accuracy_verified": false,
+    "depth_motion_qualified": false,
+    "navigation_authorized": false,
+    "slam_pose_count": 43,
+    "slam_pose_time_coverage_s": 35.316771507263184,
+    "maximum_slam_pose_gap_s": 2.608619213104248,
+    "nominal_path_length_m": 0.16031646154848403,
+    "nominal_endpoint_displacement_m": 0.12087275816291246,
+    "compared_encoder_pose": [
+      0.11031973555737228,
+      -0.04940100491090882,
+      -1.6305108895333833
+    ],
+    "compared_slam_pose": [
+      0.06955514121226479,
+      -0.07742116650274038,
+      -1.839818179608914
+    ],
+    "scan_vs_encoder_final_translation_difference_m": 0.04946596413447858,
+    "scan_vs_encoder_final_heading_difference_deg": -11.992424342648366,
+    "heldout_scans": 134,
+    "heldout_endpoint_to_map": {
+      "endpoints": 33324,
+      "median_m": 0.022303372235459543,
+      "p90_m": 0.03779959403658251,
+      "within_10cm_fraction": 0.9945684791741688
+    },
+    "nominal_endpoint_to_map": {
+      "endpoints": 33324,
+      "median_m": 0.02658314869637425,
+      "p90_m": 0.11889925439000286,
+      "within_10cm_fraction": 0.87099387828592
+    },
+    "depth_preview_frames": 70,
+    "preview_voxels": 7189,
+    "above_lidar_voxels": 2653,
+    "lidar_free_cells_with_upper_depth_endpoints": 584,
+    "limitations": [
+      "map fit is internal consistency, not an independent surveyed distance",
+      "map-to-odom corrections interpolated between online SLAM poses; not a final optimized graph trajectory",
+      "8-pixel stride is for preview only; original full-resolution native depth retained",
+      "upper endpoints are review candidates; no free space, obstacle clearing or semantic labels inferred"
+    ]
+  },
+  "root_cause_right_arm_confirmed": false,
+  "local_regression_tests_passed": 66,
+  "evidence": {
+    "movement": "output/s4-recorded-mapping-final-20261112/report.json",
+    "slam": "output/s4-recorded-mapping-20261112/s4-recorded-slam-20261112-03/report.json",
+    "quality": "output/s4-recorded-map-quality-final-20261112/report.json",
+    "figure": "output/s4-recorded-map-quality-final-20261112/map-review.png"
+  },
+  "next_operator_step": {
+    "purpose": "longer translations and repeatable starting pose before metric calibration and room mapping acceptance",
+    "route": "mark start; 0.5–1.0 m forward/back and sideways within cable slack; slow rotations both ways; return near start",
+    "record": "actual marked travel distance; obstacles/abnormalities; final orientation; same full sensor archive",
+    "start_requires": "fresh supports/space/cable clearance and explicit operator teleop start",
+    "motor_power_cycle_required": false
+  },
+  "unqualified": [
+    "metric floor distance and yaw calibration",
+    "independent surveyed map accuracy",
+    "full-height live obstacle clearing and furniture semantics",
+    "physical power-reconnect relocalization",
+    "autonomous navigation and fetch"
+  ],
+  "rotation_option_verified_at_runtime": true,
+  "synthetic_slam_depth_checkpoint_regression_passed": true,
+  "synthetic_regression_evidence": "output/s4-recorded-mapping-20261112/s4-rotation-setting-regression-20261112/report.json"
+}
