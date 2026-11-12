@@ -3,7 +3,8 @@
 
 Reuses the official executable and navigation health gate. Only sensor start/pause
 commands are sent; no base/controller interfaces exist here. Optional reviewed
-sensor TFs and native RGB-D capture are stationary observation only.
+sensor TFs are nominal. Optional RGB-D archives preserve moving observations
+for later registration; capture alone never qualifies a map or navigation.
 """
 import argparse
 import hashlib
@@ -14,6 +15,7 @@ from pathlib import Path
 import pty
 import select
 import signal
+import shutil
 import struct
 import subprocess
 import sys
@@ -33,6 +35,78 @@ def packet(index):
     return bytes(data)
 
 
+
+class TeleopCompletion:
+    """Observe one existing append-only log without owning the controller."""
+    def __init__(self, path):
+        self.path = Path(path)
+        self.offset = 0
+        self.pending = b''
+        self.header = False
+        self.finished = None
+        self.poll()
+        if not self.header or self.finished is not None:
+            raise ValueError('an open identified teleop recording is required')
+
+    def poll(self):
+        with self.path.open('rb') as stream:
+            if stream.seek(0, 2) < self.offset:
+                raise ValueError('teleop recording was truncated')
+            stream.seek(self.offset)
+            data = stream.read(1_000_000)
+            self.offset = stream.tell()
+        lines = (self.pending + data).split(b'\n')
+        self.pending = lines.pop()
+        if len(self.pending) > 100_000:
+            raise ValueError('oversized teleop record')
+        for line in lines:
+            row = json.loads(line)
+            if not self.header:
+                if (row.get('event') != 'session' or
+                        row.get('firmware', {}).get('firmware') != 'mobile-base-hold-teleop-v7'):
+                    raise ValueError('identified teleop session required')
+                self.header = True
+            if row.get('event') == 'finished':
+                self.finished = row
+        return self.finished
+
+
+class RGBDArchive:
+    """Sparse full-resolution RGB/native-depth assets with acquisition times."""
+    def __init__(self, output, period):
+        if not .5 <= period <= 10:
+            raise ValueError('archive period must be within 0.5..10 seconds')
+        self.folder = Path(output)/'rgbd'
+        self.folder.mkdir()
+        self.period, self.last, self.count = period, None, 0
+
+    def add(self, record, color, native, metadata):
+        import numpy as np
+        stamp = record['depth_time_s']
+        if self.last is not None and stamp - self.last < self.period:
+            return False
+        if shutil.disk_usage(self.folder).free < 1024**3 + color.nbytes + native.nbytes:
+            raise RuntimeError('less than 1 GiB reserve for RGB-D archive')
+        name = f'{self.count:06d}.npz'
+        temporary = self.folder/(name+'.tmp')
+        with temporary.open('xb') as stream:
+            # No alignment, crop or depth quantization. Avoid compression in the sensor loop.
+            np.savez(stream, color_bgr=color, native_depth=native)
+        path = self.folder/name
+        temporary.rename(path)
+        if self.count == 0:
+            (self.folder/'metadata.json').write_text(json.dumps(metadata, indent=2)+'\n')
+        row = dict(file=name, sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                   capture_id=record['capture_id'],color_time_s=record['color_time_s'],
+                   depth_time_s=stamp,host_saved_s=time.monotonic(),
+                   color_frame=record['color_frame'],depth_frame=record['depth_frame'])
+        with (self.folder/'frames.jsonl').open('a') as stream:
+            stream.write(json.dumps(row)+'\n')
+        self.last = stamp
+        self.count += 1
+        return True
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--output', type=Path, required=True)
@@ -43,16 +117,23 @@ def main():
     p.add_argument('--sensor-frames', action='store_true', help='publish reviewed nominal sensor TFs in the isolated diagnostic domain')
     p.add_argument('--rgbd', action='store_true', help='also capture the actual D415, including unaligned native depth')
     p.add_argument('--require-receipt-timing', action='store_true', help='check host receipt estimate and reversed ray-time ordering')
+    p.add_argument('--archive-rgbd-period', type=float, help='retain full native RGB/depth every N seconds (0.5..10)')
+    p.add_argument('--teleop-record', type=Path, help='stop sensor capture when this existing teleop session finishes; never controls motors')
     a = p.parse_args()
-    if not 4 <= a.seconds <= 120:
-        p.error('seconds must be within 4..120')
+    limit = 600 if a.teleop_record else 120
+    if not 4 <= a.seconds <= limit:
+        p.error(f'seconds must be within 4..{limit}')
+    if a.archive_rgbd_period is not None and (not a.rgbd or not .5 <= a.archive_rgbd_period <= 10):
+        p.error('archive requires --rgbd and a period within 0.5..10')
     if a.port and a.fault != 'none':
         p.error('hardware capture requires --fault none')
     if a.rgbd and (not a.port or not a.sensor_frames):
         p.error('RGB-D capture requires an explicit lidar port and --sensor-frames')
     if os.environ.get('ROS_AUTOMATIC_DISCOVERY_RANGE') != 'LOCALHOST':
         p.error('set ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST before this diagnostic')
+    completion = TeleopCompletion(a.teleop_record) if a.teleop_record else None
     a.output.mkdir(parents=True, exist_ok=False)
+    archive = RGBDArchive(a.output, a.archive_rgbd_period) if a.archive_rgbd_period is not None else None
     import rclpy
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import LaserScan
@@ -143,7 +224,15 @@ def main():
         proc = subprocess.Popen([str(executable), '--ros-args', '-r', '__ns:=/lds_commissioning',
                                  '-p', 'port:='+port, '-p', 'frame_id:=lidar_a'], stdout=log, stderr=subprocess.STDOUT)
         started = time.monotonic()
+        next_log_check = started
+        ready = False
         while time.monotonic() - started < a.seconds:
+            if completion and time.monotonic() >= next_log_check:
+                next_log_check = time.monotonic() + .25
+                if completion.poll() is not None:
+                    report['teleop_finished'] = completion.finished
+                    report['capture_end_reason'] = 'teleop_finished'
+                    break
             if proc.poll() is not None:
                 raise RuntimeError('driver exited before requested stop')
             if master is not None:
@@ -176,6 +265,13 @@ def main():
                     color_time_s=record['color_time_s'], depth_time_s=record['depth_time_s'],
                     native_valid_fraction=float(valid.mean()),
                     native_row_band_valid_fractions=[float(b.mean()) for b in np.array_split(valid, 3)]))
+                if archive:
+                    archive.add(record, color, native, metadata)
+            if not ready and len(records) >= 5 and (not camera or len(camera_records) >= 5):
+                ready = True
+                (a.output/'ready.json').write_text(json.dumps(dict(ready=True, host_monotonic_s=time.monotonic(),
+                    sensor_only=True, native_archive=archive is not None, teleop_record=str(a.teleop_record)))+'\n')
+        report.setdefault('capture_end_reason', 'duration_limit')
         if len(records) < 5:
             raise RuntimeError('insufficient scans')
         gaps = [b['observed_s'] - x['observed_s'] for x, b in zip(records, records[1:])]
@@ -242,6 +338,10 @@ def main():
                     proc.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     proc.kill(); proc.wait()
+        if archive:
+            report['native_rgbd_archive'] = dict(frames=archive.count, period_s=archive.period,
+                directory='rgbd', clock='SDK global_time converted to same-host monotonic',
+                registration_applied=False, physical_sync_qualified=False)
         report['driver_exit_code'] = proc.returncode if proc else None
         report['passed'] &= report['driver_exit_code'] == 0
         if camera:
