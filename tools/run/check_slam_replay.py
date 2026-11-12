@@ -47,6 +47,7 @@ def recorded_replay(a):
     scans=[s for s in all_scans if s['observed_s']+359*s['time_increment']>=odom[0,0] and s['observed_s']<=odom[-1,0]]
     mount=json.loads((ROOT/'config/home_assistant/lidar_mount.review.json').read_text())
     localize = a.localization_map is not None
+    recording_id='recorded-'+a.teleop.stem
     rclpy.init();node=rclpy.create_node('recorded_replay',namespace='/offline_s4_recorded')
     pub=node.create_publisher(LaserScan,'scan',10);dynamic=TransformBroadcaster(node);static=StaticTransformBroadcaster(node)
     maps=[];poses=[]
@@ -121,6 +122,19 @@ def recorded_replay(a):
             if report['motion_model']!='nav2_amcl::OmniMotionModel':raise RuntimeError('omnidirectional localization required')
             raw=a.localization_map.read_bytes();report['localization_map_sha256']=hashlib.sha256(raw).hexdigest()
             document=json.loads(raw);grid=OccupancyGrid();grid.header.frame_id='map';grid.header.stamp=node.get_clock().now().to_msg()
+            if a.scan_map_initialization:
+                from home_robot_tasks.s4_recorded_mapping import map_initial_pose_candidates, transform
+                lidar_mount=transform([*mount['base_from_lidar_translation_m'][:2],mount['yaw_rad']])
+                started=time.monotonic()
+                seed=map_initial_pose_candidates(scans[0],odom,lidar_mount,document)
+                seed['elapsed_s']=time.monotonic()-started
+                (a.output/'initial-scan-hypotheses.json').write_text(json.dumps(seed,indent=2)+'\n')
+                best=seed['candidates'][0]
+                gap=(seed['candidates'][1]['clipped_mean_distance_m']-best['clipped_mean_distance_m']) if len(seed['candidates'])>1 else None
+                if best['within_10cm_fraction']<.8 or gap is None or gap<.02:
+                    raise RuntimeError('initial scan/map hypothesis ambiguous; no automatic pose selection')
+                a.initial_pose=best['xy_yaw']
+                report['initial_scan_hypothesis']=dict(best=best,alternative_score_gap_m=gap,elapsed_s=seed['elapsed_s'],later_scans_used=False)
             grid.info.width=document['width'];grid.info.height=document['height'];grid.info.resolution=document['resolution']
             grid.info.origin.position.x=document['origin'][0];grid.info.origin.position.y=document['origin'][1];grid.info.origin.orientation.w=1.
             grid.data=document['data'];map_pub.publish(grid)
@@ -130,8 +144,19 @@ def recorded_replay(a):
             initial.pose.pose.position.x=a.initial_pose[0];initial.pose.pose.position.y=a.initial_pose[1]
             initial.pose.pose.orientation.z=math.sin(a.initial_pose[2]/2);initial.pose.pose.orientation.w=math.cos(a.initial_pose[2]/2)
             initial.pose.covariance[0]=initial.pose.covariance[7]=.2**2;initial.pose.covariance[35]=math.radians(15)**2
-            initial_pub.publish(initial);report['initial_pose_xy_yaw']=a.initial_pose
-            report['same_capture_map_replay_not_independent_accuracy']=True
+            if a.global_localization:
+                from std_srvs.srv import Empty
+                service(Empty,'reinitialize_global_localization',Empty.Request())
+                report['initialization']='uniform_free_space_global_localization'
+            else:
+                initial_pub.publish(initial);report['initial_pose_xy_yaw']=a.initial_pose
+                report['initialization']='first_scan_map_hypothesis' if a.scan_map_initialization else 'provided_pose_hypothesis'
+            reference_report=json.loads((a.localization_map.parent/'report.json').read_text())
+            source_hashes=reference_report['source_sha256'].values()
+            same_capture=all(hashlib.sha256(p.read_bytes()).hexdigest() in source_hashes
+                             for p in (a.teleop,a.recorded_capture/'scans.json'))
+            report['same_capture_map_replay_not_independent_accuracy']=same_capture
+            report['independent_capture_from_map']=not same_capture
         else:
             parameters=service(GetParameters,'slam_toolbox/get_parameters',GetParameters.Request(names=['check_min_dist_and_heading_precisely']))
             report['rotation_scan_selection_enabled']=bool(parameters.values[0].bool_value)
@@ -157,15 +182,21 @@ def recorded_replay(a):
         if localize:
             until(lambda:len(poses)>=3,10)
             stop()
-            reference=json.loads((a.localization_map.parent/'slam-poses.json').read_text())
-            reference_report=json.loads((a.localization_map.parent/'report.json').read_text())
-            from home_robot_tasks.s4_recorded_mapping import localization_comparison
-            comparison=localization_comparison(poses,clock_start-source_start,reference,reference_report['replay_clock_offset_s'])
+            if same_capture:
+                reference=json.loads((a.localization_map.parent/'slam-poses.json').read_text())
+                from home_robot_tasks.s4_recorded_mapping import localization_comparison
+                comparison=localization_comparison(poses,clock_start-source_start,reference,reference_report['replay_clock_offset_s'])
+            else:
+                from home_robot_tasks.s4_recorded_mapping import localization_map_review, transform
+                lidar_mount=transform([*mount['base_from_lidar_translation_m'][:2],mount['yaw_rad']])
+                comparison=localization_map_review(poses,clock_start-source_start,scans,odom,lidar_mount,document)
+                (a.output/'scan-map-review.json').write_text(json.dumps(comparison,indent=2)+'\n')
+                comparison={k:v for k,v in comparison.items() if k!='per_scan'}
             report.update(comparison,scans_published=j,pose_messages=len(poses),
                 passed=all(c==0 for c in report['process_exit_codes']) and comparison['tracking_sanity_passed'],
                 replay_clock_offset_s=clock_start-source_start,
-                limitations=['same recorded session used to build map and replay localization; not independent accuracy',
-                    'initial pose hypothesis provided, not global localization from an unknown room',
+                limitations=[('same recorded session used to build map and replay localization' if same_capture else 'new capture against a frozen prior map; map correspondence is not surveyed pose accuracy'),
+                    ('global initialization evaluated offline; live restart recovery not commissioned' if a.global_localization else 'initial pose hypothesis provided, not global localization from an unknown room'),
                     'no live device, controller, motor commands, or automatic navigation authorization'])
             print(json.dumps(report));return report
         until(lambda:len(maps)>=2,10)
@@ -177,7 +208,7 @@ def recorded_replay(a):
             return dict(width=g.info.width,height=g.info.height,resolution=g.info.resolution,
                 origin=[g.info.origin.position.x,g.info.origin.position.y],data=list(g.data))
         original=grid_dict(grid);(a.output/'occupancy.json').write_text(json.dumps(original))
-        document=from_occupancy_grid(grid,map_id='s4-recorded-room-review',revision='recorded-06',floor_id='floor',
+        document=from_occupancy_grid(grid,map_id='s4-recorded-room-review',revision=recording_id,floor_id='floor',
             envelope=TravelEnvelope('nominal-review-only',.22,1.2),clearance_m=.03)
         write_nav2_map(a.output,'localization',document)
         graph=a.output/'posegraph';req=SerializePoseGraph.Request(filename=str(graph))
@@ -186,12 +217,12 @@ def recorded_replay(a):
         if not all(f.is_file() and f.stat().st_size for f in files):raise RuntimeError('missing graph assets')
         db=a.output/'checkpoint.db';store=WorldStore(db)
         try:
-            ctx=Context(document['map_id'],document['revision'],'nominal-recorded-calibration','recorded-06')
-            manager=ScanManager(store,ctx);manager.start('recorded-06','Recorded room review',mode='replay');manager.ingest_map('recorded-06',document)
-            MappingCheckpoints(store).save('recorded-06',stopped=True,graph={'slam.data':files[0].read_bytes(),'slam.posegraph':files[1].read_bytes()})
+            ctx=Context(document['map_id'],document['revision'],'nominal-recorded-calibration',recording_id)
+            manager=ScanManager(store,ctx);manager.start(recording_id,'Recorded room review',mode='replay');manager.ingest_map(recording_id,document)
+            MappingCheckpoints(store).save(recording_id,stopped=True,graph={'slam.data':files[0].read_bytes(),'slam.posegraph':files[1].read_bytes()})
         finally:store.close()
         stop();maps.clear();store=WorldStore(db)
-        try:restored=MappingCheckpoints(store).materialize_graph('recorded-06',a.output/'restored-graph')
+        try:restored=MappingCheckpoints(store).materialize_graph(recording_id,a.output/'restored-graph')
         finally:store.close()
         launch(2);service(DeserializePoseGraph,'slam_toolbox/deserialize_map',DeserializePoseGraph.Request(filename=str(restored),match_type=1))
         until(lambda:bool(maps),20);loaded=grid_dict(maps[-1]);stop()
@@ -229,9 +260,13 @@ def main():
     p.add_argument('--reverse-ray-timing',action='store_true',help='exercise signed ray-time metadata used by the LDS driver')
     p.add_argument('--recorded-capture',type=Path)
     p.add_argument('--teleop',type=Path)
-    p.add_argument('--localization-map',type=Path,help='saved occupancy.json with report.json/slam-poses.json from the same capture: compare AMCL against SLAM')
+    p.add_argument('--localization-map',type=Path,help='saved occupancy.json with report.json; same capture compares SLAM poses, new capture reviews scan/map fit')
     p.add_argument('--initial-pose',nargs=3,type=float,default=[0.,0.,0.],metavar=('X','Y','YAW'))
+    p.add_argument('--global-localization',action='store_true',help='initialize AMCL across saved-map free space instead of providing a pose')
+    p.add_argument('--scan-map-initialization',action='store_true',help='offline initial-scan map search; refuse ambiguous hypotheses, then test later scans with AMCL')
     a=p.parse_args();a.output=a.output.resolve()
+    if a.scan_map_initialization and (not a.localization_map or a.global_localization):p.error('--scan-map-initialization requires a map and excludes --global-localization')
+    if a.global_localization and not a.localization_map:p.error('--global-localization requires --localization-map')
     if a.localization_map and not a.recorded_capture:p.error('--localization-map requires --recorded-capture')
     if not all(math.isfinite(v) for v in a.initial_pose):p.error('finite initial pose required')
     if a.recorded_capture:

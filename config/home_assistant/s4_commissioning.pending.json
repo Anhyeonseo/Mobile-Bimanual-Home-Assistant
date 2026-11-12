@@ -51,11 +51,14 @@
     "restart_sensor_localization_arm_lift_readiness": null,
     "jetson_os_shutdown_and_safe_power_removal": null,
     "saved_map_localization": {
-      "status": "real_amcl_same_capture_replay_passed_independent_physical_trial_pending",
+      "status": "new_capture_prior_map_first_scan_seeded_amcl_replay_passed_live_integration_pending",
       "evidence": "config/home_assistant/s4_recorded_mapping.observed.json",
       "profile": "ros2_ws/src/home_robot_tasks/config/localization.replay.yaml",
       "physical_accuracy_qualified": false,
-      "live_service_activated": false
+      "live_service_activated": false,
+      "global_uniform_initialization_accepted": false,
+      "initial_scan_hypothesis_seconds": 2.715498750010738,
+      "independent_physical_accuracy_qualified": false
     }
   },
   "local_acceptance": [
@@ -103,7 +106,8 @@
     "Operator confirmed supports and requested right-arm hold/retest. Existing hold-here completed SETUP_HOLD_READY; all 13 axes hold verified, fault false, zero retries, wheel stop confirmed, lift 3693. New manual session 20261112T090513Z-8d6f6d18 and concurrent lidar/native RGB-D archive 06 are prepared; physical outcome pending. No firmware installation or controller reset this step.",
     "Full periodic native RGB-D archive retest 06 completed normally: 37.042 s, 658 ACKs, no pauses or read retries, final wheel goal zero/torque OFF and all holds confirmed, lift 3693. Commands F138/A65/D410/Z45; B/L/R absent despite general operator movement report. LDS 380 scans max gap 202.261 ms, no >350 ms gaps; RGB-D 2322 frames and 156 original pairs archived. No fault reproduced this trial; original root cause remains unresolved. Existing encoder analyzer passed record integrity but floor-travel calibration remains false. Evidence: output/s4-full-archive-retest-20261112/report.json.",
     "2026-11-12 offline replay of full archive 06: 156 native RGB-D hashes verified; encoder path length 0.1603 m is nominal, not ground truth. Existing slam_toolbox 2.8.5 precise distance/heading option increased accepted pose messages 4 to 43. Actual recorded map graph restored through atomic checkpoint with identical cells. Internal map consistency and upper-height endpoint preview reviewed; no live map, clearance profile or raw wheel scale changed. Final encoder/SLAM mismatch about 4.95 cm and 12 degrees requires longer measured floor translations before metric calibration. See config/home_assistant/s4_recorded_mapping.observed.json.",
-    "2026-11-12 localization policy: lidar/map matching is the global pose reference; wheel encoders provide continuous short-term prediction. The 4.95 cm/12 degree difference is not measured true error. Encoder agreement or complete wheel calibration is not required before the next manual mapping/localization trial; wheel geometry, braking, stop and hold verification remain necessary for autonomous commissioning. Real AMCL with OmniMotionModel processed 181 recorded scans/69 poses from a deliberately offset initial estimate; final difference from same-capture SLAM was 2.41 cm/3.35 degrees. This is replay consistency, not independent physical accuracy, global unknown-room relocalization or live service activation."
+    "2026-11-12 localization policy: lidar/map matching is the global pose reference; wheel encoders provide continuous short-term prediction. The 4.95 cm/12 degree difference is not measured true error. Encoder agreement or complete wheel calibration is not required before the next manual mapping/localization trial; wheel geometry, braking, stop and hold verification remain necessary for autonomous commissioning. Real AMCL with OmniMotionModel processed 181 recorded scans/69 poses from a deliberately offset initial estimate; final difference from same-capture SLAM was 2.41 cm/3.35 degrees. This is replay consistency, not independent physical accuracy, global unknown-room relocalization or live service activation.",
+    "2026-11-12 retry 08: all six manual directions, 2217 ACKs over 122.775 s, no pauses or hold retries, final stop/hold confirmed. New SLAM graph and map restore passed. Global AMCL on frozen prior map was initially unstable; first-scan-only map hypothesis + existing AMCL improved replay fit to 97.4% within 10 cm after 10 s, correction steps <=1.01 cm/0.50 degrees. These are correspondence/stability metrics, not surveyed accuracy. Start marker absent. Local checks 77 passed; no live navigation activation. Full evidence: config/home_assistant/s4_recorded_mapping.observed.json latest_independent_trial."
   ],
   "target_observed_on": "2026-11-12",
   "target_environment": {
@@ -141,7 +145,9 @@
     "controller_teleop_evidence": "config/home_assistant/s4_teleop.prepared.json",
     "manual_teleop_available": true,
     "manual_teleop_web_active": false,
-    "latest_floor_drive_evidence": "config/home_assistant/s4_floor_teleop.observed.json"
+    "latest_floor_drive_evidence": "config/home_assistant/s4_floor_teleop.observed.json",
+    "current_wheel_stop_confirmed": true,
+    "current_arm_lift_hold_confirmed": true
   },
   "operator_reported_state": {
     "local_date": "2026-11-12",
@@ -149,6 +155,6 @@
     "arms_supported": true,
     "lift_lowest": true,
     "grippers_empty": true,
-    "scope": "After object contact: operator confirmed object removed, path clear, no jam/visible abnormality, supports maintained and right-arm power/cables visually normal. No fresh drive clearance."
+    "scope": "After retry 08: operator reported normal completion and no start marker. Recorded stop and all holds confirmed; no fresh clearance for a further drive."
   }
 }

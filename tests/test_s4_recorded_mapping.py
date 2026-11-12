@@ -66,3 +66,43 @@ def test_localization_comparison_handles_angle_wrap_and_clock_offsets():
     for row in actual:row['xy_yaw'][0]+=.5
     assert not localization_comparison(actual,200,reference,100)['tracking_sanity_passed']
     with pytest.raises(ValueError,match='shared'):localization_comparison(actual,300,reference,100)
+
+
+def test_new_capture_localization_scores_fixed_map_without_slam_time_overlap():
+    from home_robot_tasks.s4_recorded_mapping import localization_map_review
+    grid=np.zeros((101,101),dtype=int);angles=np.arange(360)*math.tau/360
+    endpoints=np.column_stack((np.cos(angles),np.sin(angles)))
+    cells=np.floor((endpoints+2.525)/.05).astype(int);grid[cells[:,1],cells[:,0]]=100
+    saved=dict(width=101,height=101,resolution=.05,origin=[-2.525,-2.525],data=grid.ravel().tolist())
+    odom=np.array([[t,0.,0.,0.] for t in np.linspace(0,30,301)])
+    poses=[dict(stamp=100+t,xy_yaw=[0.,0.,0.]) for t in range(1,30)]
+    scans=[dict(observed_s=float(t),time_increment=-.0005,ranges=[1.]*360,
+                angle_min=0.,angle_increment=math.tau/360) for t in np.linspace(1,29,60)]
+    result=localization_map_review(poses,100,scans,odom,np.eye(3),saved)
+    assert result['tracking_sanity_passed']
+    assert result['after_10s_scan_to_map']['p90_m']<.04
+    assert not result['physical_localization_qualified']
+    assert not result['measured_return_error_available']
+    assert not result['encoder_agreement_required']
+    for row in poses:row['xy_yaw'][0]=1.
+    assert not localization_map_review(poses,100,scans,odom,np.eye(3),saved)['tracking_sanity_passed']
+    with pytest.raises(ValueError,match='coverage'):
+        localization_map_review(poses,100,scans[:3],odom,np.eye(3),saved)
+
+
+def test_initial_scan_map_search_recovers_distinct_pose_without_future_scans():
+    from home_robot_tasks.s4_recorded_mapping import map_initial_pose_candidates
+    rng=np.random.default_rng(31);angles=np.arange(360)*math.tau/360
+    ranges=rng.uniform(.5,1.5,360)
+    scan=dict(observed_s=1.,time_increment=-.0005,ranges=ranges.tolist(),angle_min=0.,angle_increment=math.tau/360)
+    odom=np.array([[0.,0,0,0],[2.,0,0,0]])
+    expected=np.array([.3,-.2,.5]);T=transform(expected)
+    points=np.column_stack((ranges*np.cos(angles),ranges*np.sin(angles)))@T[:2,:2].T+T[:2,2]
+    grid=np.zeros((100,100),dtype=int);cells=np.floor((points+2.5)/.05).astype(int);grid[cells[:,1],cells[:,0]]=100
+    saved=dict(width=100,height=100,resolution=.05,origin=[-2.5,-2.5],data=grid.ravel().tolist())
+    result=map_initial_pose_candidates(scan,odom,np.eye(3),saved)
+    assert np.allclose(result['candidates'][0]['xy_yaw'],expected,atol=.04)
+    assert not result['later_scans_used']
+    assert not result['automatic_motion_authorized']
+    saved['data']=[0]*10000
+    with pytest.raises(ValueError,match='occupied'):map_initial_pose_candidates(scan,odom,np.eye(3),saved)

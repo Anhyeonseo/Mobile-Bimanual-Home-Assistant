@@ -202,3 +202,98 @@ def localization_comparison(poses,clock_offset,reference,reference_offset):
         last_5s_median_slam_difference_deg=float(np.rad2deg(np.median(yaw[tail]))),
         tracking_sanity_passed=bool(np.median(xy[tail])<.15 and np.median(yaw[tail])<.2),
         physical_localization_qualified=False,encoder_agreement_required=False)
+
+
+def localization_map_review(poses, clock_offset, scans, odom, mount, saved):
+    """Score a new recording against a fixed older map, without invented truth.
+
+    Report the first ten seconds separately for global initialization. The
+    diagnostic threshold is not a live-motion gate or surveyed pose accuracy.
+    """
+    rows=np.array([[p['stamp']-clock_offset,*p['xy_yaw']] for p in poses])
+    if len(rows)<3:raise ValueError('insufficient localization poses')
+    rows[:,3]=np.unwrap(rows[:,3])
+    wheel=interpolate(odom,rows[:,0])
+    corrections=np.array([[r[0],*pose(transform(r[1:])@np.linalg.inv(transform(w)))]
+                          for r,w in zip(rows,wheel)])
+    corrections[:,3]=np.unwrap(corrections[:,3])
+    grid=np.array(saved['data']).reshape(saved['height'],saved['width'])
+    origin=np.array(saved['origin']);resolution=saved['resolution']
+    yy,xx=np.nonzero(grid>=65)
+    if len(xx)<10:raise ValueError('insufficient occupied map cells')
+    tree=cKDTree(origin+(np.column_stack((xx,yy))+.5)*resolution)
+    metrics=[];distances=[];steady=[]
+    for scan in scans:
+        t=scan['observed_s']
+        if not rows[0,0]<=t<=rows[-1,0]:continue
+        if t+(len(scan['ranges'])-1)*scan['time_increment']<odom[0,0]:continue
+        points=scan_points(scan,mount,odom)
+        if not len(points):continue
+        T=transform(interpolate(corrections,[t])[0])@transform(interpolate(odom,[t])[0])
+        world=points@T[:2,:2].T+T[:2,2]
+        d=tree.query(world)[0];distances.extend(d)
+        elapsed=float(t-rows[0,0])
+        if elapsed>=10:steady.extend(d)
+        metrics.append(dict(elapsed_s=elapsed,endpoints=len(d),median_m=float(np.median(d)),
+            p90_m=float(np.percentile(d,90)),within_10cm_fraction=float(np.mean(d<=.1))))
+    if len(metrics)<10 or not steady:raise ValueError('insufficient scan/map review coverage')
+    def stats(values):
+        d=np.asarray(values)
+        return dict(endpoints=len(d),median_m=float(np.median(d)),p90_m=float(np.percentile(d,90)),
+                    within_10cm_fraction=float(np.mean(d<=.1)))
+    steady_stats=stats(steady)
+    # The pose at +10 s is an analysis baseline, not a measured start marker.
+    start=interpolate(rows,[rows[0,0]+10])[0]
+    delta=pose(np.linalg.inv(transform(start))@transform(rows[-1,1:]))
+    steps=np.diff(corrections[:,1:],axis=0)
+    after=rows[1:,0]>=rows[0,0]+10
+    return dict(compared_scans=len(metrics),pose_time_coverage_s=float(rows[-1,0]-rows[0,0]),
+        all_scan_to_map=stats(distances),after_10s_scan_to_map=steady_stats,per_scan=metrics,
+        maximum_pose_message_gap_s=float(np.max(np.diff(rows[:,0]))),
+        maximum_map_correction_step_after_10s_m=float(np.max(np.linalg.norm(steps[after,:2],axis=1))),
+        maximum_map_correction_step_after_10s_deg=float(np.rad2deg(np.max(abs(steps[after,2])))),
+        final_pose_xy_yaw=rows[-1,1:].tolist(),relative_to_pose_at_10s=delta.tolist(),
+        tracking_sanity_passed=bool(steady_stats['within_10cm_fraction']>=.8 and steady_stats['p90_m']<=.2),
+        physical_localization_qualified=False,encoder_agreement_required=False,
+        measured_return_error_available=False)
+
+
+def map_initial_pose_candidates(scan, odom, mount, saved):
+    """Offline hypotheses from one initial scan; never a motor enable decision.
+
+    Search free map cells at coarse resolution, then reuse bounded ICP. Keep
+    distinct alternatives so repeated room geometry is not hidden by one fit.
+    No subsequent trajectory or final pose is used to select the hypothesis.
+    """
+    grid=np.array(saved['data']).reshape(saved['height'],saved['width'])
+    origin=np.array(saved['origin']);resolution=saved['resolution']
+    yy,xx=np.nonzero(grid>=65);target=origin+(np.column_stack((xx,yy))+.5)*resolution
+    if len(target)<60:raise ValueError('insufficient occupied map cells for initialization')
+    tree=cKDTree(target);source=scan_points(scan,mount,odom)
+    if len(source)<60:raise ValueError('insufficient initial scan endpoints')
+    step=max(1,round(.1/resolution));yy,xx=np.indices(grid.shape)
+    free=(grid==0)&(xx%step==0)&(yy%step==0)
+    translations=origin+(np.column_stack((xx[free],yy[free]))+.5)*resolution
+    if not len(translations):raise ValueError('no free cells for initialization')
+    sparse=source[::4];coarse=[]
+    for yaw in np.arange(-math.pi,math.pi,math.radians(10)):
+        rotated=sparse@transform((0,0,yaw))[:2,:2].T
+        distances=tree.query(translations[:,None,:]+rotated[None,:,:])[0]
+        costs=np.minimum(distances,.2).mean(axis=1)
+        for index in np.argsort(costs)[:3]:
+            coarse.append((float(costs[index]),[*translations[index],float(yaw)]))
+    candidates=[]
+    for _,seed in sorted(coarse)[:40]:
+        try:matrix,quality=align(source,target,transform(seed))
+        except ValueError:continue
+        candidate=pose(matrix)
+        if any(np.linalg.norm(candidate[:2]-np.array(c['xy_yaw'][:2]))<.15 and
+               abs((candidate[2]-c['xy_yaw'][2]+math.pi)%math.tau-math.pi)<.15 for c in candidates):continue
+        world=source@matrix[:2,:2].T+matrix[:2,2];distances=tree.query(world)[0]
+        candidates.append(dict(xy_yaw=candidate.tolist(),clipped_mean_distance_m=float(np.minimum(distances,.2).mean()),
+            within_10cm_fraction=float(np.mean(distances<=.1)),registration=quality))
+    candidates.sort(key=lambda c:c['clipped_mean_distance_m'])
+    if not candidates:raise ValueError('no initial alignment hypothesis')
+    return dict(method='first_scan_coarse_free_cell_search_then_existing_icp',
+        source_scan_observed_s=scan['observed_s'],later_scans_used=False,
+        candidates=candidates[:5],physical_pose_verified=False,automatic_motion_authorized=False)

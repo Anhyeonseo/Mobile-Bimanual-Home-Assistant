@@ -88,10 +88,10 @@
     "localization": "output/s4-recorded-mapping-20261112/s4-recorded-amcl-20261112-01/report.json"
   },
   "next_operator_step": {
-    "purpose": "independent new room capture to assess lidar/map localization stability and return-to-mark repeatability; encoder disagreement is diagnostic, not an entry gate",
+    "purpose": "Prepare live localization startup using a saved pose or an unambiguous initial-scan candidate; then observe before controlled manual travel",
     "route": "mark start position and heading; translate 0.5–1.0 m where space/cable slack permit, including lateral motion; turn slowly both ways; return near the mark",
     "record": "same full sensor archive, start/end marks and heading, any jumps, map overlap and observed final offset; actual marked distance if available",
-    "evaluation": "Replay the new session against the saved map; inspect stable wall alignment and localization continuity. Independently measure final position/heading before claiming physical accuracy. Map/odom disagreement alone does not fail the trial.",
+    "evaluation": "Confirm initial pose/scan-map alignment before motion, then check fresh scan/TF and correction continuity. Independent marked return accuracy remains unmeasured.",
     "start_requires": "fresh supports/space/cable clearance and explicit operator teleop start",
     "motor_power_cycle_required": false
   },
@@ -153,5 +153,162 @@
       "no live device, controller, motor commands, or automatic navigation authorization"
     ],
     "report_sha256": "df87bbe5334afeb5a6ec4e9e1d28b0232ad9fd86eaff3041d15936b78627dbc0"
+  },
+  "latest_independent_trial": {
+    "source_session": "20261112T100243Z-fa0d0fef",
+    "operator_report": "Normal completion without abnormalities; start marker not placed",
+    "source_sha256": {
+      "output/s4-localization-drive-20261112/completed/drive-session.jsonl": "5e6ac388d4a96b0fd1b472c69b2927a7cc6700edf98313d175bef3653e765f71",
+      "output/s4-localization-drive-20261112/completed/capture/report.json": "3ecaf795282e195638285ad5c83eb5705e4700a2110d9214484e286737093219",
+      "output/s4-localization-drive-20261112/completed/capture/scans.json": "854b59f648fc7ec1fff7f5ec963af0503a3fb440e5c88ef9ba7655efc079ca7e"
+    },
+    "drive_completed": true,
+    "all_six_directions_recorded": true,
+    "acks": 2217,
+    "duration_s": 122.774815542,
+    "nominal_encoder_path_m": 1.368400768240202,
+    "measured_return_error_available": false,
+    "native_archive_hashes_verified": 403,
+    "slam": {
+      "passed": true,
+      "scans_published": 610,
+      "slam_pose_messages": 74,
+      "map_shape": [
+        128,
+        97
+      ],
+      "known_area_m2": 12.520000373125079,
+      "graph_restored_from_checkpoint": true,
+      "map_cells_identical_after_restart": true
+    },
+    "new_map_quality": {
+      "mode": "offline_recorded_map_quality_preview",
+      "hardware_commands": 0,
+      "live_map_modified": false,
+      "physical_accuracy_verified": false,
+      "depth_motion_qualified": false,
+      "navigation_authorized": false,
+      "slam_pose_count": 74,
+      "slam_pose_time_coverage_s": 120.01049494743347,
+      "maximum_slam_pose_gap_s": 7.825552940368652,
+      "nominal_path_length_m": 1.368400768240202,
+      "nominal_endpoint_displacement_m": 0.1371681407621796,
+      "compared_encoder_pose": [
+        0.07124292593910987,
+        0.12248546885245891,
+        0.03668027921430875
+      ],
+      "compared_slam_pose": [
+        0.10230687252909704,
+        0.09927612970052141,
+        0.0367597095237473
+      ],
+      "scan_vs_encoder_final_translation_difference_m": 0.03877682557424259,
+      "scan_vs_encoder_final_heading_difference_deg": 0.004551021496247037,
+      "heldout_scans": 525,
+      "heldout_endpoint_to_map": {
+        "endpoints": 131702,
+        "median_m": 0.021761599899496505,
+        "p90_m": 0.03796430652920698,
+        "within_10cm_fraction": 0.9965148593035793
+      },
+      "nominal_endpoint_to_map": {
+        "endpoints": 131702,
+        "median_m": 0.02203357915569841,
+        "p90_m": 0.04143551075456351,
+        "within_10cm_fraction": 0.98721355788067
+      },
+      "depth_preview_frames": 238,
+      "preview_voxels": 6132,
+      "above_lidar_voxels": 2312,
+      "lidar_free_cells_with_upper_depth_endpoints": 572,
+      "limitations": [
+        "map fit is internal consistency, not an independent surveyed distance",
+        "map-to-odom corrections interpolated between online SLAM poses; not a final optimized graph trajectory",
+        "8-pixel stride is for preview only; original full-resolution native depth retained",
+        "upper endpoints are review candidates; no free space, obstacle clearing or semantic labels inferred"
+      ]
+    },
+    "unseeded_localization": {
+      "passed": false,
+      "initialization": "uniform_free_space_global_localization",
+      "independent_capture_from_map": true,
+      "all_scan_to_map": {
+        "endpoints": 150024,
+        "median_m": 0.044805076967462255,
+        "p90_m": 0.20219982546214474,
+        "within_10cm_fraction": 0.7428944702180984
+      },
+      "after_10s_scan_to_map": {
+        "endpoints": 137591,
+        "median_m": 0.04019729705366855,
+        "p90_m": 0.15424665321734884,
+        "within_10cm_fraction": 0.7906040366012311
+      },
+      "maximum_map_correction_step_after_10s_m": 0.23670907607737407,
+      "maximum_map_correction_step_after_10s_deg": 20.73706379927919,
+      "physical_localization_qualified": false,
+      "measured_return_error_available": false
+    },
+    "first_scan_seeded_localization": {
+      "passed": true,
+      "initialization": "first_scan_map_hypothesis",
+      "independent_capture_from_map": true,
+      "all_scan_to_map": {
+        "endpoints": 150024,
+        "median_m": 0.02386943632459269,
+        "p90_m": 0.04826741813278225,
+        "within_10cm_fraction": 0.975510584973071
+      },
+      "after_10s_scan_to_map": {
+        "endpoints": 137591,
+        "median_m": 0.02415059487907379,
+        "p90_m": 0.049372711894192935,
+        "within_10cm_fraction": 0.9740971429817358
+      },
+      "maximum_map_correction_step_after_10s_m": 0.010036173551848625,
+      "maximum_map_correction_step_after_10s_deg": 0.4999761733182728,
+      "physical_localization_qualified": false,
+      "measured_return_error_available": false,
+      "initial_scan_hypothesis": {
+        "best": {
+          "xy_yaw": [
+            0.10305272942415922,
+            0.3848849410752106,
+            -1.0890518947582133
+          ],
+          "clipped_mean_distance_m": 0.029605452866234307,
+          "within_10cm_fraction": 0.9678714859437751,
+          "registration": {
+            "rmse_m": 0.022698480632744416,
+            "overlap_fraction": 0.8473895582329317,
+            "inliers": 211
+          }
+        },
+        "alternative_score_gap_m": 0.0742925281690955,
+        "elapsed_s": 2.715498750010738,
+        "later_scans_used": false
+      }
+    },
+    "local_regression_tests_passed": 77,
+    "live_localization_activated": false,
+    "autonomous_navigation_authorized": false,
+    "semantic_mapping_physically_accepted": false,
+    "evidence_directory": "output/s4-localization-drive-20261112/completed",
+    "figure": "output/s4-localization-drive-20261112/completed/localization-review.png",
+    "artifact_report_sha256": {
+      "s4-recorded-trajectory-20261112-08/report.json": "84c7cf1810ddd1c9bfe631768f80ab0bef2c217ce2156a6ab31d37df9889e778",
+      "s4-recorded-quality-20261112-08/report.json": "0f92cfa6d3aac66e13b9d48cfc46f0f50c6c4c411f4682ae7e184620f590143f",
+      "s4-recorded-slam-20261112-08/report.json": "a75763513feed8723c254681bdb2662c9d0331627704663135cb48167d0dc34d",
+      "s4-recorded-amcl-20261112-08-seeded/report.json": "1293aa792bf1eee359a0c39bb96ef4d1c508d2cb7bc1110ddbcd70df93040bad",
+      "s4-recorded-amcl-20261112-08-global/report.json": "7dde626aee070193a77198e222531115e8ec5fd83dea2557e71852e09c260c84"
+    },
+    "limitations": [
+      "One new capture against an older map; generalization needs further scenes.",
+      "No measured start/end markers; scan-to-map distances and correction steps are not physical pose accuracy.",
+      "Upper RGB-D endpoints are previews and may contain robot geometry; furniture semantics and live obstacle clearing unaccepted.",
+      "First-scan map search is an offline candidate path, not active robot navigation.",
+      "Global initialization failed the diagnostic; preserve its evidence, do not relax the threshold."
+    ]
   }
 }
