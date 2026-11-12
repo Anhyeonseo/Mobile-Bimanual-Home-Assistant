@@ -2,15 +2,15 @@
   "release": "wheel-hold-a2e478ef6660",
   "firmware": "mobile-base-hold-teleop-v7",
   "wheel_feedback": true,
-  "state": "LIDAR_RGBD_RECEPTION_DRIVE_PASSED_WITHOUT_PERIODIC_ARCHIVE",
+  "state": "RETEST_BLOCKED_RIGHT_ARM_READ_AFTER_CONTROLLER_RESET",
   "source_date": "2026-11-12",
   "hardware_drive_tested": true,
   "hold_activated": true,
   "motor_write_commands": null,
   "full_flash_backup_bytes": 524288,
   "boot_journal_preserved": true,
-  "preflight": "297 normal ACKs across F/B/L/R/A/D, zero hold read retries; final wheel stop and hold confirmed",
-  "required_next_action": "Same-firmware drive with original periodic native RGB-D archive enabled; root cause unresolved",
+  "preflight": "After controller-only reset, right slot 7 address 33 still unreadable; wheels zero/torque OFF verified; no new drive session.",
+  "required_next_action": "Restore and freshly verify right-arm response before reopening the same-condition archive drive",
   "local_tests_passed": 217,
   "browser_preview_flow_verified": true,
   "installed_info": {
@@ -35,7 +35,7 @@
   "raw_evidence_directory": "output/s4-hold-read-recovery-20261112",
   "local_build_verified": true,
   "web_session": {
-    "state": "awaiting_operator_start",
+    "state": "closed_fault_object_contact",
     "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T085104Z-913cf499.jsonl",
     "port": 18766,
     "sensor_capture": "lidar_rgbd_with_periodic_native_archive",
@@ -61,23 +61,15 @@
   "last_drive_failure": {
     "reason": "HOLD_READ_FAILED",
     "hold_failed_slot": 7,
-    "bus": "right",
-    "motor_id": 1,
+    "read_failure_address": 33,
     "wheel_stop_confirmed": true,
     "hold_confirmed": false,
-    "duration_s": 1.924468267,
-    "commands": {
-      "A": 9,
-      "Z": 27
-    },
-    "operator_pressed_finish": false,
+    "source": "output/s4-full-archive-object-contact-20261112/drive-session.jsonl",
+    "operator_reported_object_contact": true,
+    "clean_comparison_eligible": false,
     "initial_physical_cause_confirmed": false,
-    "software_reproduced": "unfinished read ownership prevents subsequent service requests",
-    "source": "output/s4-mapping-capture-20261112/failure-02/drive-session.jsonl",
-    "read_failure_address": 33,
-    "read_retries_at_final_stop": 3,
-    "read_recoveries_at_final_stop": 0,
-    "subsequent_read_only_hold_recovered": true
+    "subsequent_read_only_hold_recovered": false,
+    "persisted_after_controller_reset": true
   },
   "postinstall_soak": {
     "passed": true,
@@ -180,5 +172,31 @@
     },
     "operator_report": "rotation and movement normal, recording finished",
     "root_cause_confirmed": false
-  }
+  },
+  "latest_interrupted_retest_evidence": "output/s4-full-archive-object-contact-20261112/report.json",
+  "current_hold_confirmed": false,
+  "current_wheel_stop_confirmed": true,
+  "last_drive_failure_history": [
+    {
+      "reason": "HOLD_READ_FAILED",
+      "hold_failed_slot": 7,
+      "bus": "right",
+      "motor_id": 1,
+      "wheel_stop_confirmed": true,
+      "hold_confirmed": false,
+      "duration_s": 1.924468267,
+      "commands": {
+        "A": 9,
+        "Z": 27
+      },
+      "operator_pressed_finish": false,
+      "initial_physical_cause_confirmed": false,
+      "software_reproduced": "unfinished read ownership prevents subsequent service requests",
+      "source": "output/s4-mapping-capture-20261112/failure-02/drive-session.jsonl",
+      "read_failure_address": 33,
+      "read_retries_at_final_stop": 3,
+      "read_recoveries_at_final_stop": 0,
+      "subsequent_read_only_hold_recovered": true
+    }
+  ]
 }
