@@ -66,11 +66,14 @@
     "l4t": "39.2.1",
     "python": "3.12.3",
     "runtime_scope": "user-owned isolated prefix; not an active robot service",
-    "lidar_connected": false,
+    "lidar_connected": true,
     "controller_stop_latched": true,
     "controller_firmware": "0x00024911",
     "controller_reset_or_flashed": false,
     "motor_commands_sent": 0,
-    "report": "docs/S4_JETSON_PREPARATION.md"
+    "report": "docs/S4_JETSON_PREPARATION.md",
+    "lidar_stream_received": false,
+    "lidar_checked_on": "2026-11-12",
+    "lidar_evidence": "config/home_assistant/lidar_device.connected.observed.json"
   }
 }
