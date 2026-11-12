@@ -47,7 +47,7 @@ case "${1:-status}" in
   stop-wheels) exec python3 wheel-hold.pyz --port "$port" --stop-wheels ;;
   hold-here) exec python3 wheel-hold.pyz --port "$port" --prepare-hold --execute ;;
   keyboard) exec python3 wheel-hold.pyz --port "$port" --preserve-hold --run ;;
-  web) exec python3 wheel-hold.pyz --port "$port" --preserve-hold --web --bind 127.0.0.1 --web-port 18766 ;;
+  web) exec python3 wheel-hold.pyz --port "$port" --preserve-hold --web --bind 127.0.0.1 --web-port 18766 --record-dir /home/hyper/robot/shared/diagnostics/teleop-sessions ;;
   *) echo 'status | help | info | stop-wheels | plan-hold (read only) | hold-here (torque ON at current pose) | check | keyboard | web' >&2; exit 2 ;;
 esac
 '''

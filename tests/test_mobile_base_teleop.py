@@ -185,7 +185,12 @@ class Server:
     def shutdown(self): self.ended.set()
     def server_close(self): pass
 base_teleop_web.ThreadingHTTPServer = Server
-sys.argv = ["teleop_mobile_base.py", "--port", "fake", mode]
+class Started(base_teleop_web.Control):
+    def take_action(self, now):
+        if not self.active: return "start"
+        return None
+base_teleop_web.Control = Started
+sys.argv = ["teleop_mobile_base.py", "--port", "fake", mode, "--record-dir", str(pathlib.Path(log).parent/"sessions")]
 runpy.run_path(str(pathlib.Path(root)/"tools/run/teleop_mobile_base.py"), run_name="__main__")
 '''
     result = subprocess.run([sys.executable, "-c", child, str(ROOT), str(log), signal_name, mode],

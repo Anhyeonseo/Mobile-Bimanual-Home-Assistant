@@ -22,6 +22,10 @@ static const char *reason="BOOT", *first_failure="NONE";
 static int first_failed_id;
 typedef struct {int goal,torque,speed,position;unsigned quiet;} WheelEvidence;
 static WheelEvidence evidence[3];
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+/* Fresh per-command samples, deliberately separate from stop evidence. */
+static struct {int position,speed;uint32_t begin,end;} feedback[3];
+#endif
 /* Preserve the first anomalous observation across cleanup; it never qualifies
  * as fresh standstill evidence. A recovered read is diagnostic, not a fault. */
 typedef struct {
@@ -128,6 +132,20 @@ static void reply(const char *type){
     n+=snprintf(line+n,sizeof(line)-(unsigned)n,
         ",\"lift_position_raw\":%d,\"lift_target_raw\":%d",
         WheelHold_LiftPosition(),WheelHold_LiftTarget());
+#endif
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    if(!strcmp(type,"ack")){
+        n+=snprintf(line+n,sizeof(line)-(unsigned)n,",\"wheel_feedback\":[");
+        for(unsigned i=0;i<3;i++){
+            n+=snprintf(line+n,sizeof(line)-(unsigned)n,
+                "%s{\"id\":%u,\"position_raw\":%d,\"speed_raw\":%d,\"speed_signed\":%d,"
+                "\"tick_begin_ms\":%lu,\"tick_end_ms\":%lu}",
+                i?",":"",(unsigned)actuator_mobile_axis_id(i),feedback[i].position,
+                feedback[i].speed,signed_speed(feedback[i].speed),
+                (unsigned long)feedback[i].begin,(unsigned long)feedback[i].end);
+        }
+        n+=snprintf(line+n,sizeof(line)-(unsigned)n,"]");
+    }
 #endif
     if(strcmp(type,"ack")){
         n+=snprintf(line+n,sizeof(line)-(unsigned)n,
@@ -275,6 +293,22 @@ static void drive(uint32_t nonce,uint32_t seq,char motion){
         if(read_reg(id,40,1)!=1){fail("TORQUE_LOST");return;}
     }
     if(!lease_ok())return;
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    /* Within the same stop-and-wait transaction, not between host bytes.
+     * Read failures or an overrun stop the wheels; never emit partial/stale ACKs. */
+    for(unsigned i=0;i<3;i++){
+        if(!lease_ok())return;
+        bad_id=actuator_mobile_axis_id(i);
+        feedback[i].begin=HAL_GetTick();
+        feedback[i].position=read_reg((uint8_t)bad_id,56,2);
+        if(feedback[i].position<0){fail("WHEEL_POSITION_READ");return;}
+        if(!lease_ok())return;
+        feedback[i].speed=read_reg((uint8_t)bad_id,58,2);
+        if(feedback[i].speed<0){fail("WHEEL_SPEED_READ");return;}
+        feedback[i].end=HAL_GetTick();
+    }
+    if(!lease_ok())return;
+#endif
     bad_id=0;reason=motion=='Z'?"ZERO_COMMAND":"DRIVE";reply("ack");
 }
 static void dispatch(void){
@@ -301,7 +335,7 @@ static void dispatch(void){
         stop_all(false,"OPERATOR_STOP");reply("stopped");return;}
     if(!strcmp(command,"INFO")){
 #if HOST_MOBILE_BASE_PRESERVE_HOLD
-        send("{\"firmware\":\"mobile-base-hold-teleop-v7\",\"host_baud\":921600,\"servo_baud\":1000000,\"ids\":[7,8,9,10],\"max_raw\":200,\"watchdog_ms\":400,\"hold_monitor\":true,\"held_axes\":13,\"arm_lift_writes\":\"explicit_setup_only\",\"hold_setup\":true}\r\n");return;
+        send("{\"firmware\":\"mobile-base-hold-teleop-v7\",\"host_baud\":921600,\"servo_baud\":1000000,\"ids\":[7,8,9,10],\"max_raw\":200,\"watchdog_ms\":400,\"hold_monitor\":true,\"held_axes\":13,\"arm_lift_writes\":\"explicit_setup_only\",\"hold_setup\":true,\"wheel_feedback\":true}\r\n");return;
 #else
         send("{\"firmware\":\"mobile-base-teleop-v4\",\"host_baud\":921600,\"servo_baud\":1000000,\"ids\":[7,8,9,10],\"max_raw\":200,\"watchdog_ms\":400}\r\n");return;
 #endif

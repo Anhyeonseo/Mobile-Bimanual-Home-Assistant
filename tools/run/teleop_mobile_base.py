@@ -69,6 +69,8 @@ def inspect(port):
     if PRESERVE_HOLD:
         expected.update(firmware='mobile-base-hold-teleop-v7',hold_monitor=True,held_axes=13,
                         arm_lift_writes='explicit_setup_only',hold_setup=True)
+    if PRESERVE_HOLD and info.get("wheel_feedback") is True:
+        expected["wheel_feedback"] = True
     if info != expected: raise RuntimeError("unexpected firmware; wheels not enabled")
     return info
 
@@ -227,12 +229,13 @@ def main():
     global PRESERVE_HOLD
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", required=True)
-    parser.add_argument("--web", action="store_true", help="Browser key-down/key-up control; enables wheels")
+    parser.add_argument("--web", action="store_true", help="Open browser controls; wheels require an explicit Start action")
     parser.add_argument("--bind", default="127.0.0.1", help="Browser listener IP, e.g. Pi LAN address")
     parser.add_argument("--web-port", type=int, default=8765)
+    parser.add_argument("--record-dir", default="teleop-sessions", help="Browser session JSONL directory")
     parser.add_argument("--run", action="store_true", help="Enable wheels and start keyboard teleop")
     parser.add_argument('--preserve-hold', action='store_true',
-        help='Require hold-monitor firmware; never write arm/gripper/lift targets or torque')
+        help='Require hold-monitor firmware; web Hold action explicitly prepares current-pose holding')
     parser.add_argument('--check-hold', action='store_true', help='Read hold registers only; never enable wheels')
     parser.add_argument('--prepare-hold',action='store_true',help='Read-only current-pose hold plan; --execute activates OFF axes')
     parser.add_argument('--execute',action='store_true',help='With --prepare-hold, explicitly enable current-pose holding; no wheel motion')
@@ -254,7 +257,7 @@ def main():
                 elif args.check_hold: print(json.dumps(check_hold(port), indent=2))
                 elif args.web:
                     from base_teleop_web import run_web
-                    run_web(port, args.bind, args.web_port)
+                    run_web(port, args.bind, args.web_port, args.record_dir)
                 elif args.run: run(port, sys.stdin.fileno())
                 else: print(json.dumps(inspect(port), indent=2))
         return 0

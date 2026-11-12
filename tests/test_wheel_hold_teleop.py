@@ -179,3 +179,22 @@ def test_lost_setup_reply_never_retries_activation_or_releases_torque(host,monke
     port=Port([])
     with pytest.raises(RuntimeError,match='timeout'):host.prepare_hold(port,True)
     assert [w.split()[0] for w in port.writes]==[b'STOP',b'PREP',b'HSET']
+
+
+@pytest.mark.parametrize('scenario', [28,29,30,31])
+def test_live_wheel_feedback_and_fail_closed_reads(binaries, scenario):
+    result=subprocess.run([str(binaries/'app'),str(scenario)],capture_output=True,text=True,check=True)
+    messages=[json.loads(x) for x in result.stdout.splitlines() if x]
+    assert messages[0]['wheel_feedback'] is True
+    acks=[x for x in messages if x.get('type')=='ack']
+    assert len(acks)==(2 if scenario==28 else 1)
+    for ack in acks:
+        assert [x['id'] for x in ack['wheel_feedback']]==[7,8,9]
+        assert all(x['tick_end_ms']-x['tick_begin_ms']==2 for x in ack['wheel_feedback'])
+        assert 'wheels' not in ack  # stopped-position evidence is not live feedback
+    if scenario==28:
+        assert [b['position_raw']-a['position_raw'] for a,b in zip(acks[0]['wheel_feedback'],acks[1]['wheel_feedback'])]==[10]*3
+        assert [x['speed_signed'] for x in acks[1]['wheel_feedback']]==[200,-200,0]
+    else:
+        reason={29:'WHEEL_POSITION_READ',30:'WHEEL_SPEED_READ',31:'HOST_TIMEOUT'}[scenario]
+        assert any(x.get('first_failure')==reason and x.get('stop_confirmed') for x in messages)

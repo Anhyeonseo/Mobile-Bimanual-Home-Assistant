@@ -73,7 +73,8 @@
     "2026-11-11: source and isolated runtime uploaded over SSH; camera and synthetic ROS checks performed. No controller reset, firmware flash, power change, or motor command.",
     "2026-11-12: user authenticated; read-only inspection firmware installed with full flash backup and boot journal preservation. Wheel/lift queries and concurrent LDS/D415 capture verified; no motor writes. Right-arm pre-install timeouts and wheel 8 stationary speed discrepancy remain unqualified for motion.",
     "2026-11-12 follow-up: fixed-block inventory added to read-only inspection image. Right arm initially timed out, then recovered without another commanded reset; 154 complete 16-device rounds passed. Wheel 8 +/-50 register reports persist across reset and changed position with torque/current zero and a one-count band. Manual movement did not qualify bidirectional scale; no stop gate relaxed.",
-    "Existing S1 policy and v7 teleop already cover +/-50 stationary speed reports with 400 ms encoder stability <=8 counts, goal speed zero and torque OFF. The observed 1-count band is within that existing range. Raised-wheel prerequisite withdrawn; reuse established floor teleop and LDS/encoder comparison. No threshold or raw feedback changed."
+    "Existing S1 policy and v7 teleop already cover +/-50 stationary speed reports with 400 ms encoder stability <=8 counts, goal speed zero and torque OFF. The observed 1-count band is within that existing range. Raised-wheel prerequisite withdrawn; reuse established floor teleop and LDS/encoder comparison. No threshold or raw feedback changed.",
+    "2026-11-12: existing wheel/hold teleop extended with explicit browser Hold/Start/Finish and raw wheel feedback recording. Release wheel-hold-984477805a80 installed with full flash backup and journal preservation; all 16 devices responded with torque OFF before installation, read-only post-install hold plan passed. No motor write or physical drive was performed. Numeric floor scale and autonomous S4 acceptance remain pending."
   ],
   "target_observed_on": "2026-11-12",
   "target_environment": {
@@ -83,7 +84,7 @@
     "runtime_scope": "user-owned isolated prefix; not an active robot service",
     "lidar_connected": true,
     "controller_stop_latched": null,
-    "controller_firmware": "mobile-bus-inspection-v2",
+    "controller_firmware": "mobile-base-hold-teleop-v7",
     "controller_reset_or_flashed": true,
     "motor_commands_sent": 0,
     "report": "docs/S4_JETSON_PREPARATION.md",
@@ -95,18 +96,21 @@
     "lidar_cadence_scope": "stationary concurrent RGB-D 60 seconds; 291 lidar frames, max gap 0.201432 s, no gaps over 0.35 s; moving timing/load unqualified",
     "replacement_lidar_mount_fixed_user_confirmed": true,
     "mobile_endpoint_available": false,
-    "mobile_endpoint_inspection": "text INFO/SCAN/WHEELS verified; binary common motion endpoint is not installed",
+    "mobile_endpoint_inspection": "Previous inspection endpoint replaced by manual INFO/HOLD/PREP/HSET/ARM/D/STOP; binary autonomous motion endpoint is not installed",
     "stationary_sensor_tf_and_concurrent_capture_passed": true,
     "sensor_observation_evidence": "config/home_assistant/s4_sensors.connected.observed.json",
     "preflight_evidence": "config/home_assistant/s4_preflight.prepared.json",
     "lidar_timestamp_basis": "host serial receipt estimate; negative per-ray offsets; USB/device latency and moving deskew uncalibrated",
     "controller_replacement_requires_admin_authentication": false,
     "controller_inspection_evidence": "config/home_assistant/s4_response_diagnostics.observed.json",
-    "controller_scope": "read-only maintenance with fixed-block inventory for both arms and mobile IDs; motor writes blocked",
+    "controller_scope": "Manual wheel/hold teleop; explicit setup-only arm/lift writes; autonomous binary motion endpoint not installed",
     "right_arm_current_state_verified": true,
     "right_arm_response_restored": true,
     "right_arm_root_cause_confirmed": false,
-    "controller_inspection_release": "s4-inspection-4b60ea01f357"
+    "controller_inspection_release": "s4-inspection-4b60ea01f357",
+    "controller_teleop_release": "wheel-hold-984477805a80",
+    "controller_teleop_evidence": "config/home_assistant/s4_teleop.prepared.json",
+    "manual_teleop_available": true
   },
   "operator_reported_state": {
     "local_date": "2026-11-12",

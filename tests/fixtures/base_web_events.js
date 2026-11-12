@@ -2,9 +2,10 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const source=fs.readFileSync(0,'utf8');
 const windows={},docs={},posts=[];let interval,failNext=false,deferNext=false,resolvePending;
 function element(key){return {dataset:{key},events:{},classList:{toggle(){}},addEventListener(n,f){this.events[n]=f},setPointerCapture(){},textContent:''};}
+const extra={};
 const buttons=['w','s','a','d','q','e'].map(element),status=element(''),stop=element('');
 const context={location:{hash:'#test-token'},crypto:{randomUUID:()=> 'browser-test-uuid'},
- document:{hidden:false,querySelector:q=>q==='#status'?status:stop,querySelectorAll:()=>buttons,addEventListener:(n,f)=>docs[n]=f},
+ document:{hidden:false,querySelector:q=>q==='#status'?status:q==='#stop'?stop:(extra[q]??=element('')),querySelectorAll:()=>buttons,addEventListener:(n,f)=>docs[n]=f},
  window:{addEventListener:(n,f)=>windows[n]=f},setInterval:f=>interval=f,setTimeout,clearTimeout,AbortController,
  fetch:async(path,options)=>{const data=JSON.parse(options.body);posts.push({path,...data});if(failNext){failNext=false;throw Error('lost')}if(deferNext){deferNext=false;await new Promise((resolve,reject)=>{resolvePending=resolve;options.signal.addEventListener('abort',()=>reject(Error('timeout')))})}return {ok:true,json:async()=>({active:true,status:'ready'})}}};
 vm.createContext(context);vm.runInContext(source,context);
@@ -38,7 +39,7 @@ const key=k=>({key:k,repeat:false,preventDefault(){}});
  const ended=posts.length;
  interval();windows.keydown(key('a'));await flush();
  assert.equal(posts.length,ended); // requires reload; no late automatic rearm
- assert(status.textContent.includes('새로고침'));
+ assert(status.textContent.includes('다시 실행'));
 
  assert(posts.filter(p=>p.path==='/control').every((p,i,a)=>i===0||p.sequence>a[i-1].sequence));
 })().catch(e=>{console.error(e);process.exitCode=1});

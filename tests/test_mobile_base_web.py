@@ -8,7 +8,7 @@ from base_teleop_web import Control, handler_for, PAGE
 
 
 def controller():
-    state = Control(); state.set_status(True, "ready"); assert state.claim("a" * 16, 0)
+    state = Control(); assert state.claim("a" * 16, 0); state.set_status(True, "ready")
     return state
 
 
@@ -49,10 +49,13 @@ def test_only_one_browser_owner_and_reload_after_expiry():
     state = controller(); assert state.update("a" * 16, 1, "F", .1)
     assert not state.claim("b" * 16, .2)
     assert not state.update("b" * 16, 2, "F", .2)
+    assert not state.claim("b" * 16, 2.1)  # active sessions cannot be stolen
+    state.set_status(False, "stopped")
     assert state.claim("b" * 16, 2.1)
     assert state.desired(2.1) == "Z"
     assert not state.update("a" * 16, 2, "F", 2.2)
-    assert state.update("b" * 16, 1, "F", 2.2)
+    assert not state.update("b" * 16, 1, "F", 2.2)
+    assert state.update("b" * 16, 1, "Z", 2.2)
 
 
 @pytest.mark.parametrize("seq,motion", [(True, "F"), (-1, "F"), (1, "X"), (1, None), (1, {}), (2**32, "F")])
@@ -109,9 +112,11 @@ def test_delayed_new_sequence_cannot_restart_after_expiry(poll_first):
     assert not state.update("a" * 16, 4, "F", .43)
     assert state.desired(.44) == "Z"
     assert not state.claim("a" * 16, 2)
+    state.set_status(False, "stopped")
     assert state.claim("b" * 16, 2)
     assert state.desired(2) == "Z"
-    assert state.update("b" * 16, 1, "L", 2.1)
+    assert not state.update("b" * 16, 1, "L", 2.1)
+    assert state.update("b" * 16, 1, "Z", 2.1)
     assert not state.claim("a" * 16, 4)
 
 
@@ -124,9 +129,96 @@ def test_same_client_claim_cannot_reset_sequence_or_disrupt_current_motion():
 
 
 def test_client_history_is_bounded_and_never_reuses_retired_identity():
-    state = controller()
+    state = controller(); state.set_status(False, "idle")
     for i in range(256): assert state.claim(f"browser-{i:016d}", i+2)
     assert len(state.retired) == 256
     assert not state.claim("fresh-browser-id-1", 300)
     assert not state.claim("a" * 16, 300)
     assert state.desired(300) == "Z"
+
+
+def test_explicit_actions_share_sequence_and_cannot_survive_expiry():
+    state = Control(); assert state.claim('a'*16, 0)
+    assert not state.request('a'*16, 1, 'start', .01)
+    assert state.update('a'*16, 1, 'Z', .05)
+    assert state.request('a'*16, 2, 'hold', .1)
+    assert not state.request('a'*16, 3, 'hold', .11)
+    assert not state.claim('b'*16, 2)
+    assert state.take_action(.4) is None
+    assert not state.request('a'*16, 4, 'start', .4)
+    assert state.claim('b'*16, 2)
+    state.configure(ready=True)
+    assert not state.request('a'*16, 5, 'start', 2.01)
+    assert state.request('b'*16, 1, 'start', 2.01)
+    assert not state.update('b'*16, 1, 'F', 2.02)
+    assert state.take_action(2.02) == 'start'
+
+
+@pytest.mark.parametrize('scenario', ['idle_finish', 'drive_finish', 'loss', 'bad_ack', 'disk_error', 'hold'])
+def test_web_lifecycle_uses_explicit_actions_and_always_cleans_up(monkeypatch, tmp_path, scenario):
+    import base_teleop_web as web
+    import json
+    now = [0.]
+    monkeypatch.setattr(web.time, 'monotonic', lambda: now[0])
+    monkeypatch.setattr(web.time, 'sleep', lambda delay: now.__setitem__(0, now[0]+delay))
+    calls = []
+    class State(Control):
+        def __init__(self):
+            super().__init__(); self.claim('a'*16, 0); self.round = 0
+        def take_action(self, stamp):
+            self.round += 1
+            if self.round == 1:
+                assert not calls  # no ARM on opening the server
+                if scenario == 'idle_finish': return 'finish'
+                return 'hold' if scenario == 'hold' else 'start'
+            if scenario == 'hold': return 'finish'
+            if scenario == 'loss':
+                self.configure(expired=True)
+                return None
+            return 'finish'
+    class Server:
+        server_port = 12345
+        def __init__(self, *args): pass
+        def serve_forever(self): pass
+        def shutdown(self): pass
+        def server_close(self): pass
+    monkeypatch.setattr(web, 'Control', State)
+    monkeypatch.setattr(web, 'ThreadingHTTPServer', Server)
+    monkeypatch.setattr(web, 'inspect', lambda port: {'hold_setup': scenario=='hold'})
+    monkeypatch.setattr(web, 'prepare_hold', lambda port, execute: calls.append('hold') or {'ready':True})
+    monkeypatch.setattr(web, 'send', lambda port, data: calls.append(data.decode().split()))
+    def receive(port, timeout):
+        command = calls[-1]
+        return dict(type='armed' if command[0]=='ARM' else 'ack', armed=True,
+                    fault=scenario=='bad_ack' and command[0]=='D',
+                    session=int(command[1],16), sequence=0 if command[0]=='ARM' else int(command[2],16))
+    monkeypatch.setattr(web, 'receive', receive)
+    monkeypatch.setattr(web, 'stop', lambda port: calls.append('stop') or {'stop_confirmed':True})
+    if scenario == 'disk_error':
+        original = web.SessionRecord.write
+        def write(self, event, **data):
+            if event=='command': raise OSError('disk full')
+            return original(self,event,**data)
+        monkeypatch.setattr(web.SessionRecord,'write',write)
+    if scenario in ('bad_ack','disk_error'):
+        with pytest.raises((RuntimeError,OSError)): web.run_web(None, record_dir=tmp_path)
+    else:
+        web.run_web(None, record_dir=tmp_path)
+    lines = [json.loads(x) for x in next(tmp_path.glob('*.jsonl')).read_text().splitlines()]
+    assert lines[0]['calibrated_odometry'] is False
+    assert lines[-1]['event'] == 'finished' and lines[-1]['map_saved'] is False
+    if scenario=='idle_finish': assert calls==[]
+    elif scenario=='hold': assert calls==['hold']
+    else:
+        assert calls[0][0]=='ARM' and calls[-1]=='stop'
+        assert lines[-1]['stop']['stop_confirmed']
+    if scenario=='disk_error': assert not any(isinstance(c,list) and c[0]=='D' for c in calls)
+
+
+def test_live_feedback_requires_all_ids_and_bounded_fresh_read_window():
+    from base_teleop_web import validate_feedback
+    samples=[dict(id=i,position_raw=12,speed_raw=32818,tick_begin_ms=0xffffffff,tick_end_ms=1) for i in (7,8,9)]
+    validate_feedback({'wheel_feedback':samples})  # MCU tick wrap, raw +/-50 preserved
+    for bad in (None, samples[:2], [samples[0]]*3, [dict(samples[0],tick_end_ms=999),*samples[1:]],
+                [dict(samples[0],position_raw=True),*samples[1:]]):
+        with pytest.raises(RuntimeError): validate_feedback({'wheel_feedback':bad})

@@ -1,0 +1,43 @@
+{
+  "release": "wheel-hold-984477805a80",
+  "firmware": "mobile-base-hold-teleop-v7",
+  "wheel_feedback": true,
+  "state": "INSTALLED_READ_ONLY_PREFLIGHT_PASSED",
+  "source_date": "2026-11-12",
+  "hardware_drive_tested": false,
+  "hold_activated": false,
+  "motor_write_commands": 0,
+  "full_flash_backup_bytes": 524288,
+  "boot_journal_preserved": true,
+  "preflight": "SETUP_PLAN_READY; all 13 held axes torque OFF; lift in speed mode, explicit hold required",
+  "required_next_action": "Operator-supported Hold then Start in the browser; no automatic movement",
+  "local_tests_passed": 222,
+  "browser_preview_flow_verified": true,
+  "installed_info": {
+    "firmware": "mobile-base-hold-teleop-v7",
+    "host_baud": 921600,
+    "servo_baud": 1000000,
+    "ids": [
+      7,
+      8,
+      9,
+      10
+    ],
+    "max_raw": 200,
+    "watchdog_ms": 400,
+    "hold_monitor": true,
+    "held_axes": 13,
+    "arm_lift_writes": "explicit_setup_only",
+    "hold_setup": true,
+    "wheel_feedback": true
+  },
+  "postinstall_plan_reason": "SETUP_PLAN_READY",
+  "raw_evidence_directory": "output/s4-teleop-usability-20261112",
+  "local_build_verified": true,
+  "web_session": {
+    "state": "idle_no_motor_commands",
+    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T072132Z-5790fc42.jsonl",
+    "port": 18766,
+    "required_next_action": "operator current-pose hold and manual drive"
+  }
+}
