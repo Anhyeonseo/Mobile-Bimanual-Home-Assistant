@@ -163,7 +163,7 @@ def review_moving(capture, slam, trajectory_review, output):
     return result
 
 
-def travel_geometry(root, hold_plan, *, lift_m, mobile_mesh_dir, d415_mesh, lds_mesh):
+def travel_geometry(root, hold_plan, *, lift_m, mobile_mesh_dir, d415_mesh, lds_mesh, include_surfaces=False):
     """Original STL bounds at an observed posture; not an installed-body certificate."""
     from home_robot_tasks import s2_geometry as geom, s2_development as dev
     from home_robot_tasks.d415_geometry import nominal_model
@@ -188,14 +188,14 @@ def travel_geometry(root, hold_plan, *, lift_m, mobile_mesh_dir, d415_mesh, lds_
     base=np.array(profile['base_from_cad']);platform=np.array(profile['lift']['platform_at_lift_zero'])
     displacement=np.array(profile['lift']['axis_base'])*lift_m;platform[:3,3]+=displacement
     joints={j['name']:j for j in geometry['mobile_reference_joints']}
-    clouds=[];parts=[];sources={}
+    clouds=[];parts=[];sources={};surfaces=[]
     def add(name,path,matrix,sha,scale=1.):
         vertices,raw=read_stl(Path(path))
         if hashlib.sha256(raw).hexdigest()!=sha:raise ValueError('original mesh hash mismatch: '+name)
         matrix=geom.rigid(matrix)
         vertices=(vertices*scale)@matrix[:3,:3].T+matrix[:3,3]
         vertices[:,2]-=profile['ground_z_m']
-        clouds.append(vertices)
+        clouds.append(vertices);surfaces.append(vertices.reshape(-1,3,3))
         parts.append(dict(name=name,minimum_m=vertices.min(0).tolist(),maximum_m=vertices.max(0).tolist()))
         sources[str(path)]=sha
     mobile_mesh_dir=Path(mobile_mesh_dir)
@@ -233,7 +233,8 @@ def travel_geometry(root, hold_plan, *, lift_m, mobile_mesh_dir, d415_mesh, lds_
         physical_body_verified=False,runtime_authorized=False,
         unmodelled=['external power cable','any support or accessory absent from official CAD','payload (empty grippers last confirmed)'])
     # Display sample only: all dimensions above were calculated from full surfaces.
-    return result,points[::max(1,len(points)//18000)]
+    sample=points[::max(1,len(points)//18000)]
+    return (result,sample,surfaces) if include_surfaces else (result,sample)
 
 
 def endpoint_obstacles(voxels, voxel_size, grid_shape, origin, resolution, *, bottom, top):
@@ -255,11 +256,95 @@ def endpoint_obstacles(voxels, voxel_size, grid_shape, origin, resolution, *, bo
     return blocked,len(selected)
 
 
+def slab_footprints(surfaces, bottom, top):
+    """Per-part convex XY bounds of triangles clipped to a height interval.
+
+    Intersect triangle edges with both planes; merely selecting nearby vertices
+    misses a tall face crossing the band. Separate parts do not fill each other's gaps.
+    """
+    from scipy.spatial import ConvexHull
+    if not np.isfinite([bottom,top]).all() or bottom>=top:raise ValueError('invalid slab')
+    polygons=[]
+    for triangles in surfaces:
+        triangles=np.asarray(triangles,float)
+        if triangles.ndim!=3 or triangles.shape[1:]!=(3,3) or not np.isfinite(triangles).all():
+            raise ValueError('finite original triangles required')
+        if not len(triangles):continue
+        tri=triangles[(triangles[:,:,2].min(1)<=top)&(triangles[:,:,2].max(1)>=bottom)]
+        if not len(tri):continue
+        pts=tri.reshape(-1,3);inside=pts[(pts[:,2]>=bottom)&(pts[:,2]<=top)]
+        pieces=[inside[:,:2]]
+        for a,b in ((0,1),(1,2),(2,0)):
+            start,end=tri[:,a],tri[:,b];dz=end[:,2]-start[:,2]
+            for z in (bottom,top):
+                valid=(abs(dz)>1e-12)&(np.minimum(start[:,2],end[:,2])<=z)&(np.maximum(start[:,2],end[:,2])>=z)
+                t=(z-start[valid,2])/dz[valid]
+                pieces.append((start[valid]+t[:,None]*(end[valid]-start[valid]))[:,:2])
+        xy=np.unique(np.vstack(pieces),axis=0)
+        if not len(xy):continue
+        if len(xy)>=3 and np.linalg.matrix_rank(xy-xy[0],tol=1e-10)==2:xy=xy[ConvexHull(xy).vertices]
+        polygons.append(xy)
+    return polygons
+
+
+def footprint_kernel(polygons, resolution, yaw, clearance):
+    """Obstacle cell -> robot centre offsets for one yaw (reflected footprint).
+
+    Expand by the obstacle cell square and metric clearance, without rounding
+    clearance up to a whole number of cells or assuming all possible yaw angles.
+    """
+    from scipy.spatial import ConvexHull
+    if not np.isfinite([resolution,yaw,clearance]).all() or resolution<=0 or clearance<0:raise ValueError('invalid footprint parameters')
+    rotation=np.array([[np.cos(yaw),-np.sin(yaw)],[np.sin(yaw),np.cos(yaw)]])
+    square=resolution/2*np.array([[-1,-1],[-1,1],[1,1],[1,-1]])
+    expanded=[]
+    for poly in polygons:
+        poly=np.asarray(poly,float)
+        if poly.ndim!=2 or poly.shape[1]!=2 or not len(poly) or not np.isfinite(poly).all():raise ValueError('finite XY polygon required')
+        points=(-poly@rotation.T)[:,None,:]+square[None,:,:]
+        points=points.reshape(-1,2);hull=ConvexHull(points)
+        expanded.append(points[hull.vertices])
+    if not expanded:return np.zeros((1,1),bool)
+    extent=max(abs(np.vstack(expanded)).max()+clearance,resolution)
+    steps=int(np.ceil(extent/resolution))
+    if steps>200:raise ValueError('bounded footprint kernel required')
+    yy,xx=np.mgrid[-steps:steps+1,-steps:steps+1];points=np.column_stack((xx.ravel(),yy.ravel()))*resolution
+    selected=np.zeros(len(points),bool)
+    for poly in expanded:
+        hull=ConvexHull(poly)
+        inside=np.all(points@hull.equations[:,:2].T+hull.equations[:,2]<=1e-10,axis=1)
+        distance=np.full(len(points),np.inf)
+        for a,b in zip(poly,np.roll(poly,-1,axis=0)):
+            edge=b-a;t=np.clip((points-a)@edge/(edge@edge),0,1)
+            distance=np.minimum(distance,np.linalg.norm(points-a-t[:,None]*edge,axis=1))
+        selected|=inside|(distance<=clearance+1e-10)
+    return selected.reshape(xx.shape)
+
+
+def height_matched_candidates(occupied, voxels, surfaces, *, resolution, origin,
+                              voxel_size, lidar_top, height, yaw, clearance):
+    from scipy.ndimage import binary_dilation
+    base_polys=slab_footprints(surfaces,0,lidar_top)
+    base_kernel=footprint_kernel(base_polys,resolution,yaw,clearance)
+    result=binary_dilation(occupied,structure=base_kernel)
+    bands=[]
+    for z in np.unique(voxels[:,2]):
+        low,high=float(z*voxel_size),float((z+1)*voxel_size)
+        if high<=lidar_top or low>=height+clearance:continue
+        polygons=slab_footprints(surfaces,max(0,low-clearance),min(height,high+clearance))
+        if not polygons:continue
+        observed,_=endpoint_obstacles(voxels[voxels[:,2]==z],voxel_size,occupied.shape,origin,resolution,bottom=max(lidar_top,low),top=high)
+        kernel=footprint_kernel(polygons,resolution,yaw,clearance)
+        result|=binary_dilation(observed,structure=kernel)
+        bands.append(dict(height_interval_m=[low,high],body_polygons=len(polygons),kernel_cells=int(kernel.sum())))
+    return result,base_polys,bands
+
+
 def review_traversability(args):
     from scipy.ndimage import binary_dilation
     import math
-    geometry,body=travel_geometry(ROOT,args.hold_plan,lift_m=args.lift_m,
-        mobile_mesh_dir=args.mobile_mesh_dir,d415_mesh=args.d415_mesh,lds_mesh=args.lds_mesh)
+    geometry,body,surfaces=travel_geometry(ROOT,args.hold_plan,lift_m=args.lift_m,
+        mobile_mesh_dir=args.mobile_mesh_dir,d415_mesh=args.d415_mesh,lds_mesh=args.lds_mesh,include_surfaces=True)
     output=args.output
     if output.exists():raise ValueError('new review output required')
     occupancy=json.loads((args.slam_review/'occupancy.json').read_text())
@@ -285,54 +370,71 @@ def review_traversability(args):
     radius=geometry['circumscribed_radius_m']+args.clearance_m
     steps=math.ceil(radius/resolution);y,x=np.mgrid[-steps:steps+1,-steps:steps+1]
     kernel=x*x+y*y<=steps*steps
-    forbidden=binary_dilation(combined,structure=kernel)
+    legacy=binary_dilation(combined,structure=kernel)
+    yaw=float(poses[-1,3])
+    forbidden,base_polys,bands=height_matched_candidates(occupied,voxels,surfaces,
+        resolution=resolution,origin=origin,voxel_size=.05,lidar_top=bottom,
+        height=geometry['height_above_floor_m'],yaw=yaw,clearance=args.clearance_m)
     extra=(grid==0)&upper
     report=dict(mode='recorded_body_clearance_candidate_review',geometry=geometry,
         candidate_clearance_m=args.clearance_m,vertical_interval_m=[bottom,top],
         upper_endpoint_voxels=n,upper_endpoint_xy_cells=int(upper.sum()),
         lidar_free_cells_with_upper_hits=int(extra.sum()),
         body_dilated_obstacle_cells=int(forbidden.sum()),
+        comparison_policy='height-matched per-part STL slabs, fixed recorded final yaw',
+        yaw_rad=yaw,base_footprint_xy_m=[p.tolist() for p in base_polys],height_bands=bands,
+        previous_circle_cells=int(legacy.sum()),
+        previous_circle_on_lidar_free_cells=int((legacy&(grid==0)).sum()),
+        height_matched_on_lidar_free_cells=int((forbidden&(grid==0)).sum()),
+        rotation_sweep_verified=False,
         free_space_certified=False,self_geometry_removed=False,depth_motion_qualified=False,
         runtime_authorized=False,motor_commands=0,live_map_modified=False,
         current_posture_applied_to_recorded_environment=True,
         limitations=['Recorded endpoint preview, not a full-height ray-cleared traversability map.',
             'Current observed joint posture does not certify the pose at every historical depth exposure.',
             'Self returns and unsupported accessories remain unresolved; no obstacle clearing performed.',
-            'Circumcircle supports any yaw but can reject a narrow passage a fixed-yaw footprint could fit.',
+            'Height-specific part hulls at one fixed yaw; turns require a swept-orientation check.',
+            'LiDAR-only geometry is tested with the lower body; unknown upper geometry is not certified clear.',
             'Clearance is an explicit review setting, not measured braking or installation uncertainty.'],
         source_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in
             [args.slam_review/'occupancy.json',args.slam_review/'report.json',args.slam_review/'slam-poses.json',args.depth_review/'preview.npz',args.depth_review/'report.json']})
     output.mkdir(parents=True);(output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
-    np.savez_compressed(output/'candidate-layers.npz',lidar_occupied=occupied,upper_hits=upper,body_forbidden=forbidden)
+    np.savez_compressed(output/'candidate-layers.npz',lidar_occupied=occupied,upper_hits=upper,body_forbidden=forbidden,previous_circle=legacy)
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     from matplotlib.colors import ListedColormap
-    from matplotlib.patches import Circle
+    from matplotlib.patches import Polygon, Patch
     from matplotlib import font_manager
-    korean=any(f.name=='Noto Sans CJK KR' for f in font_manager.fontManager.ttflist)
+    families=[f.name for f in font_manager.fontManager.ttflist if f.name.startswith('Noto Sans CJK')]
+    korean=bool(families)
     if korean:
-        plt.rcParams['font.family']='Noto Sans CJK KR'
+        plt.rcParams['font.family']=families[0]
         plt.rcParams['axes.unicode_minus']=False
-    fig,axes=plt.subplots(1,3,figsize=(16,5.5))
-    extent=[*([origin[0],origin[0]+grid.shape[1]*resolution]),origin[1],origin[1]+grid.shape[0]*resolution]
+    fig,axes=plt.subplots(1,3,figsize=(16,6))
+    extent=[origin[0],origin[0]+grid.shape[1]*resolution,origin[1],origin[1]+grid.shape[0]*resolution]
     display=np.where(grid<0,0,np.where(occupied,2,1))
-    for ax in axes[:2]:
+    for ax in axes:
         ax.imshow(display,origin='lower',extent=extent,cmap=ListedColormap(['#aeb8c2','#f7f5ee','#23323d']),vmin=0,vmax=2)
-        ax.plot(poses[:,1],poses[:,2],color='#16837a',linewidth=1.5)
-        ax.set(xlabel='Map X (m)',ylabel='Map Y (m)',aspect='equal')
-    axes[0].set_title('라이다 + 상부 깊이 형상 (주황)' if korean else 'Lidar + observed upper surfaces')
-    axes[0].imshow(np.ma.masked_where(~upper,upper),origin='lower',extent=extent,cmap=ListedColormap(['#df802f']),alpha=.8)
-    axes[1].imshow(np.ma.masked_where(~forbidden,forbidden),origin='lower',extent=extent,cmap=ListedColormap(['#c95252']),alpha=.5)
-    axes[1].add_patch(Circle(poses[-1,1:3],radius,fill=False,color='#16837a',linewidth=2))
-    axes[1].set_title('로봇 중심 접근 제한 후보 (빨강)' if korean else 'Body clearance candidates / any yaw')
-    axes[2].scatter(body[:,0],body[:,2],s=.35,c='#354d61',alpha=.3)
-    axes[2].axhline(bottom,color='#df802f',linestyle='--',label='Upper review starts')
-    axes[2].axhline(geometry['height_above_floor_m'],color='#16837a',linestyle='--',label='Model body height')
-    axes[2].set(xlabel='Robot forward X (m)',ylabel='Height above floor (m)',aspect='equal',title='원본 STL · 현재 팔 자세' if korean else 'Original STL / current arm posture')
-    axes[2].legend(fontsize=8)
-    fig.suptitle('기록 지도 검토 · 밝은 영역도 아직 통행 가능으로 확인한 곳은 아님' if korean else 'Recorded-data comparison: pale areas are NOT certified traversable',fontsize=13)
-    fig.tight_layout();fig.savefig(output/'traversability-review.png',dpi=160);plt.close(fig)
+        ax.set(xlabel='X (m)',ylabel='Y (m)',aspect='equal')
+    axes[0].imshow(np.ma.masked_where(~upper,upper),origin='lower',extent=extent,cmap=ListedColormap(['#df802f']),alpha=.9)
+    axes[0].set_title('관측된 물체 형상 · 여유 폭 확장 전' if korean else 'Observed surfaces / no padding')
+    for ax,mask,title in [(axes[1],legacy,'이전: 모든 높이에 최대 원 반경'),(axes[2],forbidden,'수정: 높이별 외형 · 표시된 방향 기준')]:
+        # Shade only lidar-known free floor, not unseen grey regions or objects.
+        visible=mask&(grid==0)&~upper
+        ax.imshow(np.ma.masked_where(~visible,visible),origin='lower',extent=extent,cmap=ListedColormap(['#cf6666']),alpha=.5)
+        ax.imshow(np.ma.masked_where(~upper,upper),origin='lower',extent=extent,cmap=ListedColormap(['#df802f']),alpha=.9)
+        ax.set_title(title if korean else ('Previous circle' if ax is axes[1] else 'Height-matched body / fixed yaw'))
+    rot=np.array([[np.cos(yaw),-np.sin(yaw)],[np.sin(yaw),np.cos(yaw)]])
+    for poly in base_polys:axes[2].add_patch(Polygon(poly@rot.T+poses[-1,1:3],fill=False,color='#16837a',linewidth=1.2))
+    axes[2].arrow(poses[-1,1],poses[-1,2],.27*np.cos(yaw),.27*np.sin(yaw),color='#16837a',width=.015,head_width=.10)
+    legends=[Patch(color='#23323d',label='라이다 물체' if korean else 'Lidar surface'),
+        Patch(color='#df802f',label='상부 깊이 형상' if korean else 'Upper surface'),
+        Patch(color='#e4aaaa',label='로봇 중심의 여유 공간 · 실제 물체 아님' if korean else 'Centre clearance / not a solid object'),
+        Patch(color='#aeb8c2',label='미관측' if korean else 'Unobserved')]
+    fig.legend(handles=legends,loc='lower center',ncol=4,fontsize=10)
+    fig.suptitle('물체 영역과 로봇 중심의 여유 영역을 구분한 비교 · 실물 주행 판정 전' if korean else 'Surfaces and centre clearance shown separately / offline review',fontsize=13)
+    fig.tight_layout(rect=[0,.13,1,.94]);fig.savefig(output/'traversability-review.png',dpi=160);plt.close(fig)
     return report
 
 
