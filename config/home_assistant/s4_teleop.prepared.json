@@ -2,15 +2,15 @@
   "release": "wheel-hold-a2e478ef6660",
   "firmware": "mobile-base-hold-teleop-v7",
   "wheel_feedback": true,
-  "state": "INSTALLED_HOLD_READ_RECOVERY_READ_ONLY_SOAK_PASSED",
+  "state": "ALL_MANUAL_DIRECTIONS_PASSED_WITHOUT_SENSOR_CAPTURE",
   "source_date": "2026-11-12",
-  "hardware_drive_tested": false,
+  "hardware_drive_tested": true,
   "hold_activated": true,
   "motor_write_commands": null,
   "full_flash_backup_bytes": 524288,
   "boot_journal_preserved": true,
-  "preflight": "600 complete 13-axis read rounds in 30 seconds; all holds confirmed, lift 3692, no motor writes; moving test pending",
-  "required_next_action": "Operator-controlled rotation and mapping capture",
+  "preflight": "297 normal ACKs across F/B/L/R/A/D, zero hold read retries; final wheel stop and hold confirmed",
+  "required_next_action": "Lidar-only concurrent manual capture, then RGB-D comparison; initial fault cause unresolved",
   "local_tests_passed": 217,
   "browser_preview_flow_verified": true,
   "installed_info": {
@@ -36,8 +36,10 @@
   "local_build_verified": true,
   "web_session": {
     "state": "awaiting_operator_start",
-    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T083358Z-4e0b072e.jsonl",
-    "port": 18766
+    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T084420Z-01bc1c16.jsonl",
+    "port": 18766,
+    "sensor_capture": "lidar_only",
+    "sensor_evidence": "/home/hyper/robot/shared/diagnostics/s4-mapping-capture-20261112-03-lidar-only"
   },
   "firmware_installed_by_release": "wheel-hold-a2e478ef6660",
   "hold_partially_applied": false,
@@ -63,16 +65,19 @@
     "motor_id": 1,
     "wheel_stop_confirmed": true,
     "hold_confirmed": false,
-    "duration_s": 5.996738268,
+    "duration_s": 1.924468267,
     "commands": {
-      "A": 45,
-      "D": 50,
-      "Z": 17
+      "A": 9,
+      "Z": 27
     },
     "operator_pressed_finish": false,
     "initial_physical_cause_confirmed": false,
     "software_reproduced": "unfinished read ownership prevents subsequent service requests",
-    "source": "output/s4-mapping-capture-20261112/failure/drive-session.jsonl"
+    "source": "output/s4-mapping-capture-20261112/failure-02/drive-session.jsonl",
+    "read_failure_address": 33,
+    "read_retries_at_final_stop": 3,
+    "read_recoveries_at_final_stop": 0,
+    "subsequent_read_only_hold_recovered": true
   },
   "postinstall_soak": {
     "passed": true,
@@ -87,5 +92,83 @@
       3692
     ],
     "plan_reason": "SETUP_PLAN_READY"
+  },
+  "latest_retest_evidence": "output/s4-retest-20261112-01/report.json",
+  "latest_retest_summary": {
+    "duration_s": 16.270563905,
+    "command_counts": {
+      "Z": 65,
+      "D": 55,
+      "A": 83,
+      "F": 23,
+      "B": 31,
+      "R": 18,
+      "L": 22
+    },
+    "acks": 297,
+    "all_ack": true,
+    "max_command_gap_s": 0.060289114,
+    "final_stop": {
+      "type": "stopped",
+      "armed": false,
+      "fault": false,
+      "session": 770503756,
+      "sequence": 297,
+      "reason": "OPERATOR_STOP",
+      "first_failure": "NONE",
+      "first_failed_id": 0,
+      "stop_confirmed": true,
+      "failed_id": 7,
+      "speed_raw": 0,
+      "speed_hal_status": 0,
+      "hold_confirmed": true,
+      "hold_reason": "HOLD_UNCHANGED",
+      "hold_failed_slot": 0,
+      "hold_samples": 439,
+      "hold_read_retries": 0,
+      "hold_read_recoveries": 0,
+      "hold_read_failure_slot": 0,
+      "hold_read_failure_address": 0,
+      "lift_position_raw": 3692,
+      "lift_target_raw": 3692,
+      "wait_elapsed_ms": 474,
+      "first_failure_wait_ms": 0,
+      "wheels": [
+        {
+          "id": 7,
+          "goal_raw": 0,
+          "torque_raw": 0,
+          "speed_raw": 0,
+          "speed_signed": 0,
+          "speed_valid": true,
+          "position_raw": 1353,
+          "quiet_samples": 7
+        },
+        {
+          "id": 8,
+          "goal_raw": 0,
+          "torque_raw": 0,
+          "speed_raw": 0,
+          "speed_signed": 0,
+          "speed_valid": true,
+          "position_raw": 2364,
+          "quiet_samples": 7
+        },
+        {
+          "id": 9,
+          "goal_raw": 0,
+          "torque_raw": 0,
+          "speed_raw": 0,
+          "speed_signed": 0,
+          "speed_valid": true,
+          "position_raw": 1426,
+          "quiet_samples": 7
+        }
+      ]
+    },
+    "error": null,
+    "operator_report": "rotation and translation normal; recording finished",
+    "sensor_capture_enabled": false,
+    "root_cause_confirmed": false
   }
 }
