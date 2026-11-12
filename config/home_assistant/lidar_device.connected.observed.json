@@ -146,5 +146,83 @@
     "last_port_query": "ttyUSB0 absent during audit; no physical serial port opened",
     "local_evidence": "output/s4-lidar-connected/software-audit.json",
     "target_evidence": "/home/hyper/robot/shared/diagnostics/s4-lidar-connected/software-audit/report.json"
+  },
+  "local_replacement_test": {
+    "checked_on_local_date": "2026-11-12",
+    "host": "local_pc",
+    "unit_identity": "different LDS-01 per user; adapter serial 0001 is not a unique lidar identifier",
+    "report": {
+      "host": "local_pc",
+      "unit": "replacement_same_model_reported_by_user",
+      "serial_configuration": {
+        "requested": {
+          "baudrate": 230400,
+          "bytesize": 8,
+          "parity": "N",
+          "stopbits": 1,
+          "xonxoff": false,
+          "dsrdtr": false,
+          "rtscts": false,
+          "timeout": 0.05,
+          "write_timeout": 1,
+          "inter_byte_timeout": null
+        },
+        "rts": true,
+        "dtr": true,
+        "os_input_baud_is_230400": true,
+        "os_output_baud_is_230400": true,
+        "os_receiver_enabled": true,
+        "os_8bit": true,
+        "os_parity_enabled": false,
+        "os_two_stop_bits": false,
+        "os_software_flow_enabled": false,
+        "os_hardware_flow_enabled": false,
+        "os_canonical": false
+      },
+      "captured_at_utc": "2026-11-12T01:07:33.400414+00:00",
+      "mode": "sensor_start_pause_raw_capture",
+      "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+      "baud": 230400,
+      "serial_command_bytes_sent": 2,
+      "robot_motion_commands": 0,
+      "duration_s": 20.002882834000047,
+      "bytes": 217950,
+      "raw_sha256": "c855dc6fb0df14506e1701313e8891a6ec4683638c0485b58c3af5465485c71b",
+      "sectors": 5189,
+      "discarded_bytes": 11,
+      "checksum_failed_sectors": 0,
+      "checksum_method": "LDS specification p5: (255-sum(first40)) mod256 matches byte40 or41",
+      "sequence_errors": [
+        {
+          "packet": 3539,
+          "previous": 58,
+          "next": 0
+        },
+        {
+          "packet": 4678,
+          "previous": 58,
+          "next": 0
+        }
+      ],
+      "sequence_error_count": 2,
+      "complete_scans": 84,
+      "scan_starts": 87,
+      "scan_gaps_over_035s": 0,
+      "range_accuracy_validated": false,
+      "mount_calibrated": false,
+      "scan_start_interval_s": {
+        "min": 0.19996726799990938,
+        "median": 0.20072049150007842,
+        "max": 0.2025660480001079
+      },
+      "rpm_median": 298.3,
+      "valid_points": {
+        "min": 320,
+        "median": 322.0,
+        "max": 325
+      }
+    },
+    "local_evidence": "output/s4-lidar-connected/local-second-unit",
+    "conclusion": "Real bytes received with same acquisition algorithm and actual OS port settings verified. Host and sensor changed together; original sensor vs Jetson fault not isolated. Two missing sectors remain; not navigation-qualified."
   }
 }
