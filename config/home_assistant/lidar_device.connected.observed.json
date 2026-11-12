@@ -87,5 +87,64 @@
   "references": [
     "https://raw.githubusercontent.com/ROBOTIS-GIT/hls_lfcd_lds_driver/2.1.1/src/hlds_laser_publisher.cpp",
     "https://emanual.robotis.com/assets/docs/LDS_Basic_Specification.pdf"
-  ]
+  ],
+  "original_cable_retest": {
+    "captured_at_utc": "2026-11-11T15:58:24.828345+00:00",
+    "mode": "sensor_start_pause_raw_capture",
+    "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+    "baud": 230400,
+    "serial_command_bytes_sent": 2,
+    "robot_motion_commands": 0,
+    "duration_s": 20.008301060999997,
+    "bytes": 0,
+    "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sectors": 0,
+    "discarded_bytes": 0,
+    "checksum_failed_sectors": 0,
+    "checksum_method": "LDS specification p5: (255-sum(first40)) mod256 matches byte40 or41",
+    "sequence_errors": [],
+    "sequence_error_count": 0,
+    "complete_scans": 0,
+    "scan_starts": 0,
+    "scan_gaps_over_035s": 0,
+    "range_accuracy_validated": false,
+    "mount_calibrated": false
+  },
+  "software_audit": {
+    "checked_on_local_date": "2026-11-12",
+    "physical_device_opened": false,
+    "fixture_sha256": "475b3a3939ec339aef62b2b71a619c45b1ef8210e9de74f93f20ac5be1d870a6",
+    "scope": "PTY replay validates readers and decoder; excludes real CP210x USB/UART, physical line states and sensor output",
+    "raw_reader": {
+      "received_bytes": 50400,
+      "complete_scans": 20,
+      "checksum_failures": 0
+    },
+    "official_driver": {
+      "received_scans": 20,
+      "rays_per_scan": 360,
+      "exit_code_after_requested_stop": 255
+    },
+    "requested_serial_settings": {
+      "baudrate": 230400,
+      "bytesize": 8,
+      "parity": "N",
+      "stopbits": 1,
+      "xonxoff": false,
+      "rtscts": false,
+      "dsrdtr": false,
+      "rts": true,
+      "dtr": true
+    },
+    "unresolved": [
+      "actual_CP210x_USB_UART_receive_path",
+      "actual_OS_applied_port_configuration",
+      "electrical_effect_of_RTS_DTR_on_connected_adapter",
+      "sensor_power_and_output"
+    ],
+    "hardware_fault_confirmed": false,
+    "last_port_query": "ttyUSB0 absent during audit; no physical serial port opened",
+    "local_evidence": "output/s4-lidar-connected/software-audit.json",
+    "target_evidence": "/home/hyper/robot/shared/diagnostics/s4-lidar-connected/software-audit/report.json"
+  }
 }
