@@ -1,17 +1,17 @@
 {
-  "release": "wheel-hold-8b1afa8c0e3d",
+  "release": "wheel-hold-a2e478ef6660",
   "firmware": "mobile-base-hold-teleop-v7",
   "wheel_feedback": true,
-  "state": "MANUAL_FLOOR_TRANSLATION_TESTED_STOPPED_HOLD_MAINTAINED",
+  "state": "INSTALLED_HOLD_READ_RECOVERY_READ_ONLY_SOAK_PASSED",
   "source_date": "2026-11-12",
-  "hardware_drive_tested": true,
+  "hardware_drive_tested": false,
   "hold_activated": true,
   "motor_write_commands": null,
   "full_flash_backup_bytes": 524288,
   "boot_journal_preserved": true,
-  "preflight": "Fresh hold plan and explicit hold passed; 13 axes maintained through manual drive and verified wheel stop",
-  "required_next_action": "Record both Q/E rotations during the next floor mapping session; qualify metric floor motion and actual SLAM",
-  "local_tests_passed": 237,
+  "preflight": "600 complete 13-axis read rounds in 30 seconds; all holds confirmed, lift 3692, no motor writes; moving test pending",
+  "required_next_action": "Operator-controlled rotation and mapping capture",
+  "local_tests_passed": 217,
   "browser_preview_flow_verified": true,
   "installed_info": {
     "firmware": "mobile-base-hold-teleop-v7",
@@ -32,18 +32,18 @@
     "wheel_feedback": true
   },
   "postinstall_plan_reason": "SETUP_PLAN_READY",
-  "raw_evidence_directory": "output/s4-floor-teleop-20261112",
+  "raw_evidence_directory": "output/s4-hold-read-recovery-20261112",
   "local_build_verified": true,
   "web_session": {
-    "state": "closed_after_verified_stop_and_recording",
-    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T075056Z-3700c4fc.jsonl",
+    "state": "awaiting_operator_start",
+    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T083358Z-4e0b072e.jsonl",
     "port": 18766
   },
-  "firmware_installed_by_release": "wheel-hold-8b1afa8c0e3d",
+  "firmware_installed_by_release": "wheel-hold-a2e478ef6660",
   "hold_partially_applied": false,
-  "prepared_recovery_release": "wheel-hold-8b1afa8c0e3d",
+  "prepared_recovery_release": "wheel-hold-a2e478ef6660",
   "recovery_installation": "completed_backup_and_journal_verified",
-  "recovery_local_tests_passed": 237,
+  "recovery_local_tests_passed": 217,
   "hold_failure": {
     "reason": "SETUP_LIFT_MODE_POSITION_CHANGED",
     "before_raw": 3778,
@@ -55,5 +55,37 @@
     "raw_evidence": "output/s4-floor-teleop-20261112/hold-failure.jsonl",
     "scope": "Historical failed attempt; superseded by successful hold and drive. Not the current torque state."
   },
-  "latest_physical_evidence": "config/home_assistant/s4_floor_teleop.observed.json"
+  "latest_physical_evidence": "config/home_assistant/s4_floor_teleop.observed.json",
+  "last_drive_failure": {
+    "reason": "HOLD_READ_FAILED",
+    "hold_failed_slot": 7,
+    "bus": "right",
+    "motor_id": 1,
+    "wheel_stop_confirmed": true,
+    "hold_confirmed": false,
+    "duration_s": 5.996738268,
+    "commands": {
+      "A": 45,
+      "D": 50,
+      "Z": 17
+    },
+    "operator_pressed_finish": false,
+    "initial_physical_cause_confirmed": false,
+    "software_reproduced": "unfinished read ownership prevents subsequent service requests",
+    "source": "output/s4-mapping-capture-20261112/failure/drive-session.jsonl"
+  },
+  "postinstall_soak": {
+    "passed": true,
+    "read_rounds": 600,
+    "axes_per_round": 13,
+    "motor_write_commands": 0,
+    "duration_s": 31.249562611003057,
+    "all_holds_confirmed": true,
+    "read_retries": 0,
+    "read_recoveries": 0,
+    "lift_positions_raw": [
+      3692
+    ],
+    "plan_reason": "SETUP_PLAN_READY"
+  }
 }

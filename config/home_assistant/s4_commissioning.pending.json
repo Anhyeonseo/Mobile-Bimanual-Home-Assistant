@@ -82,7 +82,9 @@
     "Existing S1 policy and v7 teleop already cover +/-50 stationary speed reports with 400 ms encoder stability <=8 counts, goal speed zero and torque OFF. The observed 1-count band is within that existing range. Raised-wheel prerequisite withdrawn; reuse established floor teleop and LDS/encoder comparison. No threshold or raw feedback changed.",
     "2026-11-12: existing wheel/hold teleop extended with explicit browser Hold/Start/Finish and raw wheel feedback recording. Release wheel-hold-984477805a80 installed with full flash backup and journal preservation; all 16 devices responded with torque OFF before installation, read-only post-install hold plan passed. No motor write or physical drive was performed. Numeric floor scale and autonomous S4 acceptance remain pending.",
     "2026-11-12 actual setup: browser idle expiry fixed by host-only update. Twelve arm holds applied before lift position changed 3778 to 3693 on mode 1 to 0, exactly matching stored +85 offset; operator saw no movement. Setup stopped with lift torque OFF/mode 0 and wheel ARM never sent. Prepared recovery release wheel-hold-8b1afa8c0e3d corrects mode coordinates and resumes verified communication pauses without reset; 237 regressions passed; subsequently installed and tested as recorded below. Do not assume all torque OFF.",
-    "2026-11-12 actual floor teleop: wheel-hold-8b1afa8c0e3d installed with full backup/journal verification. Explicit hold succeeded. 1433 ACKs over 76.14 s, no communication pauses or controller faults, operator reported no abnormalities. Commands contain F/B/L/R but no A/D rotation; do not accept yaw qualification from the operator report alone. Final wheel stop verified, both arms and lift remain torque ON. Web session closed. Encoder speed candidates are not an adopted floor-distance calibration; autonomous endpoint and actual SLAM remain pending."
+    "2026-11-12 actual floor teleop: wheel-hold-8b1afa8c0e3d installed with full backup/journal verification. Explicit hold succeeded. 1433 ACKs over 76.14 s, no communication pauses or controller faults, operator reported no abnormalities. Commands contain F/B/L/R but no A/D rotation; do not accept yaw qualification from the operator report alone. Final wheel stop verified, both arms and lift remain torque ON. Web session closed. Encoder speed candidates are not an adopted floor-distance calibration; autonomous endpoint and actual SLAM remain pending.",
+    "2026-11-12 follow-up rotation session failed after 112 commands at right-arm slot 7 HOLD_READ_FAILED. Wheel stop confirmed; original hold was unconfirmed. 2485 scans and 993 native RGB-D pairs retained. New wheel-hold-a2e478ef6660 installed with full flash backup/journal preservation. Read-owner cleanup defect reproduced in native tests; initial physical read failure cause remains unconfirmed. No drive acceptance for the new release until retested.",
+    "Post-install read-only check: 600 complete 13-axis rounds over 30 s, all holds confirmed, no retries, lift position 3692. Stopped wheel setup plan passed. Motor writes zero during this check. A new operator-controlled drive is pending; response recovery after MCU restart alone does not prove the original physical fault cause."
   ],
   "target_observed_on": "2026-11-12",
   "target_environment": {
@@ -116,10 +118,10 @@
     "right_arm_response_restored": true,
     "right_arm_root_cause_confirmed": false,
     "controller_inspection_release": "s4-inspection-4b60ea01f357",
-    "controller_teleop_release": "wheel-hold-8b1afa8c0e3d",
+    "controller_teleop_release": "wheel-hold-a2e478ef6660",
     "controller_teleop_evidence": "config/home_assistant/s4_teleop.prepared.json",
     "manual_teleop_available": true,
-    "manual_teleop_web_active": false,
+    "manual_teleop_web_active": true,
     "latest_floor_drive_evidence": "config/home_assistant/s4_floor_teleop.observed.json"
   },
   "operator_reported_state": {

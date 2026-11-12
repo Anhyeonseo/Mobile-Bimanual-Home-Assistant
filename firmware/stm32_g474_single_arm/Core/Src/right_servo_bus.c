@@ -205,6 +205,16 @@ static RightServoReadStatus RightServo_ReadDataOwned(
 static RightServoReadStatus RightServo_ReadData(
     uint8_t servo_id, uint8_t address, uint8_t length, uint8_t *data)
 {
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    /* A late RX byte can leave End busy after a completed read. Retain the
+     * owner until it can be released; never strand all later hold queries. */
+    if (right_service_token != 0U) {
+        if (ServoTransport_End(right_servo_uart, right_service_token, true) != HAL_OK)
+            return RIGHT_SERVO_READ_UNAVAILABLE;
+        right_service_token = 0U;
+    }
+#endif
+
     if (!ServoTransport_BeginService(right_servo_uart, ACTUATOR_BUS_WORK_FEEDBACK, &right_service_token))
         return RIGHT_SERVO_READ_UNAVAILABLE;
     RightServoReadStatus status = RightServo_ReadDataOwned(servo_id, address, length, data);

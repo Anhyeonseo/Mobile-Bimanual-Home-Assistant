@@ -130,6 +130,10 @@ static void reply(const char *type){
         WheelHold_Confirmed()?"true":"false",WheelHold_Reason(),WheelHold_FailedSlot(),
         (unsigned long)WheelHold_Samples());
     n+=snprintf(line+n,sizeof(line)-(unsigned)n,
+        ",\"hold_read_retries\":%lu,\"hold_read_recoveries\":%lu,\"hold_read_failure_slot\":%u,\"hold_read_failure_address\":%u",
+        (unsigned long)WheelHold_ReadRetries(),(unsigned long)WheelHold_ReadRecoveries(),
+        WheelHold_ReadFailureSlot(),WheelHold_ReadFailureAddress());
+    n+=snprintf(line+n,sizeof(line)-(unsigned)n,
         ",\"lift_position_raw\":%d,\"lift_target_raw\":%d",
         WheelHold_LiftPosition(),WheelHold_LiftTarget());
 #endif

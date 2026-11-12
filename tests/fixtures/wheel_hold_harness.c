@@ -37,6 +37,13 @@ static HAL_StatusTypeDef read_bus(unsigned bus,uint8_t id,uint8_t addr,uint8_t n
     if(inject && !bus && id==8 &&
        ((scenario==29 && addr==56) || (scenario==30 && addr==58))){inject=false;return HAL_TIMEOUT;}
     if(inject && scenario==31 && !bus && id==8 && addr==56){inject=false;tick+=401;}
+    if(inject && ((scenario==33 && bus==1 && id==1 && addr==33) ||
+       (scenario==34 && bus==0 && id==6 && addr==40) ||
+       (scenario==35 && bus==0 && id==10 && addr==56) ||
+       (scenario==36 && bus==1 && id==1 && addr==40))){
+        inject=false;if(scenario==36)reg[bus][id][42]++;
+        return HAL_TIMEOUT;
+    }
     memcpy(v,reg[bus][id]+addr,n);return HAL_OK;
 }
 HAL_StatusTypeDef Servo_ReadData(uint8_t id,uint8_t addr,uint8_t n,uint8_t *v){return read_bus(0,id,addr,n,v);}
@@ -119,6 +126,12 @@ int main(int argc,char **argv){
         drive('B');assert(strstr(output,"\"fault\":true"));zero_wheels();preserved();break;
     case 31:
         drive('B');assert(strstr(output,"\"type\":\"paused\""));zero_wheels();preserved();break;
+    case 33:case 34:case 35:
+        for(unsigned i=0;i<30;i++){tick+=20;drive('F');}
+        assert(!strstr(output,"\"fault\":true"));
+        assert(WheelHold_ReadRetries()==1 && WheelHold_ReadRecoveries()==1);
+        feed("STOP\n");zero_wheels();preserved();assert(WheelHold_Confirmed());break;
+    case 36:break;
     case 32:
         tick+=401;SingleArmApp_Process();zero_wheels();preserved();
         assert(strstr(output,"\"type\":\"paused\""));
@@ -146,13 +159,13 @@ int main(int argc,char **argv){
     case 25:reg[0][10][33]=1;break; /* zero speed can never qualify as height hold */
     default:assert(0);
     }
-    if((scenario>=3 && scenario<=10) || scenario==14 || scenario==20 || scenario==24 || scenario==25){
+    if((scenario>=3 && scenario<=10) || scenario==14 || scenario==20 || scenario==24 || scenario==25 || scenario==36){
         for(unsigned i=0;i<30;i++){tick+=20;drive('F');}
         assert(strstr(output,"\"fault\":true"));assert(!WheelHold_Confirmed());zero_wheels();
         if(scenario==24)assert(strstr(output,"LIFT_POSITION_DRIFT"));
         if(scenario==25)assert(strstr(output,"LIFT_POSITION_HOLD_REQUIRED"));
     }
     unsigned prior=nonzero;
-    if(scenario!=18 && scenario!=19 && scenario!=0 && scenario!=26 && scenario!=28 && scenario!=32){packet("ARM 1234ABCD");assert(nonzero==prior);}
+    if(scenario!=18 && scenario!=19 && scenario!=0 && scenario!=26 && scenario!=28 && scenario!=32 && !(scenario>=33 && scenario<=35)){packet("ARM 1234ABCD");assert(nonzero==prior);}
     puts(output);
 }

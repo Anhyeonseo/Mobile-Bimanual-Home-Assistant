@@ -236,3 +236,13 @@ def test_startup_failure_snapshot_survives_successful_cleanup(binaries, scenario
 @pytest.mark.parametrize("scenario", [29,30,31])
 def test_zero_speed_may_enable_torque_and_torque_off_must_be_verified(binaries, scenario):
     subprocess.run([str(binaries / "app"), str(scenario)], check=True)
+
+
+def test_failed_hold_retains_confirmed_wheel_stop(monkeypatch):
+    monkeypatch.setattr(module,'PRESERVE_HOLD',True)
+    reply=dict(type='stopped',armed=False,stop_confirmed=True,hold_confirmed=False,
+               hold_reason='HOLD_READ_FAILED',hold_failed_slot=7)
+    with pytest.raises(module.StopError) as caught:module.stop(Port([reply]))
+    assert caught.value.reply==reply
+    message=module.stop_failure_message(caught.value,caught.value.reply)
+    assert 'supports' in message and 'Cut motor' not in message

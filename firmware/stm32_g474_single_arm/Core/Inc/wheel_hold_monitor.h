@@ -15,4 +15,8 @@ const char *WheelHold_Reason(void);
 uint32_t WheelHold_Samples(void);
 int WheelHold_LiftPosition(void);
 int WheelHold_LiftTarget(void);
+uint32_t WheelHold_ReadRetries(void);
+uint32_t WheelHold_ReadRecoveries(void);
+unsigned WheelHold_ReadFailureSlot(void);
+unsigned WheelHold_ReadFailureAddress(void);
 #endif

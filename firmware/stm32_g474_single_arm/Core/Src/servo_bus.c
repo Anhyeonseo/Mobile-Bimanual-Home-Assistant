@@ -1642,6 +1642,16 @@ HAL_StatusTypeDef Servo_ReadData(
     uint8_t *data
 )
 {
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+    /* A late RX byte can leave End busy after a completed read. Retain the
+     * owner until it can be released; never strand all later hold queries. */
+    if (servo_service_token != 0U) {
+        if (ServoTransport_End(servo_uart_handle, servo_service_token, true) != HAL_OK)
+            return HAL_BUSY;
+        servo_service_token = 0U;
+    }
+#endif
+
     if (!ServoTransport_BeginService(servo_uart_handle, ACTUATOR_BUS_WORK_FEEDBACK, &servo_service_token))
         return HAL_BUSY;
     HAL_StatusTypeDef status = Servo_ReadDataOwned(servo_id, start_address, data_length, data);

@@ -8,9 +8,20 @@ from pathlib import Path
 from datetime import datetime, timezone
 import threading
 import time
-from teleop_mobile_base import inspect, send, receive, frame, validate, stop, PERIOD, response_timeout, prepare_hold, check_hold
+from teleop_mobile_base import inspect, send, receive, frame, validate, stop, PERIOD, response_timeout, prepare_hold, check_hold, stop_failure_message
 
 BROWSER_LEASE = .25
+
+
+def failure_status(stopped):
+    if not stopped or stopped.get('armed') is not False or stopped.get('stop_confirmed') is not True:
+        return '바퀴 정지 확인 실패 · 움직이면 모터 전원을 차단하세요'
+    if stopped.get('hold_confirmed') is not True:
+        slot = stopped.get('hold_failed_slot', 0)
+        axis = f'왼팔 {slot}번' if 1 <= slot <= 6 else f'오른팔 {slot-6}번' if 7 <= slot <= 12 else '리프트' if slot == 13 else '팔·리프트'
+        issue = '상태 조회 실패' if stopped.get('hold_reason') in ('HOLD_READ_FAILED', 'LIFT_POSITION_READ_FAILED') else '자세 유지 확인 실패'
+        return f'{axis} {issue} · 바퀴 정지 확인 · 받침 유지'
+    return '바퀴 정지·자세 유지 확인 · 오류로 조종 종료 · 기록 확인 필요'
 
 
 class Control:
@@ -353,7 +364,8 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions")
         try:
             if arm_sent: stopped = stop(port)
         except Exception as exc:
-            error = RuntimeError(f"{error or 'exit'}; STOP failed: {exc}. Cut motor 12 V power.")
+            stopped = getattr(exc, 'reply', None)
+            error = RuntimeError(stop_failure_message(f"{error or 'exit'}; stop verification: {exc}", stopped))
         try:
             record.write("finished", stop=stopped, error=str(error) if error else None,
                          wheel_session_started=ever_armed, map_saved=False)
@@ -363,7 +375,7 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions")
             if not record.file.closed: record.file.close()
         control.configure(ended=True, busy=False, active=False, motion="Z",
                           status="정지·기록 저장 완료 · 팔과 리프트의 힘은 유지됩니다" if not error and held_mode and ever_armed
-                          else "기록 저장 완료" if not error else "종료 중 문제 발생 · 실행 로그를 확인하세요")
+                          else "기록 저장 완료" if not error else failure_status(stopped))
         # Let the page receive the final persisted result before closing HTTP.
         if server:
             try:

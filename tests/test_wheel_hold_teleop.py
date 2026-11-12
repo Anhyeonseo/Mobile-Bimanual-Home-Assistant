@@ -220,3 +220,15 @@ def test_controller_communication_pause_can_resume_without_reset(binaries):
     assert pause['stop_confirmed'] and pause['hold_confirmed'] and not pause['fault']
     assert [m['session'] for m in messages if m.get('type')=='armed']==[0x1234abcd,0x9876abcd]
     assert messages[-1]['stop_confirmed'] and not messages[-1]['armed']
+
+
+@pytest.mark.parametrize('scenario',[33,34,35,36])
+def test_one_fresh_hold_read_recovers_transport_only_never_changed_goal(binaries,scenario):
+    result=subprocess.run([str(binaries/'app'),str(scenario)],capture_output=True,text=True,check=True)
+    rows=[json.loads(s) for s in result.stdout.splitlines() if s]
+    assert any(r.get('hold_read_recoveries')==1 for r in rows)
+    if scenario==36:
+        assert any(r.get('hold_reason')=='HOLD_COMMAND_CHANGED' and r.get('fault') for r in rows)
+    else:
+        assert not any(r.get('fault') for r in rows)
+        assert rows[-1]['stop_confirmed'] and rows[-1]['hold_confirmed']

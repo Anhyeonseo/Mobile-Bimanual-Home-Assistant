@@ -154,7 +154,7 @@ def test_explicit_actions_share_sequence_and_cannot_survive_expiry():
     assert state.take_action(2.02) == 'start'
 
 
-@pytest.mark.parametrize('scenario', ['idle_finish', 'drive_finish', 'loss', 'bad_ack', 'disk_error', 'hold', 'resume', 'controller_pause'])
+@pytest.mark.parametrize('scenario', ['idle_finish', 'drive_finish', 'loss', 'bad_ack', 'disk_error', 'hold', 'resume', 'controller_pause', 'hold_read_failure'])
 def test_web_lifecycle_uses_explicit_actions_and_always_cleans_up(monkeypatch, tmp_path, scenario):
     import base_teleop_web as web
     import json
@@ -195,17 +195,24 @@ def test_web_lifecycle_uses_explicit_actions_and_always_cleans_up(monkeypatch, t
         if scenario=='controller_pause' and command[0]=='D':
             return dict(type='paused',armed=False,fault=False,stop_confirmed=True,hold_confirmed=True)
         return dict(type='armed' if command[0]=='ARM' else 'ack', armed=True,
-                    fault=scenario=='bad_ack' and command[0]=='D',
+                    fault=scenario in ('bad_ack','hold_read_failure') and command[0]=='D',
                     session=int(command[1],16), sequence=0 if command[0]=='ARM' else int(command[2],16))
     monkeypatch.setattr(web, 'receive', receive)
     monkeypatch.setattr(web, 'stop', lambda port: calls.append('stop') or {'stop_confirmed':True,'fault':False})
+    if scenario == 'hold_read_failure':
+        from teleop_mobile_base import StopError
+        def failed_stop(port):
+            calls.append('stop')
+            raise StopError('hold read failed',dict(armed=False,stop_confirmed=True,hold_confirmed=False,
+                hold_reason='HOLD_READ_FAILED',hold_failed_slot=7))
+        monkeypatch.setattr(web,'stop',failed_stop)
     if scenario == 'disk_error':
         original = web.SessionRecord.write
         def write(self, event, **data):
             if event=='command': raise OSError('disk full')
             return original(self,event,**data)
         monkeypatch.setattr(web.SessionRecord,'write',write)
-    if scenario in ('bad_ack','disk_error'):
+    if scenario in ('bad_ack','disk_error','hold_read_failure'):
         with pytest.raises((RuntimeError,OSError)): web.run_web(None, record_dir=tmp_path)
     else:
         web.run_web(None, record_dir=tmp_path)
@@ -223,6 +230,9 @@ def test_web_lifecycle_uses_explicit_actions_and_always_cleans_up(monkeypatch, t
         assert len(arms)==(2 if scenario=='resume' else 1)
         drives=[c for c in calls if isinstance(c,list) and c[0]=='D']
         assert all(c[2]=='00000001' and c[3]=='Z' for c in drives)
+    if scenario=='hold_read_failure':
+        assert lines[-1]['stop']['hold_failed_slot']==7
+        assert 'Cut motor' not in lines[-1]['error']
     if scenario=='disk_error': assert not any(isinstance(c,list) and c[0]=='D' for c in calls)
 
 
@@ -247,3 +257,12 @@ def test_idle_background_tab_does_not_expire_or_enable_motion():
     # Once starting, the unchanged short lease applies again.
     assert state.take_action(270.30) is None
     assert not state.active and state.expired
+
+
+def test_error_screen_separates_wheel_stop_from_right_arm_read_failure():
+    from base_teleop_web import failure_status
+    stopped=dict(armed=False,stop_confirmed=True,hold_confirmed=False,
+                 hold_failed_slot=7,hold_reason='HOLD_READ_FAILED')
+    assert failure_status(stopped)=='오른팔 1번 상태 조회 실패 · 바퀴 정지 확인 · 받침 유지'
+    assert '전원을 차단' not in failure_status(stopped)
+    assert '바퀴 정지 확인 실패' in failure_status({**stopped,'stop_confirmed':False})

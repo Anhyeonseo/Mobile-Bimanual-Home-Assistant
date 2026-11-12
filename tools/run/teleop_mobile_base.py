@@ -84,6 +84,20 @@ def validate(reply, kind, nonce, seq):
         raise RuntimeError('arm/gripper/lift hold not confirmed: ' + json.dumps(reply))
 
 
+class StopError(RuntimeError):
+    """Preserve the actual stop result even when payload hold is unconfirmed."""
+    def __init__(self, message, reply):
+        self.reply = reply
+        super().__init__(message + ': ' + json.dumps(reply))
+
+
+def stop_failure_message(error, stopped):
+    suffix = ('Keep the arm/lift supports in place.' if stopped and
+              stopped.get('armed') is False and stopped.get('stop_confirmed') is True
+              else 'Cut motor 12 V power if wheels do not stop.')
+    return f'{error}; {suffix}'
+
+
 def stop(port):
     send(port, b"STOP\n")
     deadline = time.monotonic() + 6
@@ -91,9 +105,9 @@ def stop(port):
         reply = receive(port, max(.01, deadline - time.monotonic()))
         if reply.get("type") == "stopped":
             if reply.get("armed") is not False or reply.get("stop_confirmed") is not True:
-                raise RuntimeError("stop unconfirmed: " + json.dumps(reply))
+                raise StopError("stop unconfirmed", reply)
             if PRESERVE_HOLD and reply.get('hold_confirmed') is not True:
-                raise RuntimeError('wheels stopped, but arm/gripper/lift hold unconfirmed: ' + json.dumps(reply))
+                raise StopError('wheels stopped, but arm/gripper/lift hold unconfirmed', reply)
             return reply
     raise RuntimeError("stop unconfirmed")
 
@@ -196,7 +210,8 @@ def run(port, input_fd):
         try:
             if arm_sent: stopped = stop(port)
         except Exception as error:
-            original_error = RuntimeError(f"{original_error or 'exit'}; STOP failed: {error}. Cut motor 12 V power.")
+            stopped = getattr(error, 'reply', None)
+            original_error = RuntimeError(stop_failure_message(f"{original_error or 'exit'}; stop verification: {error}", stopped))
         finally:
             termios.tcsetattr(input_fd, termios.TCSADRAIN, old)
     if stopped: print(json.dumps(stopped, indent=2))
