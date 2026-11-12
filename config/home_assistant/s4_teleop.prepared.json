@@ -2,7 +2,7 @@
   "release": "wheel-hold-a2e478ef6660",
   "firmware": "mobile-base-hold-teleop-v7",
   "wheel_feedback": true,
-  "state": "LIDAR_ONLY_CONCURRENT_DRIVE_PASSED",
+  "state": "LIDAR_RGBD_RECEPTION_DRIVE_PASSED_WITHOUT_PERIODIC_ARCHIVE",
   "source_date": "2026-11-12",
   "hardware_drive_tested": true,
   "hold_activated": true,
@@ -10,7 +10,7 @@
   "full_flash_backup_bytes": 524288,
   "boot_journal_preserved": true,
   "preflight": "297 normal ACKs across F/B/L/R/A/D, zero hold read retries; final wheel stop and hold confirmed",
-  "required_next_action": "Compare RGB-D reception without periodic image archive; root cause unresolved",
+  "required_next_action": "Same-firmware drive with original periodic native RGB-D archive enabled; root cause unresolved",
   "local_tests_passed": 217,
   "browser_preview_flow_verified": true,
   "installed_info": {
@@ -36,10 +36,10 @@
   "local_build_verified": true,
   "web_session": {
     "state": "awaiting_operator_start",
-    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T084743Z-5184f3d2.jsonl",
+    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T085104Z-913cf499.jsonl",
     "port": 18766,
-    "sensor_capture": "lidar_rgbd_without_periodic_image_archive",
-    "sensor_evidence": "/home/hyper/robot/shared/diagnostics/s4-mapping-capture-20261112-04-rgbd-no-archive"
+    "sensor_capture": "lidar_rgbd_with_periodic_native_archive",
+    "sensor_evidence": "/home/hyper/robot/shared/diagnostics/s4-mapping-capture-20261112-05-full-archive"
   },
   "firmware_installed_by_release": "wheel-hold-a2e478ef6660",
   "hold_partially_applied": false,
@@ -93,24 +93,24 @@
     ],
     "plan_reason": "SETUP_PLAN_READY"
   },
-  "latest_retest_evidence": "output/s4-lidar-only-retest-20261112/report.json",
+  "latest_retest_evidence": "output/s4-rgbd-no-archive-retest-20261112/report.json",
   "latest_retest_summary": {
-    "duration_s": 21.71263194,
+    "duration_s": 32.991197215,
     "command_counts": {
-      "Z": 80,
-      "B": 52,
-      "A": 143,
-      "F": 96,
-      "L": 34
+      "Z": 62,
+      "F": 66,
+      "R": 21,
+      "D": 155,
+      "A": 291
     },
-    "acks": 405,
+    "acks": 595,
     "all_ack": true,
     "final_stop": {
       "type": "stopped",
       "armed": false,
       "fault": false,
-      "session": 690373559,
-      "sequence": 405,
+      "session": 1563813142,
+      "sequence": 595,
       "reason": "OPERATOR_STOP",
       "first_failure": "NONE",
       "first_failed_id": 0,
@@ -121,7 +121,7 @@
       "hold_confirmed": true,
       "hold_reason": "HOLD_UNCHANGED",
       "hold_failed_slot": 0,
-      "hold_samples": 934,
+      "hold_samples": 1619,
       "hold_read_retries": 0,
       "hold_read_recoveries": 0,
       "hold_read_failure_slot": 0,
@@ -138,7 +138,7 @@
           "speed_raw": 0,
           "speed_signed": 0,
           "speed_valid": true,
-          "position_raw": 2249,
+          "position_raw": 3159,
           "quiet_samples": 7
         },
         {
@@ -148,7 +148,7 @@
           "speed_raw": 0,
           "speed_signed": 0,
           "speed_valid": true,
-          "position_raw": 71,
+          "position_raw": 2441,
           "quiet_samples": 7
         },
         {
@@ -158,20 +158,25 @@
           "speed_raw": 0,
           "speed_signed": 0,
           "speed_valid": true,
-          "position_raw": 3316,
+          "position_raw": 517,
           "quiet_samples": 7
         }
       ]
     },
     "error": null,
-    "sensor_capture": "lidar_only",
+    "sensor_capture": "lidar_rgbd_no_periodic_archive",
     "lidar": {
       "passed": true,
-      "frames": 414,
-      "maximum_gap_s": 0.20151476069440832,
+      "frames": 377,
+      "maximum_gap_s": 0.20137343488022452,
       "gaps_over_035": 0,
       "capture_end_reason": "teleop_finished",
       "driver_exit_code": 0
+    },
+    "rgbd": {
+      "frames": 2305,
+      "maximum_depth_gap_s": 0.06721115112304688,
+      "skipped_repeated_framesets": 1
     },
     "operator_report": "rotation and movement normal, recording finished",
     "root_cause_confirmed": false
