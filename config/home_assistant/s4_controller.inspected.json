@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "local_date": "2026-11-12",
+  "status": "read_only_communication_verified_motion_unqualified",
+  "inspection_release": "s4-inspection-4e8a1c9c6e02",
+  "inspection_firmware_installed": true,
+  "firmware_sha256": "484c65454cb878a9e89dddddd34bac02c7088e7ea1aa2427663d3a875ac618da",
+  "controller_reset_or_flashed": true,
+  "motor_write_commands": 0,
+  "hardware_motion_enabled": false,
+  "physical_s4_completed": false,
+  "backup": {
+    "bytes": 524288,
+    "sha256": "d3cf7e9a3d84d2b32ee6816cb135e52360b33394ba9105cd8379ad283be30e88",
+    "boot_journal_bytes": 8192,
+    "boot_journal_preserved": true,
+    "directory": "/home/hyper/robot/shared/diagnostics/s4-inspection/s4-inspection-4e8a1c9c6e02",
+    "raw_backups_remain_on_jetson": true
+  },
+  "source_tested": "s4-local-b3b7c1861f52",
+  "previous_s3_release_retained": "s3-stationary-9d2fd662e718",
+  "s3_firmware_currently_active": false,
+  "installed_info": {
+    "firmware": "mobile-bus-inspection-v2",
+    "host_baud": 921600,
+    "servo_baud": 1000000,
+    "reference_id": 1,
+    "motion_enabled": false,
+    "wheel_samples_supported": true,
+    "lift_read_supported": true,
+    "ids": [
+      7,
+      8,
+      9,
+      10
+    ]
+  },
+  "inventory_all_reads_ok": true,
+  "motors": [
+    {
+      "id": 7,
+      "model_raw": 777,
+      "mode_raw": 1,
+      "torque_raw": 0,
+      "position_raw": 2243
+    },
+    {
+      "id": 8,
+      "model_raw": 777,
+      "mode_raw": 1,
+      "torque_raw": 0,
+      "position_raw": 1671
+    },
+    {
+      "id": 9,
+      "model_raw": 777,
+      "mode_raw": 1,
+      "torque_raw": 0,
+      "position_raw": 1086
+    },
+    {
+      "id": 10,
+      "model_raw": 777,
+      "mode_raw": 1,
+      "torque_raw": 0,
+      "position_raw": 3778
+    }
+  ],
+  "wheel_capture": {
+    "duration_requested_s": 40,
+    "samples": 1288,
+    "max_host_start_gap_s": 0.03425196099851746,
+    "median_host_start_gap_s": 0.030907719003153034,
+    "max_request_roundtrip_s": 0.012134231001255102,
+    "all_ok": true,
+    "sequence_continuous": true,
+    "samples_during_camera_exposure_window": 964,
+    "wheels": [
+      {
+        "id": 7,
+        "position_min_raw": 2243,
+        "position_max_raw": 2243,
+        "max_speed_raw": 0,
+        "max_mcu_read_ms": 3,
+        "nonzero_speed_samples": 0,
+        "minimum_signed_speed_raw": 0,
+        "maximum_signed_speed_raw": 0
+      },
+      {
+        "id": 8,
+        "position_min_raw": 1671,
+        "position_max_raw": 1672,
+        "max_speed_raw": 32818,
+        "max_mcu_read_ms": 2,
+        "nonzero_speed_samples": 50,
+        "minimum_signed_speed_raw": -50,
+        "maximum_signed_speed_raw": 50
+      },
+      {
+        "id": 9,
+        "position_min_raw": 1086,
+        "position_max_raw": 1086,
+        "max_speed_raw": 0,
+        "max_mcu_read_ms": 2,
+        "nonzero_speed_samples": 0,
+        "minimum_signed_speed_raw": 0,
+        "maximum_signed_speed_raw": 0
+      }
+    ],
+    "speed_scale_calibrated": false,
+    "stationary_speed_discrepancy": {
+      "motor_id": 8,
+      "nonzero_samples": 50,
+      "total_samples": 1288,
+      "signed_raw_values": [
+        -50,
+        50
+      ],
+      "encoder_span_counts": 1,
+      "cause_verified": false,
+      "filtered_to_zero": false,
+      "stop_speed_or_command_scale_qualified": false,
+      "next_check": "compare repeated encoder/speed observations under operator-confirmed stationary and bidirectional hand movement before a live stop gate"
+    }
+  },
+  "sensors": {
+    "passed": true,
+    "frames": 136,
+    "gaps_over_035": 0,
+    "maximum_gap_s": 0.2011764587223297,
+    "receipt_timing": {
+      "passed": true,
+      "basis": "host serial receipt minus packet serialization; negative offsets in increasing-angle array",
+      "hardware_exposure_latency_calibrated": false,
+      "maximum_first_ray_age_s": 0.035547733306884766
+    },
+    "rgbd": {
+      "frames": 893,
+      "native_shape": [
+        720,
+        1280
+      ],
+      "minimum_depth_gap_s": 0.03353619575500488,
+      "maximum_depth_gap_s": 0.06716609001159668,
+      "skipped_repeated_framesets": 1,
+      "skipped_repeated_stream_frames": {
+        "color": 0,
+        "depth": 1
+      },
+      "minimum_native_valid_fraction": 0.8966493055555556,
+      "calibration_equivalence": {
+        "method": "exact identity/intrinsics/rotation/scale; translation roundoff <= 2e-9 m",
+        "maximum_translation_difference_m": 9.313225746154785e-10,
+        "observed_camera_device": {
+          "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+          "stream_profile_id": "rgbd-v1-52b8cdab670d4770de886ec17c375dcb131a4d7ad72ae0ea92774aa5ea0916da",
+          "factory_calibration_sha256": "12ce5d4f0c292758b16632e484672fcee655436d57741f4e6b0fabc8147f5643"
+        },
+        "reference_camera_device": {
+          "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+          "stream_profile_id": "rgbd-v1-52b8cdab670d4770de886ec17c375dcb131a4d7ad72ae0ea92774aa5ea0916da",
+          "factory_calibration_sha256": "4213fcd9d40419ceb64ea3a403f670bc44bfbcf6223a52aa4c20b3f930ab7591"
+        }
+      },
+      "physical_sync_qualified": false,
+      "full_height_travel_coverage_qualified": false
+    },
+    "driver_exit_code": 0
+  },
+  "preinstall_arm_observation": {
+    "left_read_count": 6,
+    "left_torque_off": true,
+    "right_read_count": 6,
+    "right_failed_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "right_error": "RIGHT_SERVO_READ_RX_TIMEOUT (3)",
+    "right_cause_known": false,
+    "right_rechecked_after_flash": false,
+    "scope": "Inspection image has no right bus queries; not evidence of hardware damage or recovery. Recheck under appropriate read-only bimanual image before arm/drive operation."
+  },
+  "ports_released": true,
+  "remaining": [
+    "right arm communication/torque state recheck before motion",
+    "explain wheel 8 intermittent signed speed +/-50 with at most one encoder count span; do not bypass stop checks",
+    "operator-assisted bidirectional wheel encoder and speed unit measurement",
+    "measured command gain, floor travel and braking",
+    "common controller and verified live app inputs",
+    "physical room SLAM, furniture changes and power-reconnect resume"
+  ],
+  "evidence_sha256": {
+    "wheels-fresh-pairs-result.json": "0060d6cad3cd3cc561397d40a4c5e9782683045b1d0abd523b257b71eeebdd8e",
+    "sensors-concurrent.log": "9cb5c59b1d8f4001cfebf61bd61d929dc9aa9b3dcb06f7f6627cd0f23c481dba",
+    "wheels-concurrent.jsonl": "3678abb5a9d05490d008bf959d9124df2a67f46fa64a8832a50b3e3fc4cbc547",
+    "wheel-stationary.jsonl": "edd4b7b4971d520e42068d915540f44e8933a4ad2e81f7224264e5445869445d",
+    "wheel-capture-result.json": "6bd0b001d1baa4eaaeabf50a79ba0097a5e5ed92ce1a7f399c1a0555a30e36a3",
+    "installed-scan.json": "d05fbe33439d2fa4e3e9e7d05b6a9ee25ff68f1cf92230b8b4a4ee242983af7b",
+    "final-wheel-scale-review.json": "6c64590ffc2b38905ecf29afee9f90258308917b07fc1ab1b03552b1a5eaf9e1",
+    "wheels-fresh-pairs.jsonl": "00cdfd3f16dcbc4295f64094328e6822d4cda5f52899c6c4c9cb4f094a3f73df",
+    "sensors-fresh-pairs.log": "c4f58fce8eda19e878ed154cfdca4aec2447b846a7596a5e46217417c7447dac",
+    "wheel-scale-review.json": "6c64590ffc2b38905ecf29afee9f90258308917b07fc1ab1b03552b1a5eaf9e1",
+    "before-install.json": "3b513bc76e6459add30e93ddbf047cc73135e1df25b07c0b971bea3bcf06b3b2",
+    "final-scan.json": "2cc86a9cd68d03694e5e1bf34e935ae8d683289976ea39625a32a579baa5f525",
+    "wheels-concurrent-result.json": "4a41964ead08a38710e94b955b224bc83a207874c2584a7be2024bc551495f55",
+    "sensors-fresh-pairs/rgbd-last.npz": "1bc7ec42eb86a0d3fc3b28b2385a08e415fb7e3f2b0c00959a97f6cc06e73712",
+    "sensors-fresh-pairs/rgbd-frames.json": "48ba921b41306f2187b932eab54f3cb5976c1b647d81d39d1d4d6d0a2ebc4183",
+    "sensors-fresh-pairs/report.json": "f5fa92fbb6b024ea55ce6ab16aba7dee2acb87575fee30c7108489a1d532d1d4",
+    "sensors-fresh-pairs/rgbd-metadata.json": "0b5559abfad2a20dd3ba5e98959ccdf7a4ed530259d2a153bc59b5ff8eab14c2",
+    "sensors-fresh-pairs/scans.json": "d45ae68d70038568cad768121dec30c9f2fc81d6d54f8ca22e7a3d3436476c9c",
+    "sensors-fresh-pairs/driver.log": "be696a9d2e83f20faa43c917d9f91547448a8e479302e09f981b9678feb92192",
+    "sensors-concurrent/rgbd-last.npz": "d1997b13555777cf83a8028dcbd7f022b60d0dcf31587d3fb1de2ed9d0f4b7ae",
+    "sensors-concurrent/rgbd-frames.json": "f08584127357ba6df309b786c126d88a5e38ebca9a50048af3e4b6c3882b7a10",
+    "sensors-concurrent/report.json": "c9ae621a6b54b6ee2c9503405e59f7b5aaeee7c0000db4f6c0958e1214b6055b",
+    "sensors-concurrent/rgbd-metadata.json": "0a9321f98d20e77682a48286450d2e3f29a184481d44a9441d27cbb2fd3bfb13",
+    "sensors-concurrent/scans.json": "92884d4837ab1700e21dece22dd5dfeb17d0843f240f0df1014d5501c6715ba1",
+    "sensors-concurrent/driver.log": "0dce760e5847abf15dbfe0e38e7ab25b43cbbcf34c99e0cfc8c2851d77b0b9b2",
+    "../installation-console.log": "76922c17e2ef2fc26365a71869ee06b9938ec682ffcde6f2c967bf587456ba1f",
+    "../targeted-tests.log": "4f68864af7ff0d352923ace45b80ec7763329d883ccb54a1d257be20c81dd0ab",
+    "../camera-consumer-tests.log": "b386ce163b700458fc89f279ff8c9437ae831175d5b33533275f289422ef9a18"
+  },
+  "validation": {
+    "targeted_tests_passed": 106,
+    "camera_consumer_regressions_passed": 123,
+    "first_concurrent_attempt": "failed: one SDK frameset reused depth exposure; original report retained",
+    "camera_fix": "continuous Capture.next_frame skips repeated color/depth identities or times within original timeout; clock regression, reset and old exposures still reject",
+    "new_firmware_flash_after_camera_fix": false
+  },
+  "evidence_base": "output/s4-install-20261112/jetson-results"
+}

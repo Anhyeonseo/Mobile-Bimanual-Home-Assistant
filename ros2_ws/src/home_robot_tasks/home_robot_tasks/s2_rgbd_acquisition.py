@@ -50,6 +50,8 @@ class Capture:
             raise ValueError('native depth retention requires retained RGB-D frames')
         self.retain_native_depth=retain_native_depth
         self.native_depth_images={}
+        self.repeated_framesets=0
+        self.repeated_stream_frames={'color':0,'depth':0}
         if self.reference is not None and self.reference['camera_device']!=self.expected:
             raise ValueError('camera reference does not match profile')
     def __enter__(self):
@@ -140,11 +142,38 @@ class Capture:
         self.native_depth_images.clear()
         return images
     def next_frame(self, timeout_ms=1000):
-        """Continuous consumer API; exposure time stays separate from arrival."""
+        """Return a new pair; repeated SDK stream frames retain their old exposure.
+
+        A frameset may pair a new color frame with the previous depth frame.
+        Skip that pair within the original timeout, without relabeling its time
+        or admitting a restarted/regressing stream as a duplicate.
+        """
         if not self.started or not self.retain_frame:
             raise ValueError('retaining camera stream required')
-        record=self._record(self.pipeline.wait_for_frames(timeout_ms))
-        return record, self.images[record['capture_id']]
+        if type(timeout_ms) is not int or not 1<=timeout_ms<=1000:
+            raise ValueError('camera timeout must be 1..1000 ms')
+        deadline=time.monotonic()+timeout_ms/1000
+        while True:
+            remaining=deadline-time.monotonic()
+            if remaining<=0:raise ValueError('no fresh RGB-D pair within camera timeout')
+            frames=self.pipeline.wait_for_frames(max(1,int(remaining*1000)))
+            repeated=[]
+            for stream,frame in (('color',frames.get_color_frame()),('depth',frames.get_depth_frame())):
+                number=frame.get_frame_number();stamp=frame.get_timestamp()
+                # Apply the same clock-domain/age checks even to a reused frame.
+                self.clock.convert(stamp,str(frame.get_frame_timestamp_domain()))
+                if self.buffer:
+                    prior=self.buffer[-1][stream+'_frame']
+                    if number<prior['number'] or stamp<prior['timestamp_ms']:
+                        raise ValueError('camera stream reset or exposure time regressed: '+stream)
+                    if number==prior['number'] or stamp==prior['timestamp_ms']:
+                        repeated.append(stream)
+            if repeated:
+                self.repeated_framesets+=1
+                for stream in repeated:self.repeated_stream_frames[stream]+=1
+                continue
+            record=self._record(frames)
+            return record, self.images[record['capture_id']]
     def match(self,motors):
         center=sum(r['acquired_s'] for r in motors['samples'])/len(motors['samples'])
         deadline=time.monotonic()+.1

@@ -20,10 +20,11 @@
   },
   "measurement_inputs": {
     "wheel_geometry_and_raw_speed_scale": {
-      "status": "nominal_geometry_and_read_only_capture_prepared_actual_scale_unmeasured",
+      "status": "read_only_feedback_captured_nominal_geometry_prepared_actual_scale_unmeasured",
       "geometry": "config/home_assistant/s4_base.nominal.json",
       "raw_per_rad_s": null,
-      "hardware_enabled": false
+      "hardware_enabled": false,
+      "evidence": "config/home_assistant/s4_controller.inspected.json"
     },
     "lidar_base_extrinsics": {
       "status": "operator_reviewed_nominal_not_precision_calibrated",
@@ -69,7 +70,8 @@
     "This document is a pending measurement inventory, never a runtime enable token.",
     "S3 acceptance is preserved. The 5 mm closing setting is not calibrated force.",
     "A successful local simulation does not satisfy a physical acceptance item.",
-    "2026-11-11: source and isolated runtime uploaded over SSH; camera and synthetic ROS checks performed. No controller reset, firmware flash, power change, or motor command."
+    "2026-11-11: source and isolated runtime uploaded over SSH; camera and synthetic ROS checks performed. No controller reset, firmware flash, power change, or motor command.",
+    "2026-11-12: user authenticated; read-only inspection firmware installed with full flash backup and boot journal preservation. Wheel/lift queries and concurrent LDS/D415 capture verified; no motor writes. Right-arm pre-install timeouts and wheel 8 stationary speed discrepancy remain unqualified for motion."
   ],
   "target_observed_on": "2026-11-12",
   "target_environment": {
@@ -78,9 +80,9 @@
     "python": "3.12.3",
     "runtime_scope": "user-owned isolated prefix; not an active robot service",
     "lidar_connected": true,
-    "controller_stop_latched": true,
-    "controller_firmware": "0x00024911",
-    "controller_reset_or_flashed": false,
+    "controller_stop_latched": null,
+    "controller_firmware": "mobile-bus-inspection-v2",
+    "controller_reset_or_flashed": true,
     "motor_commands_sent": 0,
     "report": "docs/S4_JETSON_PREPARATION.md",
     "lidar_stream_received": true,
@@ -91,12 +93,15 @@
     "lidar_cadence_scope": "stationary concurrent RGB-D 60 seconds; 291 lidar frames, max gap 0.201432 s, no gaps over 0.35 s; moving timing/load unqualified",
     "replacement_lidar_mount_fixed_user_confirmed": true,
     "mobile_endpoint_available": false,
-    "mobile_endpoint_inspection": "protocol-v2 HELLO and read-only mobile queries; S3 0x00024911 does not attach mobile endpoint",
+    "mobile_endpoint_inspection": "text INFO/SCAN/WHEELS verified; binary common motion endpoint is not installed",
     "stationary_sensor_tf_and_concurrent_capture_passed": true,
     "sensor_observation_evidence": "config/home_assistant/s4_sensors.connected.observed.json",
     "preflight_evidence": "config/home_assistant/s4_preflight.prepared.json",
     "lidar_timestamp_basis": "host serial receipt estimate; negative per-ray offsets; USB/device latency and moving deskew uncalibrated",
-    "controller_replacement_requires_admin_authentication": true
+    "controller_replacement_requires_admin_authentication": false,
+    "controller_inspection_evidence": "config/home_assistant/s4_controller.inspected.json",
+    "controller_scope": "read-only maintenance; motion writes unavailable; no right-arm query",
+    "right_arm_current_state_verified": false
   },
   "operator_reported_state": {
     "local_date": "2026-11-12",

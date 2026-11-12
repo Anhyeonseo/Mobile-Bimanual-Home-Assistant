@@ -143,14 +143,15 @@
     }
   ],
   "current_stage_summary": {
-    "as_of": "2026-11-11",
-    "stage": "S4_local_preparation",
+    "as_of": "2026-11-12",
+    "stage": "S4_read_only_commissioning",
     "s3": "accepted_by_user",
     "s4_physical_verified": false,
-    "jetson_touched_during_s4": false,
+    "jetson_touched_during_s4": true,
     "profile": "config/home_assistant/s4_commissioning.pending.json",
-    "documentation": "docs/S4_LOCAL_PREPARATION.md",
-    "historical_development_decisions": "S1/S2 observations retained below; not current controller state"
+    "documentation": "docs/S4_COMMISSIONING_PREPARATION.md",
+    "historical_development_decisions": "S1/S2 observations retained below; not current controller state",
+    "inspection_evidence": "config/home_assistant/s4_controller.inspected.json"
   },
   "s4_living_map": {
     "design": "docs/S4_LIVING_MAP_DESIGN.md",

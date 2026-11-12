@@ -152,6 +152,69 @@ def test_camera_matches_delayed_exposure_instead_of_first_delivered_frame():
     assert result['acquisition_span_s']<.05
 
 
+def continuous_camera(monkeypatch, pairs):
+    from types import SimpleNamespace
+    from home_robot_tasks import s2_rgbd_acquisition as acquisition
+    camera=acquisition.Capture({'camera_device':{}},retain_frame=True)
+    camera.started=True
+    now=[0.]
+    monkeypatch.setattr(acquisition.time,'monotonic',lambda:now[0])
+    camera.clock=SimpleNamespace(convert=lambda stamp,domain:stamp/1000)
+    def frame(number,stamp):
+        return SimpleNamespace(get_frame_number=lambda:number,get_timestamp=lambda:stamp,
+                               get_frame_timestamp_domain=lambda:'timestamp_domain.global_time')
+    def wait(timeout):
+        now[0]+=min(timeout/1000,.03)
+        color,depth=pairs.pop(0) if len(pairs)>1 else pairs[0]
+        return SimpleNamespace(get_color_frame=lambda:frame(*color),get_depth_frame=lambda:frame(*depth))
+    camera.pipeline=SimpleNamespace(wait_for_frames=wait,elapsed=lambda:now[0])
+    camera.buffer=[dict(color_frame={'number':10,'timestamp_ms':1000.},
+                        depth_frame={'number':20,'timestamp_ms':1000.})]
+    recorded=[]
+    def record(frames):
+        recorded.append(frames)
+        row={'capture_id':'fresh','depth_time_s':frames.get_depth_frame().get_timestamp()/1000}
+        camera.images['fresh']=('color','depth','metadata')
+        return row
+    camera._record=record
+    return camera,recorded
+
+
+def test_continuous_camera_skips_reused_depth_before_recording(monkeypatch):
+    camera,recorded=continuous_camera(monkeypatch,[((11,1033.),(20,1000.)),((12,1066.),(21,1066.))])
+    row,_=camera.next_frame(100)
+    assert row['depth_time_s']==1.066 and len(recorded)==1
+    assert camera.repeated_framesets==1
+    assert camera.repeated_stream_frames=={'color':0,'depth':1}
+
+
+@pytest.mark.parametrize('pair',[
+    ((9,1033.),(21,1033.)),  # Color frame counter restart.
+    ((11,1033.),(21,999.)),  # Depth exposure clock regression.
+])
+def test_continuous_camera_does_not_hide_stream_restart(monkeypatch,pair):
+    camera,recorded=continuous_camera(monkeypatch,[pair])
+    with pytest.raises(ValueError,match='reset or exposure time regressed'):camera.next_frame(100)
+    assert not recorded and camera.repeated_framesets==0
+
+
+def test_continuous_camera_repeated_frames_cannot_extend_timeout(monkeypatch):
+    camera,recorded=continuous_camera(monkeypatch,[((10,1000.),(20,1000.))])
+    with pytest.raises(ValueError,match='no fresh RGB-D pair'):camera.next_frame(100)
+    assert not recorded and camera.repeated_framesets>0
+    assert .1<=camera.pipeline.elapsed()<=.101
+
+
+def test_continuous_camera_stale_repeat_still_fails_age_check(monkeypatch):
+    camera,recorded=continuous_camera(monkeypatch,[((11,1033.),(20,1000.))])
+    def convert(stamp,domain):
+        if stamp==1000.:raise ValueError('stale/future camera acquisition')
+        return stamp/1000
+    camera.clock.convert=convert
+    with pytest.raises(ValueError,match='stale/future'):camera.next_frame(100)
+    assert not recorded and camera.repeated_framesets==0
+
+
 def test_partial_scan_reports_the_current_failure_not_a_previous_good_sample():
     from contextlib import nullcontext
     from types import SimpleNamespace

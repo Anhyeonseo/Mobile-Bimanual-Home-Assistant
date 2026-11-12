@@ -172,6 +172,7 @@ def main():
                 depth_m = native * metadata['depth_scale_m']
                 valid = (depth_m >= .12) & (depth_m <= 4.)
                 camera_records.append(dict(capture_id=record['capture_id'],
+                    color_frame=record['color_frame'], depth_frame=record['depth_frame'],
                     color_time_s=record['color_time_s'], depth_time_s=record['depth_time_s'],
                     native_valid_fraction=float(valid.mean()),
                     native_row_band_valid_fractions=[float(b.mean()) for b in np.array_split(valid, 3)]))
@@ -217,7 +218,10 @@ def main():
         if camera:
             gaps = [b['depth_time_s']-x['depth_time_s'] for x, b in zip(camera_records, camera_records[1:])]
             report['rgbd'] = dict(frames=len(camera_records), native_shape=list(native.shape),
+                minimum_depth_gap_s=min(gaps) if gaps else None,
                 maximum_depth_gap_s=max(gaps) if gaps else None,
+                skipped_repeated_framesets=camera.repeated_framesets,
+                skipped_repeated_stream_frames=camera.repeated_stream_frames,
                 minimum_native_valid_fraction=min(r['native_valid_fraction'] for r in camera_records),
                 calibration_equivalence=record['calibration_equivalence'],
                 physical_sync_qualified=False, full_height_travel_coverage_qualified=False)
