@@ -15,7 +15,7 @@ from .perception import TransformSample
 
 
 FURNITURE_CATEGORIES = ('bed', 'sofa', 'desk', 'table', 'coffee_table', 'chair',
-                        'wardrobe', 'bookshelf', 'nightstand', 'cabinet', 'refrigerator')
+                        'wardrobe', 'bookshelf', 'nightstand', 'cabinet', 'refrigerator', 'unclassified_furniture')
 # Major household landmarks only. Native depth keeps every obstacle, including
 # unnamed small objects; semantic filtering never changes collision geometry.
 # Distractor classes prevent baskets/fans being forced into a furniture label.
@@ -25,7 +25,7 @@ FURNITURE_PROMPT = 'table . chair . sofa . bed . cabinet . bookshelf . wardrobe 
 
 def masked_furniture(*, category, detector_score, detection_id, mask, depth_m,
                      intrinsics, stamp, context, transform, now_s,
-                     voxel_size_m=.05, minimum_depth_m=.3, maximum_depth_m=5.):
+                     voxel_size_m=.05, minimum_depth_m=.3, maximum_depth_m=5., floor_z_m=None):
     """Deproject an instance mask with rectified, RGB-aligned metric depth.
 
     Any model may provide the mask; SAM is one existing adapter. Use the RGB
@@ -75,6 +75,13 @@ Native depth remains a separate input to the collision pipeline.
     points = camera @ matrix[:3, :3].T + matrix[:3, 3]
     if not np.isfinite(points).all() or np.abs(points).max() > 10000:
         raise InvalidTask('invalid mapped furniture geometry')
+    if floor_z_m is not None:
+        floor=finite(floor_z_m,'mapped floor height',-10,10)
+        above=points[:,2]>floor+.06
+        # Semantic geometry only. Native depth collision evidence is untouched.
+        if np.mean(~above)>.65 or np.count_nonzero(above)<8:
+            raise InvalidTask('floor_dominated_furniture_mask_reobserve')
+        points=points[above]
     cells = np.unique(np.floor(points/size).astype(np.int64), axis=0)
     if not 4 <= len(cells) <= 4096:
         raise InvalidTask('furniture_geometry_budget_or_extent_invalid')

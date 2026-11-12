@@ -76,7 +76,88 @@ class RecordedMapPoses:
         return matrix,float(gap)
 
 
-def review_semantics(root,capture,slam,trajectory,output,model,segmenter,*,model_revision,frames=6):
+def landmark_view_support(store,instances):
+    """Separate repeated frames from viewpoint diversity; neither certifies identity."""
+    captures={c['stamp']['capture_id']:c for c in store.records('semantic_capture')}
+    observations=store.records('furniture_observation');result=[]
+    for item in instances:
+        ids=sorted({o['observation']['stamp']['capture_id'] for o in observations
+                    if o['association']['instance_id']==item['instance_id']})
+        representatives=[]
+        for capture_id in ids:
+            if capture_id not in captures:continue
+            matrix=np.array(captures[capture_id]['camera_to_map']);origin=matrix[:3,3];direction=matrix[:3,2]
+            if not any(np.linalg.norm(origin-p)<.08 and direction@d>np.cos(np.deg2rad(10)) for p,d in representatives):
+                representatives.append((origin,direction))
+        value=dict(instance_id=item['instance_id'],category=item['category'],distinct_captures=len(ids),
+            viewpoint_groups=len(representatives),minimum_translation_m=.08,minimum_rotation_deg=10.,
+            status='MULTIVIEW_ESTIMATE' if len(representatives)>=2 else 'SINGLE_VIEW_CANDIDATE',
+            identity_verified=False,independent_correctness_verified=False)
+        store.save_record('furniture_view_support',item['instance_id'],value);result.append(value)
+    return result
+
+
+def spatial_landmark_review(instances, frames):
+    """Group unique overlapping storage hypotheses; retain raw instances and conflicts.
+
+    This is a display/memory review, not learned re-identification. A broad mask
+    touching two objects never joins them into a transitive mega-object.
+    """
+    storage={'wardrobe','cabinet','bookshelf','refrigerator','unclassified_furniture'}
+    cells=[{tuple(c) for c in i['observed_voxels']} for i in instances]
+    adjacent=[[] for _ in instances]
+    for a,left in enumerate(instances):
+        for b in range(a+1,len(instances)):
+            right=instances[b]
+            if (left['category'] not in storage or right['category'] not in storage or
+                    'unclassified_furniture' not in (left['category'],right['category']) or
+                    left['voxel_size_m']!=right['voxel_size_m'] or left['context']!=right['context']):continue
+            overlap=len(cells[a]&cells[b])
+            if overlap/min(len(cells[a]),len(cells[b]))>=.6 and overlap/max(len(cells[a]),len(cells[b]))>=.1:
+                adjacent[a].append(b);adjacent[b].append(a)
+    groups=[];used=set()
+    for i in range(len(instances)):
+        if i in used:continue
+        group=[i]
+        if len(adjacent[i])==1 and adjacent[adjacent[i][0]]==[i]:group+=adjacent[i]
+        used.update(group);groups.append(group)
+    result=[]
+    for group in groups:
+        members=sorted(instances[i]['instance_id'] for i in group)
+        categories={instances[i]['category'] for i in group};observed=[];alternatives=set(categories)-{'unclassified_furniture'}
+        for frame in frames:
+            mapping=frame.get('mapping',{});associations=mapping.get('associations',[])
+            accepted=mapping.get('provenance',{}).get('accepted_detections',[])
+            if not any(a.get('instance_id') in members for a in associations):continue
+            observed.append(frame)
+            for detection,association in zip(accepted,associations):
+                if association.get('instance_id') not in members:continue
+                corners=np.asarray(detection['corners_uv']);box=np.r_[corners.min(0),corners.max(0)]
+                matches=[d for d in frame['detections'] if np.max(abs(np.asarray(d['box_xyxy'])-box))<=1.01]
+                if len(matches)==1:
+                    evidence=matches[0];original=evidence.get('original_label',evidence['label']).replace('_',' ').split()
+                    alternatives.update(set(original)&storage-{'unclassified_furniture'})
+                    for ranking in evidence.get('household_review',{}).get('alternatives',[]):
+                        alternatives.update(v['label'] for v in ranking[:2] if v['label'] in storage and v['label']!='unclassified_furniture')
+        representatives=[]
+        for frame in observed:
+            matrix=np.array(frame['camera_to_map']);origin=matrix[:3,3];direction=matrix[:3,2]
+            if not any(np.linalg.norm(origin-p)<.08 and direction@d>np.cos(np.deg2rad(10)) for p,d in representatives):
+                representatives.append((origin,direction))
+        merged=set().union(*(cells[i] for i in group));size=instances[group[0]]['voxel_size_m']
+        category=next(iter(categories)) if len(categories)==1 else 'unclassified_furniture'
+        result.append(dict(landmark_id='landmark-'+hashlib.sha256(':'.join(members).encode()).hexdigest()[:24],
+            member_instance_ids=members,category=category,label_alternatives=sorted(alternatives),
+            observed_voxels=[list(c) for c in sorted(merged)],voxel_size_m=size,
+            distinct_captures=len({f['capture']['capture_id'] for f in observed}),viewpoint_groups=len(representatives),
+            association='unique_overlapping_storage_hypotheses' if len(group)>1 else 'existing_instance',
+            label_state='NEEDS_REVIEW' if category=='unclassified_furniture' else 'MODEL_ESTIMATE',
+            identity_verified=False,physical_extent_complete=False,collision_clearance_authority=False,
+            ambiguous_neighbor_ids=sorted(instances[j]['instance_id'] for i in group for j in adjacent[i] if j not in group)))
+    return result
+
+
+def review_semantics(root,capture,slam,trajectory,output,model,segmenter,*,model_revision,frames=6,household_review=False):
     from .camera_evidence import from_metadata,match_observed_identity
     from .assistant.contracts import Context,Stamp
     from .assistant.perception import TransformSample
@@ -114,7 +195,7 @@ def review_semantics(root,capture,slam,trajectory,output,model,segmenter,*,model
     map_sha=hashlib.sha256((slam/'occupancy.json').read_bytes()).hexdigest()
     context=Context('recorded-semantic-room','map-'+map_sha[:24],report['sensor_frames']['calibration_id'],'recorded-rgbd-review')
     output.mkdir(parents=True);store=WorldStore(output/'furniture.db')
-    mapper=RGBDFurnitureMapper(store,context,model,segmenter,model_revision=model_revision)
+    mapper=RGBDFurnitureMapper(store,context,model,segmenter,model_revision=model_revision,floor_z_m=0. if household_review else None)
     results=[]
     try:
         for number,row in enumerate(chosen):
@@ -135,17 +216,23 @@ def review_semantics(root,capture,slam,trajectory,output,model,segmenter,*,model
             canvas=rgb[...,::-1].copy();detections=getattr(model,'last_detections',[])
             entry['detections']=detections
             entry['unresolved_labels']=[d['label'] for d in detections if furniture_category(d['label']) is None]
-            for det in detections:
-                if furniture_category(det['label']) is None:continue
-                x1,y1,x2,y2=map(int,det['box_xyxy']);cv2.rectangle(canvas,(x1,y1),(x2,y2),(0,180,255),2)
-                cv2.putText(canvas,f"{det['label']} {det['score']:.2f}",(max(0,x1),max(16,y1)),cv2.FONT_HERSHEY_SIMPLEX,.5,(0,80,255),1)
+            for det in entry.get('mapping',{}).get('provenance',{}).get('accepted_detections',[]):
+                corners=np.array(det['corners_uv']);x1,y1=np.floor(corners.min(0)).astype(int);x2,y2=np.ceil(corners.max(0)).astype(int)
+                cv2.rectangle(canvas,(x1,y1),(x2,y2),(0,180,255),2)
+                cv2.putText(canvas,f"{det['category']} {det['score']:.2f}",(max(0,x1),max(16,y1)),cv2.FONT_HERSHEY_SIMPLEX,.5,(0,80,255),1)
             cv2.imwrite(str(output/f'view-{number:02d}.jpg'),canvas)
             entry['image']=f'view-{number:02d}.jpg';results.append(entry)
             (output/'progress.json').write_text(json.dumps(results,indent=2)+'\n')
         instances=mapper.memory.instances()
+        view_support=landmark_view_support(store,instances)
+        landmarks=spatial_landmark_review(instances,results)
+        for landmark in landmarks:store.save_record('furniture_landmark_review',landmark['landmark_id'],landmark)
     finally:store.close()
     reopened=WorldStore(output/'furniture.db')
-    try:restored=FurnitureMemory(reopened,context).instances()
+    try:
+        restored=FurnitureMemory(reopened,context).instances()
+        restored_view_support=reopened.records('furniture_view_support')
+        restored_landmarks=reopened.records('furniture_landmark_review')
     finally:reopened.close()
     from .assistant.furniture import FURNITURE_PROMPT
     conflicts=[]
@@ -159,11 +246,12 @@ def review_semantics(root,capture,slam,trajectory,output,model,segmenter,*,model
                     categories=[left['category'],right['category']],overlap_fraction=overlap,
                     resolution='unresolved; do not treat as two confirmed objects'))
     result=dict(mode='offline_real_rgbd_semantic_review',context=context.to_dict(),model_revision=model_revision,
-        prompt=FURNITURE_PROMPT,model_versions=getattr(model,'versions',{}),cross_category_conflicts=conflicts,
+        landmarks=landmarks,persisted_landmarks_identical=sorted(landmarks,key=lambda x:x['landmark_id'])==restored_landmarks,
+        prompt=FURNITURE_PROMPT,floor_filter_enabled=household_review,classifier_review_enabled=getattr(model,'household',None) is not None,view_support=view_support,model_versions=getattr(model,'versions',{}),cross_category_conflicts=conflicts,
         landmark_policy='major household furniture; unnamed objects remain in independent native depth',
         repeated_view_landmarks=[i['instance_id'] for i in instances if i['observation_count']>=2],
         tentative_single_view_landmarks=[i['instance_id'] for i in instances if i['observation_count']<2],
-        frames=results,instances=instances,persisted_instances_identical=instances==restored,excluded_frames=excluded,
+        frames=results,instances=instances,persisted_instances_identical=instances==restored,persisted_view_support_identical=view_support==restored_view_support,excluded_frames=excluded,
         eligible_frames=len(eligible),map_sha256=map_sha,motor_commands=0,live_map_modified=False,
         semantic_names_physically_confirmed=False,full_furniture_extent_verified=False,self_geometry_removed=False,
         obstacle_clearing_authorized=False,autonomous_navigation_authorized=False,

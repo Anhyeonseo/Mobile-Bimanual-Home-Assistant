@@ -443,6 +443,8 @@ if __name__=='__main__':
     p.add_argument('--capture',type=Path);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--slam-review',type=Path);p.add_argument('--trajectory-review',type=Path)
     p.add_argument('--semantic',action='store_true',help='Offline DINO/SAM furniture annotations; never modifies live occupancy')
+    p.add_argument('--semantic-floor-filter',action='store_true',help='Ablation: keep DINO names and filter semantic floor geometry')
+    p.add_argument('--household-review',action='store_true',help='Local household crop review plus floor filtering; original geometry unchanged')
     p.add_argument('--semantic-frames',type=int,default=6)
     p.add_argument('--model-cache',type=Path,help='Existing pinned DINO/SAM cache; semantic review uses offline model loading')
     p.add_argument('--traversability',action='store_true')
@@ -461,6 +463,7 @@ if __name__=='__main__':
         result=review_traversability(args)
         print(json.dumps(dict(dimensions_xyz_m=result['geometry']['dimensions_xyz_m'],height_m=result['geometry']['height_above_floor_m'],radius_m=result['geometry']['circumscribed_radius_m'],extra_upper_cells=result['lidar_free_cells_with_upper_hits'])))
         raise SystemExit(0)
+    if (args.household_review or args.semantic_floor_filter) and not args.semantic:p.error('--household-review requires --semantic')
     if not args.capture:p.error('--capture required')
     if args.semantic:
         if not args.slam_review or not args.trajectory_review or not args.model_cache:
@@ -475,11 +478,19 @@ if __name__=='__main__':
             def detect(self,*args):
                 detections,elapsed=super().detect(*args)
                 self.last_detections=clip_recorded_boxes(detections,args[0].shape)
+                if getattr(self,'household',None) is not None:
+                    self.last_detections=self.household.refine(args[0],self.last_detections)
                 return self.last_detections,elapsed
         model=RecordedDetector(cache_dir=args.model_cache)
+        semantic_revision='dino-'+DINO_REVISION[:12]+'-sam-'+SAM_REVISION[:12]
+        if args.household_review:
+            from household_semantics import HouseholdCropReviewer,MODEL_REVISION as HOUSEHOLD_REVISION
+            semantic_revision+='-siglip2-'+HOUSEHOLD_REVISION[:12]
+            model.household=HouseholdCropReviewer(args.model_cache,model.device)
         segmenter=SAMMasks(model.device,cache_dir=args.model_cache)
+        if args.household_review or args.semantic_floor_filter:semantic_revision+='-floor-v1'
         result=review_semantics(ROOT,args.capture,args.slam_review,args.trajectory_review,args.output,
-            model,segmenter,model_revision='dino-'+DINO_REVISION[:12]+'-sam-'+SAM_REVISION[:12],frames=args.semantic_frames)
+            model,segmenter,model_revision=semantic_revision,frames=args.semantic_frames,household_review=args.household_review or args.semantic_floor_filter)
         print(json.dumps(dict(frames=len(result['frames']),instances=len(result['instances']),
                              persisted_instances_identical=result['persisted_instances_identical'])))
     elif args.slam_review:
