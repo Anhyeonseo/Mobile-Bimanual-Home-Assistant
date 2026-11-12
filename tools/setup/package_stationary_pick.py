@@ -62,13 +62,13 @@ def package_s4(destination):
     if destination.exists():raise ValueError('new release output directory required')
     roots=('ros2_ws/src','tools','home_perception','protocol','hardware','config','requirements','tests')
     allowed={'.py','.json','.yaml','.yml','.xml','.urdf','.xacro','.srdf','.stl','.STL',
-             '.rviz','.ini','.msg','.srv','.action','.c','.h','.html','.css','.js','.txt','.cfg','.sh','.md'}
+             '.rviz','.ini','.msg','.srv','.action','.c','.h','.cpp','.hpp','.html','.css','.js','.txt','.cfg','.sh','.md'}
     paths=[]
     for root in roots:
         paths.extend(p for p in (ROOT/root).rglob('*') if p.is_file()
             and '.local.' not in p.name and not p.name.startswith('.env')
             and not any(part in ('__pycache__','node_modules','.git','build','install','log') for part in p.relative_to(ROOT/root).parts)
-            and (p.suffix in allowed or p.name in ('CMakeLists.txt','setup.cfg') or p.parent.name=='resource'))
+            and (p.suffix in allowed or p.name in ('CMakeLists.txt','setup.cfg','LICENSE') or p.parent.name=='resource'))
     paths.extend(p for p in (ROOT/'docs').glob('*.md'))
     paths.extend(p for name in ('LICENSE','README.md') if (p:=ROOT/name).is_file())
     # Retain the established controller sources for a later measured-profile

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "checked_on_local_date": "2026-11-12",
   "timezone": "Asia/Seoul",
-  "status": "replacement_stream_verified_cadence_issue_open",
+  "status": "replacement_stationary_cadence_verified",
   "model_expected": "LDS-01",
   "usb_adapter": "CP2102 10c4:ea60",
   "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
@@ -10,7 +10,8 @@
   "user_confirmed": {
     "fixed_at_existing_mount": true,
     "power_and_signal_cables_connected": true,
-    "rotated_during_official_driver_test": true
+    "rotated_during_official_driver_test": true,
+    "replacement_fixed_at_existing_mount": true
   },
   "after_reconnect": {
     "passive": {
@@ -78,9 +79,9 @@
   "navigation_authorized": false,
   "mount_transform": null,
   "range_accuracy_validated": false,
-  "cadence_verified": false,
+  "cadence_verified": true,
   "clock_note": "Target UTC is approximately nine hours behind PC UTC; target capture timestamps preserved verbatim. User-facing date uses Asia/Seoul client context. Cross-host time alignment unverified. Target timedatectl reports NTP enabled and synchronized; which host clock is correct is not established.",
-  "conclusion": "Replacement LDS-01 received on both local PC and Jetson. Jetson diagnostic flush wait was reproduced and removed; earlier original-unit no-byte results have not been explained. Official ROS stream still has gaps exceeding the existing 0.35-second threshold.",
+  "conclusion": "Packet framing fix verified on identical missing-sector ROS replay and a 60-second stationary Jetson sensor run. Mount/range/acquisition timing, localization and moving load remain unqualified.",
   "historical_evidence": "config/home_assistant/lidar_device.observed.json",
   "local_evidence": "output/s4-lidar-connected",
   "target_evidence": "/home/hyper/robot/shared/diagnostics/s4-lidar-connected",
@@ -337,5 +338,144 @@
     "current_replacement_mount_transform_verified": false,
     "evidence_root": "/home/hyper/robot/shared/diagnostics/s4-lidar-connected/",
     "original_unit_fault_confirmed": false
+  },
+  "cadence_fix": {
+    "upstream_tag": "2.1.1",
+    "upstream_commit": "fa4608d80b6005e0ca63197f79ad6d09381f84b3",
+    "source": "ros2_ws/src/hls_lfcd_lds_driver",
+    "local_evidence": "output/s4-lidar-fix",
+    "target_evidence": "/home/hyper/robot/shared/diagnostics/s4-lidar-gap-fixed/live-60s",
+    "duration_requested_s": 60,
+    "live": {
+      "mode": "real_sensor",
+      "robot_motion_commands": 0,
+      "moving_mapping_qualified": false,
+      "driver_path": "/home/hyper/robot/shared/runtime/s4-lidar-fix/install/hls_lfcd_lds_driver/lib/hls_lfcd_lds_driver/hlds_laser_publisher",
+      "driver_sha256": "95807be4fae6e60319d32ddbc802458572fcc9bf328862abb2258abf163a60aa",
+      "passed": true,
+      "frames": 291,
+      "gaps_over_035": 0,
+      "maximum_gap_s": 0.2012628900015443,
+      "minimum_gap_s": 0.20021181025276746,
+      "mean_gap_s": 0.20073545903625048,
+      "health": {
+        "epoch": "initial",
+        "ready": false,
+        "scan_ready": true,
+        "localization_ready": false,
+        "scan_error": null,
+        "localization_error": "awaiting localization",
+        "consecutive_scans": 291,
+        "maximum_scan_gap_s": 0.2012628900015443,
+        "motion_authorized": false
+      },
+      "missing_sector_observed": false,
+      "driver_exit_code": 0
+    },
+    "live_decoder_stats": {
+      "complete": 291,
+      "partial": 0,
+      "rejected": 0,
+      "checksum_errors": 0,
+      "backlog_resets": 0
+    },
+    "replay": {
+      "upstream": {
+        "mode": "virtual_serial",
+        "robot_motion_commands": 0,
+        "moving_mapping_qualified": false,
+        "driver_path": "output/s4-lidar-fix/upstream-install/hls_lfcd_lds_driver/lib/hls_lfcd_lds_driver/hlds_laser_publisher",
+        "driver_sha256": "f9f844606f88d245228fe195afcb84b865c605aa430f8e90b018a19f94de7660",
+        "passed": false,
+        "frames": 34,
+        "gaps_over_035": 5,
+        "maximum_gap_s": 0.39681763713861073,
+        "minimum_gap_s": 0.19946929018033188,
+        "mean_gap_s": 0.2302941035929755,
+        "health": {
+          "epoch": "initial",
+          "ready": false,
+          "scan_ready": false,
+          "localization_ready": false,
+          "scan_error": "awaiting consecutive scans",
+          "localization_error": "awaiting localization",
+          "consecutive_scans": 2,
+          "maximum_scan_gap_s": 0.39681763713861073,
+          "motion_authorized": false
+        },
+        "missing_sector_observed": false,
+        "driver_exit_code": 255,
+        "virtual_commands_hex": "6265"
+      },
+      "patched": {
+        "mode": "virtual_serial",
+        "robot_motion_commands": 0,
+        "moving_mapping_qualified": false,
+        "driver_path": "/home/an-hyeonseo/Documents/GitHub/SO101-Can-Towel-Manipulation/workspaces/home-assistant/output/s4-lidar-fix/install/hls_lfcd_lds_driver/lib/hls_lfcd_lds_driver/hlds_laser_publisher",
+        "driver_sha256": "8893c603423ed272a06772c9f0dda3f892a830e223ea2c08c909ea75b20b71c4",
+        "passed": true,
+        "frames": 39,
+        "gaps_over_035": 0,
+        "maximum_gap_s": 0.20370768530301575,
+        "minimum_gap_s": 0.1963989958599086,
+        "mean_gap_s": 0.19999688093651602,
+        "health": {
+          "epoch": "initial",
+          "ready": false,
+          "scan_ready": true,
+          "localization_ready": false,
+          "scan_error": null,
+          "localization_error": "awaiting localization",
+          "consecutive_scans": 39,
+          "maximum_scan_gap_s": 0.20370768530301575,
+          "motion_authorized": false
+        },
+        "missing_sector_observed": true,
+        "driver_exit_code": 0,
+        "virtual_commands_hex": "6265"
+      },
+      "sensor_loss": {
+        "mode": "virtual_serial",
+        "robot_motion_commands": 0,
+        "moving_mapping_qualified": false,
+        "driver_path": "/home/an-hyeonseo/Documents/GitHub/SO101-Can-Towel-Manipulation/workspaces/home-assistant/output/s4-lidar-fix/install/hls_lfcd_lds_driver/lib/hls_lfcd_lds_driver/hlds_laser_publisher",
+        "driver_sha256": "8893c603423ed272a06772c9f0dda3f892a830e223ea2c08c909ea75b20b71c4",
+        "passed": true,
+        "frames": 20,
+        "gaps_over_035": 0,
+        "maximum_gap_s": 0.20100587520892077,
+        "minimum_gap_s": 0.19913563792215427,
+        "mean_gap_s": 0.19997676023721347,
+        "health": {
+          "epoch": "initial",
+          "ready": false,
+          "scan_ready": false,
+          "localization_ready": false,
+          "scan_error": null,
+          "localization_error": "awaiting localization",
+          "consecutive_scans": 20,
+          "maximum_scan_gap_s": 0.20100587520892077,
+          "motion_authorized": false
+        },
+        "missing_sector_observed": false,
+        "driver_exit_code": 0,
+        "virtual_commands_hex": "6265"
+      }
+    },
+    "source_sha256": {
+      "ros2_ws/src/hls_lfcd_lds_driver/LICENSE": "143077f9f6a8de5a99f78c2c2472801fb53cf240277ef661642f079b9acdfff8",
+      "ros2_ws/src/hls_lfcd_lds_driver/CMakeLists.txt": "027e5f160399254831c01e533283979ef00edbe35b56dcdf0323ac6f3d23ca1c",
+      "ros2_ws/src/hls_lfcd_lds_driver/PATCHES.md": "5287aa025c1532d9ce3a5271affca9f3ecf21ed179954b145301843a85b3918a",
+      "ros2_ws/src/hls_lfcd_lds_driver/README.md": "7376e3246c1bcf7dd461098303b9554ed2a202926e154344e6989c12f4632588",
+      "ros2_ws/src/hls_lfcd_lds_driver/package.xml": "00cf29e28f4adddca2662a35163e183f4678a576c7f01e82b16cb85243d4913c",
+      "ros2_ws/src/hls_lfcd_lds_driver/rviz/hlds_laser.rviz": "4eda7fa707c052c793ef2ede6449787a6581e36765a72ab5cb3ea79ea5920322",
+      "ros2_ws/src/hls_lfcd_lds_driver/launch/view_hlds_laser.launch.py": "30ee83ae0b40fed5148f88f0333ca63016a2303070e799824c5247dba3baa93a",
+      "ros2_ws/src/hls_lfcd_lds_driver/launch/hlds_laser.launch.py": "843d885746682fed536fae02744ba3b7b453330249cdcd0ad4ebadf24fba07e0",
+      "ros2_ws/src/hls_lfcd_lds_driver/src/hlds_laser_segment_publisher.cpp": "3eba665589b2527facbc82218e9a0e359a36144fdff047aad93930990dcd5cc9",
+      "ros2_ws/src/hls_lfcd_lds_driver/src/hlds_laser_publisher.cpp": "5a11a43054d6e21fff4a1fff5247265237756a6612a7bda91cfd7c1fd257c429",
+      "ros2_ws/src/hls_lfcd_lds_driver/include/hls_lfcd_lds_driver/scan_decoder.hpp": "117af53744e2535963dc8fbc52035714f9b95e2f5647bfa7a74062634cb21856",
+      "ros2_ws/src/hls_lfcd_lds_driver/include/hls_lfcd_lds_driver/hlds_laser_segment_publisher.hpp": "0014b6418e1da88184321dbb491607b3c28f211fd63132df9cc06f7e8634a765",
+      "ros2_ws/src/hls_lfcd_lds_driver/include/hls_lfcd_lds_driver/lfcd_laser.hpp": "99406ac19c599cc3637af075e1f7ee595eeb581ec2125481f209424da5970613"
+    }
   }
 }

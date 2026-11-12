@@ -144,7 +144,7 @@ jobs:
       - name: Install model and action message dependencies
         run: |
           apt-get update
-          apt-get install --no-install-recommends -y ros-jazzy-nav2-msgs ros-jazzy-xacro ros-jazzy-urdfdom-py ros-jazzy-moveit-msgs python3-numpy python3-serial python3-colcon-common-extensions
+          apt-get install --no-install-recommends -y libboost-system-dev ros-jazzy-nav2-msgs ros-jazzy-xacro ros-jazzy-urdfdom-py ros-jazzy-moveit-msgs python3-numpy python3-serial python3-colcon-common-extensions
       - name: Check assembly FK and synthetic ROS action transport
         shell: bash
         env:
@@ -155,9 +155,11 @@ jobs:
           export PYTHONPATH="$PWD/ros2_ws/src/home_robot_tasks:$PYTHONPATH"
           python3 tools/run/check_mobile_model.py
           python3 tools/run/check_nav2_action_port.py
-          colcon build --base-paths ros2_ws/src --packages-select so101_interfaces so101_arm_bridge home_robot_tasks
+          colcon build --base-paths ros2_ws/src --packages-select so101_interfaces so101_arm_bridge home_robot_tasks hls_lfcd_lds_driver
           source install/setup.bash
           python3 tools/run/check_fetch_ros_ports.py
+          python3 tools/run/check_lds01_driver.py --output output/lds-missing-sector
+          python3 tools/run/check_lds01_driver.py --fault sensor_loss --output output/lds-sensor-loss
 
   ros-integration:
     runs-on: ubuntu-24.04

@@ -67,7 +67,7 @@ python3 tools/diagnostics/check_carry_moveit.py --mobile-mesh-dir output/carry-m
 ROS 패키지 빌드와 센서 입력만 받는 SLAM 실행:
 
 ```bash
-colcon build --base-paths ros2_ws/src --packages-select so101_interfaces so101_arm_bridge home_robot_tasks
+colcon build --base-paths ros2_ws/src --packages-select so101_interfaces so101_arm_bridge home_robot_tasks hls_lfcd_lds_driver
 source install/setup.bash
 ros2 launch home_robot_tasks s4_mapping.launch.py --show-args
 # 준비된 /offline_s4/scan과 TF를 입력받는다. 장치 드라이버·바퀴 제어기는 시작하지 않는다.
@@ -76,7 +76,7 @@ ros2 launch home_robot_tasks s4_mapping.launch.py
 ros2 run home_robot_tasks saved_home_maps --bundle output/s4-slam-depth/height-map --ros-args -r __ns:=/saved_s4
 ```
 
-실제 센서 설치 시 라이다 드라이버는 공식 `hls_lfcd_lds_driver`를 사용한다. 기존 관측 장치는 LDS-01, 230400 baud였으며 2026-11-05 기록의 최대 약 0.401초 수신 간격 문제는 미해결이다. 새 `NavigationHealth`의 기본 스캔 최대 간격은 0.35초, 연속 정상 관측은 3회다. 현장 기록 없이 임계값만 늘려 문제를 숨기지 않는다. 위치 추정 허용 표준편차 기본값은 평면 15cm, 방향 0.2rad이며 작업 정렬 허용치는 기존 정책에서 별도로 검사한다.
+실제 센서 설치 시 공식 2.1.1 기반의 저장소 `hls_lfcd_lds_driver` 수정본을 함께 빌드한다(`libboost-system-dev` 필요). LDS-01은 230400 baud이며, 누락 패킷이 다음 회전을 버리게 하던 처리를 수정했다. 2026-11-12 젯슨 정지 60초에서 291회·최대 0.2013초를 확인했다. 이동 중 관측 시각·장착·거리 정확도와 부하 검증은 별도다. 새 `NavigationHealth`의 기본 스캔 최대 간격은 0.35초, 연속 정상 관측은 3회다. 현장 기록 없이 임계값만 늘려 문제를 숨기지 않는다. 위치 추정 허용 표준편차 기본값은 평면 15cm, 방향 0.2rad이며 작업 정렬 허용치는 기존 정책에서 별도로 검사한다.
 
 `build_guarded_navigation(..., health=health)`에 같은 `NavigationHealth`를 전달하고 `RosNavigationHealth`로 `/scan`과 AMCL 관측을 연결한다. `reset_observations`는 기존 depth/독립 몸체 공간 확인을 새 세션으로 바꾼다. 주행기는 같은 `MobileClient`와 공통 정지 소유자를 사용한다. `build_ros_runtime(..., placement_policy=policy)`에는 기존 `TaskPlacementPolicy`를 전달한다. 실물용 feasibility는 합성 도달 범위 검사 대신 현재 모델·장면의 전체 경로 검사 결과를 제공해야 한다.
 

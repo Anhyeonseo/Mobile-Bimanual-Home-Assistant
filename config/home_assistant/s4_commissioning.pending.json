@@ -76,6 +76,8 @@
     "lidar_checked_on": "2026-11-12",
     "lidar_evidence": "config/home_assistant/lidar_device.connected.observed.json",
     "lidar_ros_scan_received": true,
-    "lidar_cadence_qualified": false
+    "lidar_cadence_qualified": true,
+    "lidar_cadence_scope": "stationary 60 seconds; patched driver, 291 frames, max gap 0.201263 s, no gaps over 0.35 s; moving timing/load unqualified",
+    "replacement_lidar_mount_fixed_user_confirmed": true
   }
 }
