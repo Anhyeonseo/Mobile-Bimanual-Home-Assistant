@@ -128,7 +128,19 @@ def review_teleop_capture(records):
             raise ValueError('host timestamp regression')
         last_time=stamp;event=record.get('event')
         if finished:raise ValueError('records after finished event')
-        if event=='armed':
+        if event=='stationary_baseline':
+            stopped=record.get('stop',{})
+            wheels=stopped.get('wheels',[])
+            if (session is not None or pending is not None or samples or not _confirmed_stop(stopped)
+                    or [w.get('id') for w in wheels]!=[7,8,9]
+                    or any(w.get('goal_raw')!=0 or w.get('torque_raw')!=0 for w in wheels)):
+                raise ValueError('invalid stationary baseline')
+        elif event=='localization_changed':
+            # Advisory observations never consume an ACK or establish a stop.
+            if (record.get('policy')!='manual_advisory_after_start'
+                    or type(record.get('localization',{}).get('ready')) is not bool):
+                raise ValueError('invalid localization annotation')
+        elif event=='armed':
             reply=record['reply'];nonce=reply.get('session')
             if (session is not None or pending is not None or nonce in seen or type(nonce) is not int
                     or nonce<=0 or reply.get('sequence')!=0 or reply.get('armed') is not True

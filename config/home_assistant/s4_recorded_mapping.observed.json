@@ -310,5 +310,122 @@
       "First-scan map search is an offline candidate path, not active robot navigation.",
       "Global initialization failed the diagnostic; preserve its evidence, do not relax the threshold."
     ]
+  },
+  "latest_live_tracking_trial": {
+    "session": "20261112T105341Z-3b25004f",
+    "operator_report": "Movement and rotation normal; arrow followed motion; Finish pressed.",
+    "manual_teleop_completed": true,
+    "live_tracking_sanity_passed": true,
+    "independent_physical_accuracy_qualified": false,
+    "autonomous_navigation_authorized": false,
+    "acks": 796,
+    "verified_pauses": 0,
+    "hold_read_retries": 0,
+    "duration_s": 42.536115381502896,
+    "all_six_directions_recorded": true,
+    "maximum_command_gap_ms": 63.201294,
+    "final_stop_confirmed": true,
+    "final_hold_confirmed": true,
+    "localization": {
+      "samples": 393,
+      "ready_fraction": 0.9669211195928753,
+      "warning_samples": 13,
+      "minimum_fit": 0.776,
+      "median_fit": 0.8785425101214575,
+      "maximum_scan_age_s": 0.20790811504411977,
+      "maximum_pose_age_s": 0.6747010067192605,
+      "warning_causes": {
+        "pose": 2,
+        "fit": 9,
+        "encoder": 2
+      }
+    },
+    "live_map_fit": {
+      "compared_scans": 211,
+      "pose_time_coverage_s": 42.33104372024536,
+      "all_scan_to_map": {
+        "endpoints": 52714,
+        "median_m": 0.030255519822926406,
+        "p90_m": 0.10993046039644286,
+        "within_10cm_fraction": 0.8818150775884964
+      },
+      "after_10s_scan_to_map": {
+        "endpoints": 40537,
+        "median_m": 0.0323200792922616,
+        "p90_m": 0.10760072131748553,
+        "within_10cm_fraction": 0.8869921306460764
+      },
+      "maximum_pose_message_gap_s": 0.4015829563140869,
+      "maximum_map_correction_step_after_10s_m": 0.0075168081479817395,
+      "maximum_map_correction_step_after_10s_deg": 0.4078176054219872,
+      "final_pose_xy_yaw": [
+        0.32691508016270965,
+        0.24989105796283625,
+        -2.1539014117093256
+      ],
+      "relative_to_pose_at_10s": [
+        -0.07559037866789825,
+        0.038792016481404124,
+        -1.6460232069854424
+      ],
+      "tracking_sanity_passed": true,
+      "physical_localization_qualified": false,
+      "encoder_agreement_required": false,
+      "measured_return_error_available": false
+    },
+    "capture_window": {
+      "source_capture_passed": false,
+      "selected_scans": 211,
+      "drive_window_s": [
+        69135.729092063,
+        69178.2652074445
+      ],
+      "maximum_selected_scan_gap_s": 0.20213334847358055,
+      "excluded_pre_drive_gaps": [
+        [
+          69083.18565425232,
+          69083.78558765442,
+          0.5999334021034883
+        ],
+        [
+          69084.18586018302,
+          69084.7857168437,
+          0.5998566606867826
+        ]
+      ],
+      "whole_capture_qualified": false,
+      "scope": "offline drive-window replay only; no live sensor acceptance"
+    },
+    "whole_sensor_capture_passed": false,
+    "native_archive_verified": 198,
+    "new_map": {
+      "shape": [
+        111,
+        113
+      ],
+      "resolution_m": 0.05,
+      "known_area_m2": 12.732500379458072,
+      "graph_saved": true,
+      "process_restart_cells_identical": true,
+      "actual_power_reconnect_tested": false
+    },
+    "depth_preview": {
+      "frames": 69,
+      "above_lidar_voxels": 2453,
+      "lidar_free_cells_with_upper_depth": 500,
+      "semantic_labels_inferred": false,
+      "self_geometry_removed": false,
+      "live_obstacles_updated": false
+    },
+    "source_release": "s4-local-54e4384d93b3",
+    "replay_release": "s4-local-d04c3ec27633",
+    "local_tests_passed": 82,
+    "evidence": "output/s4-live-localization-20261112/retest",
+    "reports_sha256": {
+      "review.json": "71c0f7bb3e8ce1e3473cdcc5978b0f0eb99c2ab26e8db7e6acb49383ade524be",
+      "live-map-fit.json": "e0d76ae02cbf7e7601c1854233fcd898833e146b9e313aabe026e5d81755405f",
+      "s4-recorded-slam-20261112-09-window/report.json": "03ca4131b7ce535cbb85cbbd0d21757cf88023d607a3cd03baeed1cf6f7db029",
+      "s4-recorded-quality-20261112-09/report.json": "cd7e3cc3e8f87110ecdd2e6c206acad6f9a4a7322b3202492eeee7d3d4fcb6f8"
+    }
   }
 }

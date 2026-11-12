@@ -106,3 +106,31 @@ def test_initial_scan_map_search_recovers_distinct_pose_without_future_scans():
     assert not result['automatic_motion_authorized']
     saved['data']=[0]*10000
     with pytest.raises(ValueError,match='occupied'):map_initial_pose_candidates(scan,odom,np.eye(3),saved)
+
+
+@pytest.mark.parametrize('failure',['implicit','during_drive','after_drive','camera','timing','tf','cleanup','mismatch','geometry','none'])
+def test_offline_startup_gap_exception_never_accepts_other_failures(failure):
+    from home_robot_tasks.s4_recorded_mapping import qualify_replay_capture
+    records=teleop_capture();odom=np.array([[10.,0,0,0],[13.,0,0,0]])
+    times=[1.,1.6]+list(np.arange(9.,13.3,.2))
+    scans=[dict(observed_s=t,time_increment=-.00055,frame='lidar_a',count=360) for t in times]
+    # The warm-up-to-drive interval is also an explicitly retained pre-drive gap.
+    report=dict(mode='real_sensor',passed=False,teleop_finished=records[-1],gaps_over_035=2,
+                receipt_timing=dict(passed=True),health=dict(scan_ready=True),driver_exit_code=0,
+                tf_lookup_checks=[dict(maximum_matrix_error=0.)])
+    if failure=='during_drive':scans=[s for s in scans if not 11.<s['observed_s']<11.5]
+    if failure=='after_drive':scans.append(dict(scans[-1],observed_s=15.))
+    if failure=='camera':report['rgbd']=dict(frames=10,minimum_depth_gap_s=.03,maximum_depth_gap_s=.4)
+    if failure=='timing':report['receipt_timing']['passed']=False
+    if failure=='tf':report['tf_lookup_checks'][0]['maximum_matrix_error']=.01
+    if failure=='cleanup':report['camera_cleanup_error']='camera error'
+    if failure=='mismatch':report['teleop_finished']={}
+    if failure=='geometry':scans[4]['frame']='wrong'
+    def run():return qualify_replay_capture(report,records,scans,odom,allow_startup_scan_gaps=failure!='implicit')
+    if failure!='none':
+        with pytest.raises(ValueError):run()
+    else:
+        selected,result=run()
+        assert len(selected)>10 and result['maximum_selected_scan_gap_s']<.21
+        assert not result['source_capture_passed'] and not result['whole_capture_qualified']
+        assert len(result['excluded_pre_drive_gaps'])==2 and report['passed'] is False

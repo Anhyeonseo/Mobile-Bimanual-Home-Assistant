@@ -121,3 +121,18 @@ def test_resumed_teleop_does_not_fit_motion_across_a_pause():
     for wheel,original in zip(result['wheels'],single['wheels']):
         assert wheel['raw_per_encoder_rad_s']==pytest.approx(original['raw_per_encoder_rad_s'])
         assert wheel['encoder_travel_counts']==[2*v for v in original['encoder_travel_counts']]
+
+
+def test_localization_annotations_do_not_change_drive_pairing_or_create_stop():
+    from home_robot_tasks.s4_base_preparation import review_teleop_capture
+    rows=teleop_capture();baseline=dict(event='stationary_baseline',host_monotonic_ns=0,
+        stop=dict(armed=False,fault=False,stop_confirmed=True,hold_confirmed=True,
+                  wheels=[dict(id=i,goal_raw=0,torque_raw=0) for i in (7,8,9)]))
+    rows.insert(1,baseline)
+    rows.insert(4,dict(event='localization_changed',host_monotonic_ns=40_000_000,
+                      policy='manual_advisory_after_start',localization=dict(ready=False)))
+    assert review_teleop_capture(rows)['acknowledged_samples']==40
+    missing=copy.deepcopy(rows);del missing[5]
+    with pytest.raises(ValueError):review_teleop_capture(missing)
+    baseline['stop']['stop_confirmed']=False
+    with pytest.raises(ValueError,match='baseline'):review_teleop_capture(rows)

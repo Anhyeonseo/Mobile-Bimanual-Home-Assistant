@@ -29,7 +29,7 @@ def recorded_replay(a):
     from lifecycle_msgs.srv import ChangeState
     from slam_toolbox.srv import SerializePoseGraph, DeserializePoseGraph
     from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
-    from home_robot_tasks.s4_recorded_mapping import encoder_path
+    from home_robot_tasks.s4_recorded_mapping import encoder_path, qualify_replay_capture
     from home_robot_tasks.map_bundle import from_occupancy_grid, write_nav2_map
     from home_robot_tasks.navigation_fusion import TravelEnvelope
     from home_robot_tasks.assistant.contracts import Context
@@ -40,11 +40,10 @@ def recorded_replay(a):
     a.output.mkdir(parents=True)
     records=[json.loads(s) for s in a.teleop.read_text().splitlines()]
     capture=json.loads((a.recorded_capture/'report.json').read_text())
-    if capture.get('passed') is not True or capture.get('teleop_finished')!=records[-1]:
-        raise ValueError('successful matching real capture required')
     odom,encoder=encoder_path(records,json.loads((ROOT/'config/home_assistant/s4_base.nominal.json').read_text()))
     all_scans=json.loads((a.recorded_capture/'scans.json').read_text())
-    scans=[s for s in all_scans if s['observed_s']+359*s['time_increment']>=odom[0,0] and s['observed_s']<=odom[-1,0]]
+    scans,capture_window=qualify_replay_capture(capture,records,all_scans,odom,
+        allow_startup_scan_gaps=a.allow_startup_scan_gaps)
     mount=json.loads((ROOT/'config/home_assistant/lidar_mount.review.json').read_text())
     localize = a.localization_map is not None
     recording_id='recorded-'+a.teleop.stem
@@ -69,6 +68,7 @@ def recorded_replay(a):
     report=dict(mode='real_amcl_recorded_scan_nominal_encoder_tf' if localize else 'real_slam_recorded_scan_nominal_encoder_tf',hardware_commands=0,
         physical_map_verified=False,floor_scale_qualified=False,whole_home_coverage_verified=False,
         autonomous_navigation_authorized=False,passed=False,encoder=encoder,scans_selected=len(scans),
+        capture_window=capture_window,
         export_envelope_scope='placeholder needed by map document schema; not measured robot clearance',
         source_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in
             (a.teleop,a.recorded_capture/'scans.json',a.recorded_capture/'report.json',
@@ -260,6 +260,7 @@ def main():
     p.add_argument('--reverse-ray-timing',action='store_true',help='exercise signed ray-time metadata used by the LDS driver')
     p.add_argument('--recorded-capture',type=Path)
     p.add_argument('--teleop',type=Path)
+    p.add_argument('--allow-startup-scan-gaps',action='store_true',help='Offline only: retain failed whole-capture status but replay a clean drive window after startup gaps')
     p.add_argument('--localization-map',type=Path,help='saved occupancy.json with report.json; same capture compares SLAM poses, new capture reviews scan/map fit')
     p.add_argument('--initial-pose',nargs=3,type=float,default=[0.,0.,0.],metavar=('X','Y','YAW'))
     p.add_argument('--global-localization',action='store_true',help='initialize AMCL across saved-map free space instead of providing a pose')

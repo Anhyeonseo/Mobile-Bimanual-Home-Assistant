@@ -99,19 +99,51 @@ def align(source,target,initial=None):
                        overlap_fraction=float(keep.mean()),inliers=int(keep.sum()))
 
 
-def review_recorded(root,teleop,capture,output):
+def qualify_replay_capture(report,records,scans,odom,*,allow_startup_scan_gaps=False):
+    """Qualify a recorded drive window without rewriting failed startup evidence."""
+    if report.get('mode')!='real_sensor' or report.get('teleop_finished')!=records[-1]:
+        raise ValueError('matching real sensor capture required')
+    if any(s.get('frame')!='lidar_a' or s.get('count')!=360
+           or not math.isfinite(s['observed_s']) or not -.001<s['time_increment']<0 for s in scans):
+        raise ValueError('invalid recorded scan geometry or timing')
+    selected=[s for s in scans if s['observed_s']+359*s['time_increment']>=odom[0,0]
+              and s['observed_s']<=odom[-1,0]]
+    gaps=[(a['observed_s'],b['observed_s'],b['observed_s']-a['observed_s']) for a,b in zip(scans,scans[1:])]
+    if len(selected)<10 or any(g<=0 for _,_,g in gaps):raise ValueError('insufficient or reordered scans')
+    bad=[(a,b,g) for a,b,g in gaps if g>.35]
+    if any(b>=odom[0,0] for a,b,g in bad):raise ValueError('scan gap during or after drive window')
+    if report.get('passed') is not True:
+        checks=report.get('tf_lookup_checks',[])
+        rgbd=report.get('rgbd')
+        rgbd_ok=rgbd is None or (rgbd.get('frames',0)>=5 and
+            0<rgbd.get('minimum_depth_gap_s',0)<=rgbd.get('maximum_depth_gap_s',1)<.2)
+        if not (allow_startup_scan_gaps and report.get('passed') is False and bad
+                and report.get('gaps_over_035')==len(bad) and not report.get('error')
+                and not report.get('camera_cleanup_error') and rgbd_ok
+                and report.get('receipt_timing',{}).get('passed') is True
+                and report.get('health',{}).get('scan_ready') is True
+                and report.get('driver_exit_code')==0 and checks
+                and all(0<=c['maximum_matrix_error']<1e-7 for c in checks)):
+            raise ValueError('successful capture or explicitly qualified pre-drive gaps required')
+    return selected,dict(source_capture_passed=report['passed'],selected_scans=len(selected),
+        drive_window_s=[float(odom[0,0]),float(odom[-1,0])],
+        maximum_selected_scan_gap_s=max(b['observed_s']-a['observed_s'] for a,b in zip(selected,selected[1:])),
+        excluded_pre_drive_gaps=bad,whole_capture_qualified=report['passed'] is True,
+        scope='offline drive-window replay only; no live sensor acceptance')
+
+
+def review_recorded(root,teleop,capture,output,*,allow_startup_scan_gaps=False):
     root,teleop,capture,output=map(Path,(root,teleop,capture,output))
     if output.exists():raise ValueError('new immutable review directory required')
     records=[json.loads(line) for line in teleop.read_text().splitlines()]
     source_report=json.loads((capture/'report.json').read_text())
-    if source_report.get('mode')!='real_sensor' or source_report.get('passed') is not True:
-        raise ValueError('successful real sensor capture required')
-    if source_report.get('teleop_finished')!=records[-1]:raise ValueError('capture belongs to different teleop session')
     geometry=json.loads((root/'config/home_assistant/s4_base.nominal.json').read_text())
     odom,encoder=encoder_path(records,geometry)
     mount_data=json.loads((root/'config/home_assistant/lidar_mount.review.json').read_text())
     mount=transform([*mount_data['base_from_lidar_translation_m'][:2],mount_data['yaw_rad']])
     scans=json.loads((capture/'scans.json').read_text())
+    _,capture_window=qualify_replay_capture(source_report,records,scans,odom,
+        allow_startup_scan_gaps=allow_startup_scan_gaps)
     selected=[]
     for s in scans:
         if s['frame']!='lidar_a' or s['count']!=360:raise ValueError('unexpected scan geometry')
@@ -154,6 +186,7 @@ def review_recorded(root,teleop,capture,output):
         valid_archive+=1
     covered=[r for r in manifest if registered[0,0]<=r['depth_time_s']<=registered[-1,0]]
     result=dict(mode='offline_real_capture_review',hardware_commands=0,calibration_applied=False,
+        capture_window=capture_window,
         physical_map_verified=False,floor_scale_qualified=False,encoder=encoder,
         source_sha256={str(f):hashlib.sha256(f.read_bytes()).hexdigest() for f in (teleop,capture/'scans.json',capture/'report.json',root/'config/home_assistant/s4_base.nominal.json',root/'config/home_assistant/lidar_mount.review.json')},
         scan_registration_consistent_with_encoders=bool(np.linalg.norm(error[-1,:2])<.1 and abs(error[-1,2])<.15),

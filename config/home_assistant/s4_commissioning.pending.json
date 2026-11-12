@@ -51,7 +51,7 @@
     "restart_sensor_localization_arm_lift_readiness": null,
     "jetson_os_shutdown_and_safe_power_removal": null,
     "saved_map_localization": {
-      "status": "live_manual_tracking_observed_advisory_policy_retest_pending",
+      "status": "manual_live_tracking_sanity_passed_semantic_height_and_power_resume_pending",
       "evidence": "config/home_assistant/s4_recorded_mapping.observed.json",
       "profile": "ros2_ws/src/home_robot_tasks/config/localization.replay.yaml",
       "physical_accuracy_qualified": false,
@@ -60,8 +60,9 @@
       "initial_scan_hypothesis_seconds": 2.715498750010738,
       "independent_physical_accuracy_qualified": false,
       "live_service_scope": "explicit bounded observer for manual teleop, no autonomous controller",
-      "live_moving_tracking_qualified": false,
-      "latest_manual_trial": "output/s4-live-localization-20261112/trial/review.json"
+      "live_moving_tracking_qualified": true,
+      "latest_manual_trial": "output/s4-live-localization-20261112/retest/review.json",
+      "qualification_scope": "operator manual tracking in this recorded room only; absolute accuracy, autonomous navigation and power resume unqualified"
     }
   },
   "local_acceptance": [
@@ -111,7 +112,8 @@
     "2026-11-12 offline replay of full archive 06: 156 native RGB-D hashes verified; encoder path length 0.1603 m is nominal, not ground truth. Existing slam_toolbox 2.8.5 precise distance/heading option increased accepted pose messages 4 to 43. Actual recorded map graph restored through atomic checkpoint with identical cells. Internal map consistency and upper-height endpoint preview reviewed; no live map, clearance profile or raw wheel scale changed. Final encoder/SLAM mismatch about 4.95 cm and 12 degrees requires longer measured floor translations before metric calibration. See config/home_assistant/s4_recorded_mapping.observed.json.",
     "2026-11-12 localization policy: lidar/map matching is the global pose reference; wheel encoders provide continuous short-term prediction. The 4.95 cm/12 degree difference is not measured true error. Encoder agreement or complete wheel calibration is not required before the next manual mapping/localization trial; wheel geometry, braking, stop and hold verification remain necessary for autonomous commissioning. Real AMCL with OmniMotionModel processed 181 recorded scans/69 poses from a deliberately offset initial estimate; final difference from same-capture SLAM was 2.41 cm/3.35 degrees. This is replay consistency, not independent physical accuracy, global unknown-room relocalization or live service activation.",
     "2026-11-12 retry 08: all six manual directions, 2217 ACKs over 122.775 s, no pauses or hold retries, final stop/hold confirmed. New SLAM graph and map restore passed. Global AMCL on frozen prior map was initially unstable; first-scan-only map hypothesis + existing AMCL improved replay fit to 97.4% within 10 cm after 10 s, correction steps <=1.01 cm/0.50 degrees. These are correspondence/stability metrics, not surveyed accuracy. Start marker absent. Local checks 77 passed; no live navigation activation. Full evidence: config/home_assistant/s4_recorded_mapping.observed.json latest_independent_trial.",
-    "2026-11-12 live observer/UI: frozen prior map, real LDS + AMCL and measured encoder feedback path connected to existing manual web. Fresh stationary STOP baseline recorded. Stationary readiness 40/40 samples passed, minimum map fit 94.0%, maximum status age 0.101 s. No ARM or drive command by assistant; firmware unchanged. Manual moving tracking and loss/recovery acceptance remain pending."
+    "2026-11-12 live observer/UI: frozen prior map, real LDS + AMCL and measured encoder feedback path connected to existing manual web. Fresh stationary STOP baseline recorded. Stationary readiness 40/40 samples passed, minimum map fit 94.0%, maximum status age 0.101 s. No ARM or drive command by assistant; firmware unchanged. Manual moving tracking and loss/recovery acceptance remain pending.",
+    "2026-11-12 manual live retest 20261112T105341Z-3b25004f passed: 796 ACKs, all six directions, zero pauses/read retries, final STOP and hold confirmed. Lidar whole-capture failed two startup gaps about 51 s before ARM; preserve failure. Explicit offline drive window has 211 scans and max gap 0.202133 s. Real SLAM saved/reloaded identical 111x113 cells; upper depth preview is not semantic/clearance acceptance. See latest_live_tracking_trial in s4_recorded_mapping.observed.json."
   ],
   "target_observed_on": "2026-11-12",
   "target_environment": {
