@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real slam_toolbox, synthetic LaserScan/TF, graph save and process reload.
+"""Real SLAM graph save/reload and recorded-data saved-map AMCL comparison.
 
 No device interfaces, robot commands or replacement SLAM implementation. Uses
 an isolated ROS domain chosen by the caller, just like check_nav2_closed_loop.
@@ -46,6 +46,7 @@ def recorded_replay(a):
     all_scans=json.loads((a.recorded_capture/'scans.json').read_text())
     scans=[s for s in all_scans if s['observed_s']+359*s['time_increment']>=odom[0,0] and s['observed_s']<=odom[-1,0]]
     mount=json.loads((ROOT/'config/home_assistant/lidar_mount.review.json').read_text())
+    localize = a.localization_map is not None
     rclpy.init();node=rclpy.create_node('recorded_replay',namespace='/offline_s4_recorded')
     pub=node.create_publisher(LaserScan,'scan',10);dynamic=TransformBroadcaster(node);static=StaticTransformBroadcaster(node)
     maps=[];poses=[]
@@ -53,21 +54,25 @@ def recorded_replay(a):
     def save_pose(m):
         p=m.pose.pose;q=p.orientation
         poses.append(dict(stamp=m.header.stamp.sec+m.header.stamp.nanosec/1e9,
-            xy_yaw=[p.position.x,p.position.y,math.atan2(2*q.w*q.z,1-2*q.z*q.z)]))
-    node.create_subscription(PoseWithCovarianceStamped,'pose',save_pose,10)
+            xy_yaw=[p.position.x,p.position.y,math.atan2(2*q.w*q.z,1-2*q.z*q.z)],
+            covariance=list(m.pose.covariance)))
+    node.create_subscription(PoseWithCovarianceStamped,'amcl_pose' if localize else 'pose',save_pose,10)
+    map_pub = node.create_publisher(OccupancyGrid,'map',QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL)) if localize else None
+    initial_pub = node.create_publisher(PoseWithCovarianceStamped,'initialpose',10) if localize else None
     fixed=TransformStamped();fixed.header.frame_id='base_link';fixed.child_frame_id='lidar_a'
     fixed.header.stamp=node.get_clock().now().to_msg()
     for key,value in zip(('x','y','z'),mount['base_from_lidar_translation_m']):setattr(fixed.transform.translation,key,value)
     fixed.transform.rotation.z=math.sin(mount['yaw_rad']/2);fixed.transform.rotation.w=math.cos(mount['yaw_rad']/2);static.sendTransform(fixed)
     proc=None;namespace='';active=False;logs=[]
-    report=dict(mode='real_slam_recorded_scan_nominal_encoder_tf',hardware_commands=0,
+    node_name='amcl' if localize else 'slam_toolbox'
+    report=dict(mode='real_amcl_recorded_scan_nominal_encoder_tf' if localize else 'real_slam_recorded_scan_nominal_encoder_tf',hardware_commands=0,
         physical_map_verified=False,floor_scale_qualified=False,whole_home_coverage_verified=False,
         autonomous_navigation_authorized=False,passed=False,encoder=encoder,scans_selected=len(scans),
         export_envelope_scope='placeholder needed by map document schema; not measured robot clearance',
         source_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in
             (a.teleop,a.recorded_capture/'scans.json',a.recorded_capture/'report.json',
              ROOT/'config/home_assistant/s4_base.nominal.json',ROOT/'config/home_assistant/lidar_mount.review.json',
-             ROOT/'ros2_ws/src/home_robot_tasks/config/slam.replay.yaml')})
+             ROOT/'ros2_ws/src/home_robot_tasks/config'/('localization.replay.yaml' if localize else 'slam.replay.yaml'))})
     def until(predicate,seconds):
         end=time.monotonic()+seconds
         while not predicate():
@@ -83,15 +88,16 @@ def recorded_replay(a):
     def launch(index):
         nonlocal proc,namespace,active
         namespace='/offline_s4_recorded' if index==1 else '/offline_s4_recorded_reload'
-        log=(a.output/f'slam-{index}.log').open('w');logs.append(log)
-        executable=Path(get_package_prefix('slam_toolbox'))/'lib/slam_toolbox/async_slam_toolbox_node'
+        log=(a.output/f'{"amcl" if localize else "slam"}-{index}.log').open('w');logs.append(log)
+        package='nav2_amcl' if localize else 'slam_toolbox'
+        executable=Path(get_package_prefix(package))/'lib'/package/('amcl' if localize else 'async_slam_toolbox_node')
         proc=subprocess.Popen([str(executable),'--ros-args','-r','__ns:='+namespace,
             '-r','scan:=/offline_s4_recorded/scan','-r','/map:=/offline_s4_recorded/map',
             '-r','/map_metadata:=/offline_s4_recorded/map_metadata','--params-file',
-            str(ROOT/'ros2_ws/src/home_robot_tasks/config/slam.replay.yaml')],stdout=log,stderr=subprocess.STDOUT)
+            str(ROOT/'ros2_ws/src/home_robot_tasks/config'/('localization.replay.yaml' if localize else 'slam.replay.yaml'))],stdout=log,stderr=subprocess.STDOUT)
         for transition in (1,3):
             req=ChangeState.Request();req.transition.id=transition
-            if not service(ChangeState,'slam_toolbox/change_state',req).success:raise RuntimeError('lifecycle failed')
+            if not service(ChangeState,node_name+'/change_state',req).success:raise RuntimeError('lifecycle failed')
         active=True
     def stop():
         nonlocal proc,active
@@ -99,7 +105,7 @@ def recorded_replay(a):
         if active and proc.poll() is None:
             for transition in (4,2):
                 req=ChangeState.Request();req.transition.id=transition
-                if not service(ChangeState,'slam_toolbox/change_state',req).success:raise RuntimeError('cleanup failed')
+                if not service(ChangeState,node_name+'/change_state',req).success:raise RuntimeError('cleanup failed')
             active=False
         proc.send_signal(signal.SIGINT)
         try:proc.wait(timeout=10)
@@ -108,9 +114,28 @@ def recorded_replay(a):
     try:
         launch(1)
         from rcl_interfaces.srv import GetParameters
-        parameters=service(GetParameters,'slam_toolbox/get_parameters',GetParameters.Request(names=['check_min_dist_and_heading_precisely']))
-        report['rotation_scan_selection_enabled']=bool(parameters.values[0].bool_value)
-        if not report['rotation_scan_selection_enabled']:raise RuntimeError('rotation scan selection not enabled')
+        if localize:
+            parameters=service(GetParameters,'amcl/get_parameters',GetParameters.Request(names=['robot_model_type','alpha1','alpha2','alpha3','alpha4','alpha5']))
+            report['motion_model']=parameters.values[0].string_value
+            report['odometry_noise_alphas']=[p.double_value for p in parameters.values[1:]]
+            if report['motion_model']!='nav2_amcl::OmniMotionModel':raise RuntimeError('omnidirectional localization required')
+            raw=a.localization_map.read_bytes();report['localization_map_sha256']=hashlib.sha256(raw).hexdigest()
+            document=json.loads(raw);grid=OccupancyGrid();grid.header.frame_id='map';grid.header.stamp=node.get_clock().now().to_msg()
+            grid.info.width=document['width'];grid.info.height=document['height'];grid.info.resolution=document['resolution']
+            grid.info.origin.position.x=document['origin'][0];grid.info.origin.position.y=document['origin'][1];grid.info.origin.orientation.w=1.
+            grid.data=document['data'];map_pub.publish(grid)
+            until(lambda:initial_pub.get_subscription_count()>0,10)
+            deadline=time.monotonic()+.5;until(lambda:time.monotonic()>deadline,2)
+            initial=PoseWithCovarianceStamped();initial.header.frame_id='map';initial.header.stamp=node.get_clock().now().to_msg()
+            initial.pose.pose.position.x=a.initial_pose[0];initial.pose.pose.position.y=a.initial_pose[1]
+            initial.pose.pose.orientation.z=math.sin(a.initial_pose[2]/2);initial.pose.pose.orientation.w=math.cos(a.initial_pose[2]/2)
+            initial.pose.covariance[0]=initial.pose.covariance[7]=.2**2;initial.pose.covariance[35]=math.radians(15)**2
+            initial_pub.publish(initial);report['initial_pose_xy_yaw']=a.initial_pose
+            report['same_capture_map_replay_not_independent_accuracy']=True
+        else:
+            parameters=service(GetParameters,'slam_toolbox/get_parameters',GetParameters.Request(names=['check_min_dist_and_heading_precisely']))
+            report['rotation_scan_selection_enabled']=bool(parameters.values[0].bool_value)
+            if not report['rotation_scan_selection_enabled']:raise RuntimeError('rotation scan selection not enabled')
         clock_start=node.get_clock().now().nanoseconds/1e9+.5;wall_start=time.monotonic()+.5
         source_start=odom[0,0];i=j=0
         def stamp(t):
@@ -129,6 +154,20 @@ def recorded_replay(a):
                 msg.range_min=.12;msg.range_max=3.5;msg.scan_time=s['scan_time'];msg.time_increment=s['time_increment']
                 msg.ranges=[float('inf') if v is None else float(v) for v in s['ranges']];pub.publish(msg);j+=1
             rclpy.spin_once(node,timeout_sec=.005)
+        if localize:
+            until(lambda:len(poses)>=3,10)
+            stop()
+            reference=json.loads((a.localization_map.parent/'slam-poses.json').read_text())
+            reference_report=json.loads((a.localization_map.parent/'report.json').read_text())
+            from home_robot_tasks.s4_recorded_mapping import localization_comparison
+            comparison=localization_comparison(poses,clock_start-source_start,reference,reference_report['replay_clock_offset_s'])
+            report.update(comparison,scans_published=j,pose_messages=len(poses),
+                passed=all(c==0 for c in report['process_exit_codes']) and comparison['tracking_sanity_passed'],
+                replay_clock_offset_s=clock_start-source_start,
+                limitations=['same recorded session used to build map and replay localization; not independent accuracy',
+                    'initial pose hypothesis provided, not global localization from an unknown room',
+                    'no live device, controller, motor commands, or automatic navigation authorization'])
+            print(json.dumps(report));return report
         until(lambda:len(maps)>=2,10)
         # Allow processing to finish before serializing the graph.
         deadline=time.monotonic()+2
@@ -177,7 +216,7 @@ def recorded_replay(a):
                 report['cleanup_error']=str(error);report['passed']=False
                 if proc is not None and proc.poll() is None:proc.kill();proc.wait()
         for f in logs:f.close()
-        (a.output/'slam-poses.json').write_text(json.dumps(poses))
+        (a.output/('amcl-poses.json' if localize else 'slam-poses.json')).write_text(json.dumps(poses))
         (a.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
         node.destroy_node();rclpy.shutdown()
     print(json.dumps(report))
@@ -190,7 +229,11 @@ def main():
     p.add_argument('--reverse-ray-timing',action='store_true',help='exercise signed ray-time metadata used by the LDS driver')
     p.add_argument('--recorded-capture',type=Path)
     p.add_argument('--teleop',type=Path)
+    p.add_argument('--localization-map',type=Path,help='saved occupancy.json with report.json/slam-poses.json from the same capture: compare AMCL against SLAM')
+    p.add_argument('--initial-pose',nargs=3,type=float,default=[0.,0.,0.],metavar=('X','Y','YAW'))
     a=p.parse_args();a.output=a.output.resolve()
+    if a.localization_map and not a.recorded_capture:p.error('--localization-map requires --recorded-capture')
+    if not all(math.isfinite(v) for v in a.initial_pose):p.error('finite initial pose required')
     if a.recorded_capture:
         if not a.teleop:p.error('--recorded-capture requires --teleop')
         return 0 if recorded_replay(a)["passed"] else 1

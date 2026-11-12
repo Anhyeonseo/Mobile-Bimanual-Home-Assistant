@@ -51,3 +51,18 @@ def test_encoder_uses_positions_even_when_reported_speed_has_stationary_bias():
     assert np.max(np.abs(np.diff(a[:,3])))<.02
     bad=copy.deepcopy(records);bad[-1]['error']='lost hold'
     with pytest.raises(ValueError):encoder_path(bad,geometry)
+
+
+def test_localization_comparison_handles_angle_wrap_and_clock_offsets():
+    from home_robot_tasks.s4_recorded_mapping import localization_comparison
+    reference=[dict(stamp=100+t,xy_yaw=[.1*t,0.,3.1+.02*t]) for t in (1,2,3,4)]
+    actual=[dict(stamp=200+t,xy_yaw=[.1*t+.01,0.,3.1+.02*t-2*math.pi]) for t in (1,2,3,4)]
+    result=localization_comparison(actual,200,reference,100)
+    assert result['tracking_sanity_passed']
+    assert result['final_slam_difference_m']==pytest.approx(.01)
+    assert result['final_slam_difference_deg']==pytest.approx(0,abs=1e-10)
+    assert not result['physical_localization_qualified']
+    assert not result['encoder_agreement_required']
+    for row in actual:row['xy_yaw'][0]+=.5
+    assert not localization_comparison(actual,200,reference,100)['tracking_sanity_passed']
+    with pytest.raises(ValueError,match='shared'):localization_comparison(actual,300,reference,100)

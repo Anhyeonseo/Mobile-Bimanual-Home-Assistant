@@ -182,3 +182,23 @@ def review_recorded(root,teleop,capture,output):
     for ax in axes:ax.grid(alpha=.2)
     fig.tight_layout();fig.savefig(output/'movement-review.png',dpi=160);plt.close(fig)
     return result
+
+
+def localization_comparison(poses,clock_offset,reference,reference_offset):
+    """Replay consistency against SLAM, never surveyed physical accuracy."""
+    rows=np.array([[p['stamp']-reference_offset,*p['xy_yaw']] for p in reference])
+    rows[:,3]=np.unwrap(rows[:,3])
+    actual=np.array([[p['stamp']-clock_offset,*p['xy_yaw']] for p in poses])
+    actual=actual[(actual[:,0]>=rows[0,0])&(actual[:,0]<=rows[-1,0])]
+    if len(actual)<3:raise ValueError('insufficient shared localization timeline')
+    expected=interpolate(rows,actual[:,0]);errors=actual[:,1:]-expected
+    errors[:,2]=(errors[:,2]+math.pi)%math.tau-math.pi
+    xy=np.linalg.norm(errors[:,:2],axis=1);yaw=abs(errors[:,2]);tail=actual[:,0]>=actual[-1,0]-5
+    # Diagnostic only. These thresholds never authorize motion and do not
+    # compare AMCL against encoder position or demand agreement with it.
+    return dict(compared_pose_messages=len(actual),
+        final_slam_difference_m=float(xy[-1]),final_slam_difference_deg=float(np.rad2deg(yaw[-1])),
+        last_5s_median_slam_difference_m=float(np.median(xy[tail])),
+        last_5s_median_slam_difference_deg=float(np.rad2deg(np.median(yaw[tail]))),
+        tracking_sanity_passed=bool(np.median(xy[tail])<.15 and np.median(yaw[tail])<.2),
+        physical_localization_qualified=False,encoder_agreement_required=False)

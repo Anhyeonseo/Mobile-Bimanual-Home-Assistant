@@ -84,12 +84,14 @@
     "movement": "output/s4-recorded-mapping-final-20261112/report.json",
     "slam": "output/s4-recorded-mapping-20261112/s4-recorded-slam-20261112-03/report.json",
     "quality": "output/s4-recorded-map-quality-final-20261112/report.json",
-    "figure": "output/s4-recorded-map-quality-final-20261112/map-review.png"
+    "figure": "output/s4-recorded-map-quality-final-20261112/map-review.png",
+    "localization": "output/s4-recorded-mapping-20261112/s4-recorded-amcl-20261112-01/report.json"
   },
   "next_operator_step": {
-    "purpose": "longer translations and repeatable starting pose before metric calibration and room mapping acceptance",
-    "route": "mark start; 0.5–1.0 m forward/back and sideways within cable slack; slow rotations both ways; return near start",
-    "record": "actual marked travel distance; obstacles/abnormalities; final orientation; same full sensor archive",
+    "purpose": "independent new room capture to assess lidar/map localization stability and return-to-mark repeatability; encoder disagreement is diagnostic, not an entry gate",
+    "route": "mark start position and heading; translate 0.5–1.0 m where space/cable slack permit, including lateral motion; turn slowly both ways; return near the mark",
+    "record": "same full sensor archive, start/end marks and heading, any jumps, map overlap and observed final offset; actual marked distance if available",
+    "evaluation": "Replay the new session against the saved map; inspect stable wall alignment and localization continuity. Independently measure final position/heading before claiming physical accuracy. Map/odom disagreement alone does not fail the trial.",
     "start_requires": "fresh supports/space/cable clearance and explicit operator teleop start",
     "motor_power_cycle_required": false
   },
@@ -102,5 +104,54 @@
   ],
   "rotation_option_verified_at_runtime": true,
   "synthetic_slam_depth_checkpoint_regression_passed": true,
-  "synthetic_regression_evidence": "output/s4-recorded-mapping-20261112/s4-rotation-setting-regression-20261112/report.json"
+  "synthetic_regression_evidence": "output/s4-recorded-mapping-20261112/s4-rotation-setting-regression-20261112/report.json",
+  "localization_policy": {
+    "global_pose_reference": "lidar/map matching: SLAM during mapping, AMCL against a saved map",
+    "continuous_local_prediction": "nominal wheel encoder odom; lidar corrects map-to-odom",
+    "encoder_agreement_required_for_next_mapping_trial": false,
+    "wheel_geometry_and_braking_validation_still_required": true,
+    "disagreement_4_9cm_12deg_is": "difference between estimates, not surveyed error or an adopted correction",
+    "live_localization_commissioned": false,
+    "live_navigation_authorized": false,
+    "fault_handling": "Keep fresh scan/TF, verified stop and arm/lift hold checks; do not substitute encoder-only autonomous navigation after localization loss."
+  },
+  "recorded_saved_map_localization": {
+    "mode": "real_amcl_recorded_scan_nominal_encoder_tf",
+    "passed": true,
+    "hardware_commands": 0,
+    "scans_published": 181,
+    "pose_messages": 69,
+    "motion_model": "nav2_amcl::OmniMotionModel",
+    "odometry_noise_alphas": [
+      0.2,
+      0.2,
+      0.2,
+      0.2,
+      0.2
+    ],
+    "initial_pose_xy_yaw": [
+      0.15,
+      -0.1,
+      0.1745329252
+    ],
+    "localization_map_sha256": "583c841eaac59e66908a41ca3a779bb8a0f2cd1c2b27b1c56c2865b045654504",
+    "compared_pose_messages": 69,
+    "final_slam_difference_m": 0.02408140497752063,
+    "final_slam_difference_deg": 3.3497696468771117,
+    "last_5s_median_slam_difference_m": 0.027804176944494576,
+    "last_5s_median_slam_difference_deg": 3.316521342199345,
+    "tracking_sanity_passed": true,
+    "encoder_agreement_required": false,
+    "same_capture_map_replay_not_independent_accuracy": true,
+    "physical_localization_qualified": false,
+    "process_exit_codes": [
+      0
+    ],
+    "limitations": [
+      "same recorded session used to build map and replay localization; not independent accuracy",
+      "initial pose hypothesis provided, not global localization from an unknown room",
+      "no live device, controller, motor commands, or automatic navigation authorization"
+    ],
+    "report_sha256": "df87bbe5334afeb5a6ec4e9e1d28b0232ad9fd86eaff3041d15936b78627dbc0"
+  }
 }

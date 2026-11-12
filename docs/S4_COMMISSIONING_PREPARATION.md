@@ -388,3 +388,58 @@ https://github.com/SteveMacenski/slam_toolbox/blob/jazzy/src/slam_toolbox_common
 실제 ROS 파라미터로 true인 것을 확인했고, 두 SLAM 프로세스 정상 종료와 동일 지도
 복원을 재확인했다. 기존 합성 스캔의 음수 광선 시각·실제 SLAM·높이 지도·체크포인트·
 지도 재발행 검사도 통과했다. 합성 높이 지도 통과를 실물 높이 지도 수락과 혼동하지 않는다.
+
+## 라이다 중심 위치 추정과 저장 지도 재생 검증 (2026-11-12)
+
+위치 추정의 기준은 지도와 라이다의 정합으로 잡는다. 지도 작성 중에는 SLAM이,
+저장된 지도를 사용할 때에는 AMCL이 `map → odom`을 보정한다. 바퀴 인코더는
+`odom → base_link`의 연속적인 단기 움직임 예측에 유지한다. 기존 4.95cm·12°는
+두 추정의 차이이며, 실측 오차나 그대로 적용할 보정값이 아니다. 인코더와의 일치나
+완전한 바퀴 보정을 다음 수동 지도 시험의 선행 조건으로 요구하지 않는다.
+바퀴 기하·제동·정지·팔/리프트 유지 검증은 자율 주행 수락에 계속 필요하다.
+
+기존 `tools/run/check_slam_replay.py`에 저장 지도 AMCL 비교를 추가했다.
+`config/localization.replay.yaml`은 전방향 바퀴용 `OmniMotionModel`을 사용한다.
+alpha1~5의 0.2는 초기 잡음 가정이며 실측 보정값이나 센서 간 신뢰도 비율이 아니다.
+합성 시험용 0.01 값을 실물에 그대로 채택하지 않는다. 설정 파일은
+`ros2_ws/src/home_robot_tasks/config/`에 있으며 아직 실시간 주행 서비스에 활성화하지 않았다.
+
+실제 기록 06과 그 기록으로 만든 지도 03으로 젯슨의 격리된 ROS 영역에서 AMCL을
+실행했다. 시작 추정은 X +15cm, Y -10cm, 방향 +10°로 일부러 어긋나게 주었다.
+실제 스캔 181개와 기록된 인코더를 재생해 위치 출력 69개를 얻었고, 프로세스는
+정상 종료했다. 마지막 SLAM 대비 차이는 2.41cm·3.35°, 마지막 5초의 중앙값은
+2.78cm·3.32°였다. 설정된 전방향 모델과 잡음 값도 실행 중 조회해 확인했다.
+
+이는 **같은 자료로 만든 지도에 대한 재생 일관성 검사**다. 실제 위치 정확도,
+새 기록에서의 재위치 추정, 처음 보는 방에서의 전역 위치 탐색을 입증하지 않는다.
+검사의 15cm·0.2rad 중앙값 기준은 재생 이상을 찾는 진단 기준이며 주행 허가 기준이
+아니다. 인코더와 일치하는지는 이 검사 통과 조건에 포함하지 않는다.
+원본 결과는 `output/s4-recorded-mapping-20261112/s4-recorded-amcl-20261112-01/`,
+추적 가능한 요약과 원본 보고서 해시는 `config/home_assistant/s4_recorded_mapping.observed.json`에 있다.
+센서 장치를 열거나 제어기·모터 명령을 보내지 않았다.
+
+재현할 때에는 기존 Jazzy 환경을 활성화하고, 다른 로봇 프로세스와 격리된
+`ROS_DOMAIN_ID` 및 `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`를 지정한다.
+다음 경로는 보존된 원본 디렉터리로 대체하고 출력은 새 디렉터리를 사용한다.
+
+```sh
+python3 tools/run/check_slam_replay.py \
+  --recorded-capture CAPTURE_06 --teleop TELEOP_06.jsonl \
+  --localization-map SLAM_03/occupancy.json \
+  --initial-pose 0.15 -0.1 0.1745329252 --output NEW_OUTPUT
+```
+
+이 비교 모드는 지도와 같은 기록의 `report.json` 및 `slam-poses.json`을 참조한다.
+새로운 독립 기록의 실물 수락에는 이 동일 기록 비교 점수를 대신 쓰지 않는다.
+
+다음 사용자 조작은 시작 위치·방향을 표시하고, 케이블과 공간이 허용하는 범위에서
+0.5~1m 이동·옆이동·느린 양방향 회전 후 시작 표시 근처로 돌아오는 수동 조종이다.
+거리를 맞추기 위한 반복 미세 시험 대신 한 번의 새 전체 센서 기록을 얻는다.
+저장 지도와 새 관측의 벽 정합, 위치 튐, 시작점 복귀 및 실제 표시와의 차이를 확인한다.
+실측 기준 없이 라이다 자체 출력을 정답으로 간주하지 않는다. 라이다/좌표 갱신이
+끊기거나 위치를 잃으면 기존 정지·유지 처리를 지키며 인코더만으로 자율 주행을
+계속하지 않는다. 이동한 가구는 위치 추정 실패와 구별한 뒤 높이 장애물/지도 갱신으로
+처리해야 하며, 이 재생 통과가 가구 변화 처리나 semantic mapping 수락을 뜻하지 않는다.
+
+좌표 역할 참고: [ROS REP-105](https://github.com/ros-infrastructure/rep/blob/master/rep-0105.rst).
+모델과 파라미터 참고: [Nav2 AMCL 문서](https://docs.nav2.org/rolling/configuration_and_development/configuration_guide/others/configuring_amcl/).
