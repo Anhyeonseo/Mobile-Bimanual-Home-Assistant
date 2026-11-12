@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "local_date": "2026-11-12",
+  "status": "right_response_restored_existing_teleop_stationary_criteria_reused",
+  "inspection_release": "s4-inspection-4b60ea01f357",
+  "firmware_sha256": "c58fc72adfe972717025dd69f6be5fc192ce8253150d4700393f69de4855efd7",
+  "inspection_firmware_installed": true,
+  "motor_write_commands": 0,
+  "hardware_motion_enabled": false,
+  "physical_s4_completed": false,
+  "backup": {
+    "bytes": 524288,
+    "sha256": "420c32a6605f5c78759cd292dd89653f1583f8266d571b159a9bf96a0f0c2561",
+    "boot_journal_bytes": 8192,
+    "boot_journal_preserved": true,
+    "raw_backups_remain_on_jetson": true
+  },
+  "installed_info": {
+    "firmware": "mobile-bus-inspection-v2",
+    "host_baud": 921600,
+    "servo_baud": 1000000,
+    "reference_id": 1,
+    "motion_enabled": false,
+    "wheel_samples_supported": true,
+    "device_inventory_supported": true,
+    "lift_read_supported": true,
+    "ids": [
+      7,
+      8,
+      9,
+      10
+    ]
+  },
+  "right_arm": {
+    "initial_install_query": "all six RX_TIMEOUT",
+    "recheck_complete_rounds": 3,
+    "all_16_complete": true,
+    "soak": {
+      "cycles": 154,
+      "device_samples": 2464,
+      "failures": [],
+      "motor_write_commands": 0,
+      "motion_authorized": false,
+      "passed": true
+    },
+    "calibration_offsets_unchanged": true,
+    "torque_off": true,
+    "response_restored": true,
+    "cause_confirmed": false,
+    "operator_report": "No change other than earlier STM reset; nothing done between failed and successful query",
+    "not_claimed": "No repair of underlying intermittent communication cause or S3 in-motion reader qualification"
+  },
+  "wheel8": {
+    "before_reposition": {
+      "samples": 305,
+      "nonzero_speed_samples": 20,
+      "speed_words": {
+        "0": 285,
+        "50": 10,
+        "32818": 10
+      },
+      "position_min": 1671,
+      "position_max": 1672,
+      "torque_values": [
+        0
+      ],
+      "goal_speed_values": [
+        0
+      ],
+      "load_values": [
+        0
+      ],
+      "current_values": [
+        0
+      ],
+      "moving_values": [
+        0,
+        1
+      ],
+      "raw_speed_bytes": {
+        "0000": 285,
+        "3200": 10,
+        "3280": 10
+      },
+      "all_complete": true
+    },
+    "repeat_before_reposition": {
+      "samples": 306,
+      "position_min": 1671,
+      "position_max": 1672,
+      "end_minus_start_counts": 1,
+      "nonzero_speed_samples": 67,
+      "speed_words": {
+        "0": 239,
+        "50": 33,
+        "32818": 34
+      },
+      "torque_values": [
+        0
+      ],
+      "goal_speed_values": [
+        0
+      ],
+      "current_values": [
+        0
+      ],
+      "load_values": [
+        0
+      ],
+      "all_complete": true
+    },
+    "after_reposition": {
+      "samples": 305,
+      "positions": {
+        "2126": 269,
+        "2125": 36
+      },
+      "speed_words": {
+        "0": 251,
+        "50": 27,
+        "32818": 27
+      },
+      "torques": [
+        0
+      ],
+      "currents": [
+        0
+      ],
+      "all_complete": true
+    },
+    "raw_register_speed_bytes": [
+      "0000",
+      "3200",
+      "3280"
+    ],
+    "decoded_signed_values": [
+      0,
+      50,
+      -50
+    ],
+    "host_decode_error_observed": false,
+    "controller_reset_did_not_remove_symptom": true,
+    "different_encoder_location_did_not_remove_symptom": true,
+    "root_cause_confirmed": false,
+    "working_interpretation": "speed report near rest varies with a one-count encoder band; sensor quantization or actual sub-count motion cannot be separated by this observation",
+    "operator_stationarity_visual_confirmation": "unable to tell; movement might be too small to see",
+    "raw_values_zeroed_or_stop_gate_relaxed": false,
+    "classification": "within existing v7 stationary criteria; not a new blocking fault",
+    "existing_stationary_criteria": {
+      "firmware": "mobile-base-hold-teleop-v7",
+      "goal_speed_raw": 0,
+      "torque_raw": 0,
+      "speed_magnitude_max_raw": 50,
+      "continuous_ms_min": 400,
+      "encoder_span_max_counts": 8,
+      "observed_encoder_span_counts": 1,
+      "threshold_changed": false,
+      "raw_speed_zeroed": false,
+      "source_files": {
+        "firmware/stm32_g474_single_arm/Core/Src/mobile_base_teleop_app.c": "17a6e420f15045eb59c8e819ad83a7315ef5daaf95ae8ec9c8c3494ee3f5e5d2",
+        "firmware/stm32_g474_single_arm/Core/Src/wheel_hold_setup.c": "441937e9b30303c10765f9cb89fd926fb6f455c2daf29a37898eeaa047296999"
+      }
+    }
+  },
+  "manual_motion": {
+    "operator_report": "forward/back then slightly forward; stopped",
+    "requested_displacement_m": 0.05,
+    "displacement_measured": false,
+    "recorded_samples": 1938,
+    "scale_review": {
+      "mode": "encoder_feedback_scale_review",
+      "hardware_enabled": false,
+      "motion_authorized": false,
+      "command_speed_gain_qualified": false,
+      "floor_travel_scale_qualified": false,
+      "wheels": [
+        {
+          "motor_id": 7,
+          "usable_intervals": 66,
+          "encoder_travel_counts": [
+            1333,
+            0
+          ],
+          "candidate_available": false,
+          "raw_per_encoder_rad_s": null,
+          "reported_speed_sign_vs_encoder": null,
+          "relative_median_deviation": 0.05167137705876618,
+          "reason": "insufficient bidirectional movement or inconsistent speed"
+        },
+        {
+          "motor_id": 8,
+          "usable_intervals": 17,
+          "encoder_travel_counts": [
+            0,
+            446
+          ],
+          "candidate_available": false,
+          "raw_per_encoder_rad_s": null,
+          "reported_speed_sign_vs_encoder": null,
+          "relative_median_deviation": 0.07138490308195791,
+          "reason": "insufficient bidirectional movement or inconsistent speed"
+        },
+        {
+          "motor_id": 9,
+          "usable_intervals": 0,
+          "encoder_travel_counts": [
+            0,
+            0
+          ],
+          "candidate_available": false,
+          "raw_per_encoder_rad_s": null,
+          "reported_speed_sign_vs_encoder": null,
+          "relative_median_deviation": null,
+          "reason": "insufficient bidirectional movement or inconsistent speed"
+        }
+      ],
+      "all_candidates_available": false
+    },
+    "full_bidirectional_calibration_accepted": false,
+    "note": "7/8 mainly one direction of usable intervals; 9 lacks qualifying rotation. Do not promote request length to measured odometry."
+  },
+  "tests_passed": 74,
+  "remaining": [
+    "reuse existing teleop setup and fresh arm/lift hold checks",
+    "short operator-controlled floor movement with LDS-01 and command/encoder comparison",
+    "measure command gain and floor travel/braking without mandatory raised-wheel test",
+    "monitor right-arm recurrence before motion",
+    "common controller integration and physical mapping/resume"
+  ],
+  "evidence_base": "output/s4-response-review-20261112/jetson-results",
+  "evidence_sha256": {
+    "wheel8-after-reposition.jsonl": "7adfd33108b932c512eaf4308e8c8f3af8862af2f446126afee0ce7323697f6f",
+    "wheel8-recheck-summary.json": "f618d3edabea8d48fbc0b3fd85933a38574da0d063dde0f66ed3b079c531225e",
+    "wheel8-after-summary.json": "63ffdb5d08d4456e04c946f2c2bde8f1b8707b21e3e55585965ff0e6b27cefe7",
+    "wheel8-inventory.jsonl": "ab8c873f4bc49a8d76b48596c870c8d890bab9e4111c21c48dc64c9e70c74cec",
+    "inventory-first.json": "464c83e9366ab4ed5aa606e7ebb884a4055df6e9195d7f5c5c19ee163e145208",
+    "manual-finish-marker.json": "37527e32ee4a4fa85b081c8dd58a8d14daf1e42ac85e051473ea007234243071",
+    "all-devices-soak-summary.json": "971b3978379b85744ac0c85bdccf19ea006ed6d19854c30ebdbb279065e65926",
+    "wheel-manual-scale-review.json": "04efa2899a024481f17c601a8f5f82fd5fb62a731fd8ffdcf3fdb2961a044b4c",
+    "inventory-recheck-1.json": "28e2b51d8283e36f64f19e805f3ab7fc04f6a2c2cf77f990669c0fd811df5e14",
+    "wheel8-recheck.jsonl": "7d93a6c740aa5a887c3369a0c497d5e7d0fc82a5678fdcca506e52dc085a8903",
+    "wheel8-recheck-result.json": "c06050a708273ee239f69d7fd4787e99407e022c833eeaafb685703be48f0d88",
+    "wheel-manual-result.json": "8246d3e6c7bf23f1522a56a8722a8b12b0eb6de2dc70b82bb239ae080cab0047",
+    "wheel8-result.json": "408f51731a6754cba2f91bbdd7b631dbe3b2a4d803e85a79589d7523d1bed177",
+    "inventory-recheck-2.json": "5d589dc5400fdd09ffac06231db931be119d022fba6f5176f21f149a0359cc7a",
+    "wheel-manual-forward-back.jsonl": "2c707172ed746d3d89585cdf82c61913237bd8e37c9aed5920c2ba24aabe883c",
+    "all-devices-soak.jsonl": "6ff3a90a163be4cf821b6bf47160acde6fa5857324e9178c3411c6db888aeb42",
+    "wheel8-summary.json": "0e29cfa02f66fd0284c5ba70d2ef713447575555c250a8f38b410f044724bd16",
+    "inventory-recheck-3.json": "134ada18aad926d6b3fa0b480d2c86da0e3f42e2ff9cc40061617c7bc6204b40",
+    "wheel8-after-result.json": "408f51731a6754cba2f91bbdd7b631dbe3b2a4d803e85a79589d7523d1bed177"
+  },
+  "raised_wheel_prerequisite_withdrawn": true,
+  "next_step": {
+    "method": "reuse established floor teleop plus LDS-01 and command/encoder observations",
+    "prior_direction_and_layout": "reuse prior operator-confirmed teleop and existing motion patterns",
+    "manual_raised_wheel_measurement_required": false,
+    "speed_command_gain_and_floor_displacement_still_require_evidence": true,
+    "controller_now": "read-only inspection; no teleop transition performed in this diagnosis",
+    "before_motion": "fresh arm/lift hold setup and existing wheel stationary check; single serial owner"
+  }
+}

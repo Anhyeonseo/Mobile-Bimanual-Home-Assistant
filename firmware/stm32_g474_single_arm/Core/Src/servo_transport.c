@@ -315,8 +315,14 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
     /* Maintenance image: every HAL transmit path is READ-only, even if a
      * caller accidentally obtains a normal service lease. No broadcasts,
      * arm writes, torque changes, or arbitrary register access.
-     * ID 1 identity alone is allowed as a known left-arm reference. */
-    if (length != 8 ||
+     * Existing fixed inventory blocks also permit arm state diagnosis. */
+    bool inventory_read = length == 8 && data[2]>=1 && data[2]<=ACTUATOR_LIFT_ID &&
+        ((data[5]==0 && data[6]==7) || (data[5]==9 && data[6]==4) ||
+         (data[5]==31 && data[6]==3) || (data[5]==40 && data[6]==10) ||
+         (data[5]==55 && data[6]==16));
+    extern UART_HandleTypeDef huart4;
+    if (uart==&huart4 && (!inventory_read || data[2]>6)) return false;
+    if (!inventory_read && (length != 8 ||
         !((data[2] >= ACTUATOR_WHEEL_0_ID && data[2] <= ACTUATOR_LIFT_ID) ||
           (data[2] == 1 && data[5] == 3 && data[6] == 4)) ||
         !((data[5] == 3 && data[6] == 4) ||
@@ -324,7 +330,7 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
           (data[5] == 40 && data[6] == 1) ||
           (data[5] == 56 && data[6] == 2) ||
           (data[2] >= ACTUATOR_WHEEL_0_ID && data[2] <= ACTUATOR_WHEEL_2_ID &&
-           data[5] == 56 && data[6] == 4))) return false;
+           data[5] == 56 && data[6] == 4)))) return false;
 #else
     if (!bus->read_only) return true;
 #endif

@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ros2_ws/src/so101_arm_bridge"))
 from so101_arm_bridge.backend_lease import acquire_backend_lease
 from so101_arm_bridge.serial_port import open_exclusive_serial
+from so101_arm_bridge.device_inventory import decode_inventory, inventory_request, EXPECTED_DEVICES
 
 
 def receive(port, deadline):
@@ -109,17 +110,63 @@ def capture_wheels(port, seconds, output):
                 speed_scale_calibrated=False,output='timestamped raw samples; no automatic calibration')
 
 
+def device_inventory(port, info, bus, motor):
+    """Reuse the existing fixed inventory decoder and preserve its raw payload."""
+    inventory_request(bus,motor)
+    if (info.get('firmware')!='mobile-bus-inspection-v2' or
+            info.get('device_inventory_supported') is not True or info.get('motion_enabled') is not False):
+        raise ValueError('read-only device inventory capability required')
+    command=f'DEVICE {bus} {motor}\n'.encode('ascii')
+    started=time.monotonic()
+    if port.write(command)!=len(command):raise RuntimeError('partial DEVICE transmission; no retry')
+    raw=receive(port,started+2).get('inventory_hex')
+    if not isinstance(raw,str) or len(raw)!=112:raise ValueError('invalid inventory payload')
+    row=decode_inventory(bytes.fromhex(raw),bus,motor)
+    return dict(**row,raw_payload_hex=raw,host_started_s=started,host_received_s=time.monotonic())
+
+
+def inspect_devices(port, device=None, seconds=None, output=None):
+    report=probe(port)
+    if seconds is None:
+        rows=[device_inventory(port,report['info'],*key) for key in
+              ([tuple(device)] if device is not None else EXPECTED_DEVICES)]
+        return dict(**report,devices=rows,all_reads_ok=all(r['complete'] for r in rows))
+    if device is None or output is None or not 1<=seconds<=60:
+        raise ValueError('device capture requires device, output and 1..60 seconds')
+    output.write(json.dumps({'inventory':report})+'\n');output.flush()
+    deadline=time.monotonic()+seconds;count=0;prior=None
+    while time.monotonic()<deadline:
+        row=device_inventory(port,report['info'],*device)
+        output.write(json.dumps(row)+'\n');output.flush()
+        if not row['complete']:raise ValueError('device inventory incomplete; raw result preserved')
+        tick=row['sample_started_tick_ms']
+        if prior is not None and not 0<(tick-prior)%2**32<=500:
+            raise ValueError('device capture gap or reset; do not join epochs')
+        prior=tick;count+=1;time.sleep(.02)
+    return dict(samples=count,motor_write_commands=0,motion_authorized=False)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", required=True)
     parser.add_argument("--scan", action="store_true", help="Explicit servo READs; support lift before motor power-on")
+    parser.add_argument('--inventory',action='store_true',help='read all 16 devices using fixed inventory blocks')
+    parser.add_argument('--device',nargs=2,type=int,metavar=('BUS','ID'),help='one fixed device inventory: bus 0/1')
+    parser.add_argument('--sample-device-seconds',type=float,help='repeat --device for 1..60 seconds, preserving raw payloads')
     parser.add_argument('--sample-wheels-seconds',type=float,help='read-only torque-OFF wheel capture, 1..60 seconds')
     parser.add_argument('--output',type=Path,help='new JSONL file required for wheel capture')
     args = parser.parse_args()
     if args.sample_wheels_seconds is not None and (not 1<=args.sample_wheels_seconds<=60 or args.output is None):
         parser.error('wheel capture requires 1..60 seconds and a new --output file')
-    if args.output is not None and args.sample_wheels_seconds is None:
-        parser.error('--output requires --sample-wheels-seconds')
+    if sum((args.scan,args.inventory,args.device is not None,args.sample_wheels_seconds is not None))>1:
+        parser.error('select only one inspection mode')
+    if args.device is not None:
+        try:inventory_request(*args.device)
+        except ValueError as error:parser.error(str(error))
+    if args.sample_device_seconds is not None and (args.device is None or args.output is None or not 1<=args.sample_device_seconds<=60):
+        parser.error('device capture requires --device, --output and 1..60 seconds')
+    if args.output is not None and args.sample_wheels_seconds is None and args.sample_device_seconds is None:
+        parser.error('--output requires a timed capture')
     try:
         import serial
         from contextlib import nullcontext
@@ -127,7 +174,9 @@ def main():
         with capture_output as output:
             with acquire_backend_lease("stm32", 0):
                 with open_exclusive_serial(serial, args.port, 921600, .2) as port:
-                    result = (capture_wheels(port,args.sample_wheels_seconds,output)
+                    result = (inspect_devices(port,args.device,args.sample_device_seconds,output)
+                              if args.inventory or args.device is not None else
+                              capture_wheels(port,args.sample_wheels_seconds,output)
                               if output else probe(port, args.scan))
         print(json.dumps(result, indent=2))
         return 0 if result.get("all_reads_ok", True) else 2

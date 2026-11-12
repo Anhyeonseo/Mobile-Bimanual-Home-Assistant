@@ -151,7 +151,7 @@
     "profile": "config/home_assistant/s4_commissioning.pending.json",
     "documentation": "docs/S4_COMMISSIONING_PREPARATION.md",
     "historical_development_decisions": "S1/S2 observations retained below; not current controller state",
-    "inspection_evidence": "config/home_assistant/s4_controller.inspected.json"
+    "inspection_evidence": "config/home_assistant/s4_response_diagnostics.observed.json"
   },
   "s4_living_map": {
     "design": "docs/S4_LIVING_MAP_DESIGN.md",

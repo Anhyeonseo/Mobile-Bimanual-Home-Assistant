@@ -20,11 +20,11 @@
   },
   "measurement_inputs": {
     "wheel_geometry_and_raw_speed_scale": {
-      "status": "read_only_feedback_captured_nominal_geometry_prepared_actual_scale_unmeasured",
+      "status": "reuse_verified_teleop_direction_layout_pending_numeric_floor_scale",
       "geometry": "config/home_assistant/s4_base.nominal.json",
       "raw_per_rad_s": null,
       "hardware_enabled": false,
-      "evidence": "config/home_assistant/s4_controller.inspected.json"
+      "evidence": "config/home_assistant/s4_response_diagnostics.observed.json"
     },
     "lidar_base_extrinsics": {
       "status": "operator_reviewed_nominal_not_precision_calibrated",
@@ -71,7 +71,9 @@
     "S3 acceptance is preserved. The 5 mm closing setting is not calibrated force.",
     "A successful local simulation does not satisfy a physical acceptance item.",
     "2026-11-11: source and isolated runtime uploaded over SSH; camera and synthetic ROS checks performed. No controller reset, firmware flash, power change, or motor command.",
-    "2026-11-12: user authenticated; read-only inspection firmware installed with full flash backup and boot journal preservation. Wheel/lift queries and concurrent LDS/D415 capture verified; no motor writes. Right-arm pre-install timeouts and wheel 8 stationary speed discrepancy remain unqualified for motion."
+    "2026-11-12: user authenticated; read-only inspection firmware installed with full flash backup and boot journal preservation. Wheel/lift queries and concurrent LDS/D415 capture verified; no motor writes. Right-arm pre-install timeouts and wheel 8 stationary speed discrepancy remain unqualified for motion.",
+    "2026-11-12 follow-up: fixed-block inventory added to read-only inspection image. Right arm initially timed out, then recovered without another commanded reset; 154 complete 16-device rounds passed. Wheel 8 +/-50 register reports persist across reset and changed position with torque/current zero and a one-count band. Manual movement did not qualify bidirectional scale; no stop gate relaxed.",
+    "Existing S1 policy and v7 teleop already cover +/-50 stationary speed reports with 400 ms encoder stability <=8 counts, goal speed zero and torque OFF. The observed 1-count band is within that existing range. Raised-wheel prerequisite withdrawn; reuse established floor teleop and LDS/encoder comparison. No threshold or raw feedback changed."
   ],
   "target_observed_on": "2026-11-12",
   "target_environment": {
@@ -99,9 +101,12 @@
     "preflight_evidence": "config/home_assistant/s4_preflight.prepared.json",
     "lidar_timestamp_basis": "host serial receipt estimate; negative per-ray offsets; USB/device latency and moving deskew uncalibrated",
     "controller_replacement_requires_admin_authentication": false,
-    "controller_inspection_evidence": "config/home_assistant/s4_controller.inspected.json",
-    "controller_scope": "read-only maintenance; motion writes unavailable; no right-arm query",
-    "right_arm_current_state_verified": false
+    "controller_inspection_evidence": "config/home_assistant/s4_response_diagnostics.observed.json",
+    "controller_scope": "read-only maintenance with fixed-block inventory for both arms and mobile IDs; motor writes blocked",
+    "right_arm_current_state_verified": true,
+    "right_arm_response_restored": true,
+    "right_arm_root_cause_confirmed": false,
+    "controller_inspection_release": "s4-inspection-4b60ea01f357"
   },
   "operator_reported_state": {
     "local_date": "2026-11-12",

@@ -48,7 +48,7 @@ def package_s4_inspection(destination):
     for key,raw in templates.items():
         files[key]=raw.replace(b'@RELEASE@',remote.encode()).replace(b'@DIAGNOSTICS@',logs.encode()).replace(b'@FIRMWARE_SHA256@',checksum(files['firmware.hex']).encode())
     files['release.json']=(json.dumps(dict(release=name,firmware='mobile-bus-inspection-v2',
-        wheel_samples_supported=True,motor_writes_permitted=False,flashed=False,
+        wheel_samples_supported=True,device_inventory_supported=True,motor_writes_permitted=False,flashed=False,
         requires_controller_reset=True,requires_supported_mechanism=True,
         replaces_active_controller_after_explicit_install=True,
         not_navigation_firmware=True,files_sha256={k:checksum(v) for k,v in sorted(files.items())}),indent=2)+'\n').encode()
