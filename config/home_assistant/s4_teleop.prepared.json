@@ -2,15 +2,15 @@
   "release": "wheel-hold-a2e478ef6660",
   "firmware": "mobile-base-hold-teleop-v7",
   "wheel_feedback": true,
-  "state": "RETEST_BLOCKED_RIGHT_ARM_READ_AFTER_CONTROLLER_RESET",
+  "state": "FULL_SENSOR_ARCHIVE_DRIVE_PASSED_FOR_RECORDED_DIRECTIONS",
   "source_date": "2026-11-12",
   "hardware_drive_tested": true,
   "hold_activated": true,
   "motor_write_commands": null,
   "full_flash_backup_bytes": 524288,
   "boot_journal_preserved": true,
-  "preflight": "After controller-only reset, right slot 7 address 33 still unreadable; wheels zero/torque OFF verified; no new drive session.",
-  "required_next_action": "Restore and freshly verify right-arm response before reopening the same-condition archive drive",
+  "preflight": "658 ACKs over 37.042 s with lidar/RGB-D archive; zero hold read retries or pauses; final stop and hold verified. F/A/D/Z recorded; B/L/R absent.",
+  "required_next_action": "Offline moving lidar/encoder and native RGB-D replay; physical mapping and metric floor scale remain pending",
   "local_tests_passed": 217,
   "browser_preview_flow_verified": true,
   "installed_info": {
@@ -35,11 +35,11 @@
   "raw_evidence_directory": "output/s4-hold-read-recovery-20261112",
   "local_build_verified": true,
   "web_session": {
-    "state": "closed_fault_object_contact",
-    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T085104Z-913cf499.jsonl",
+    "state": "completed",
+    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T090513Z-8d6f6d18.jsonl",
     "port": 18766,
     "sensor_capture": "lidar_rgbd_with_periodic_native_archive",
-    "sensor_evidence": "/home/hyper/robot/shared/diagnostics/s4-mapping-capture-20261112-05-full-archive"
+    "sensor_evidence": "/home/hyper/robot/shared/diagnostics/s4-mapping-capture-20261112-06-full-archive"
   },
   "firmware_installed_by_release": "wheel-hold-a2e478ef6660",
   "hold_partially_applied": false,
@@ -85,24 +85,25 @@
     ],
     "plan_reason": "SETUP_PLAN_READY"
   },
-  "latest_retest_evidence": "output/s4-rgbd-no-archive-retest-20261112/report.json",
+  "latest_retest_evidence": "output/s4-full-archive-retest-20261112/report.json",
   "latest_retest_summary": {
-    "duration_s": 32.991197215,
+    "duration_s": 37.041945809,
     "command_counts": {
-      "Z": 62,
-      "F": 66,
-      "R": 21,
-      "D": 155,
-      "A": 291
+      "Z": 45,
+      "F": 138,
+      "D": 410,
+      "A": 65
     },
-    "acks": 595,
+    "acks": 658,
     "all_ack": true,
+    "maximum_command_gap_ms": 87.709778,
+    "maximum_hold_read_retries": 0,
     "final_stop": {
       "type": "stopped",
       "armed": false,
       "fault": false,
-      "session": 1563813142,
-      "sequence": 595,
+      "session": 702520085,
+      "sequence": 658,
       "reason": "OPERATOR_STOP",
       "first_failure": "NONE",
       "first_failed_id": 0,
@@ -113,13 +114,13 @@
       "hold_confirmed": true,
       "hold_reason": "HOLD_UNCHANGED",
       "hold_failed_slot": 0,
-      "hold_samples": 1619,
+      "hold_samples": 780,
       "hold_read_retries": 0,
       "hold_read_recoveries": 0,
       "hold_read_failure_slot": 0,
       "hold_read_failure_address": 0,
-      "lift_position_raw": 3692,
-      "lift_target_raw": 3692,
+      "lift_position_raw": 3693,
+      "lift_target_raw": 3693,
       "wait_elapsed_ms": 474,
       "first_failure_wait_ms": 0,
       "wheels": [
@@ -130,7 +131,7 @@
           "speed_raw": 0,
           "speed_signed": 0,
           "speed_valid": true,
-          "position_raw": 3159,
+          "position_raw": 2501,
           "quiet_samples": 7
         },
         {
@@ -140,7 +141,7 @@
           "speed_raw": 0,
           "speed_signed": 0,
           "speed_valid": true,
-          "position_raw": 2441,
+          "position_raw": 1055,
           "quiet_samples": 7
         },
         {
@@ -150,31 +151,40 @@
           "speed_raw": 0,
           "speed_signed": 0,
           "speed_valid": true,
-          "position_raw": 517,
+          "position_raw": 3595,
           "quiet_samples": 7
         }
       ]
     },
     "error": null,
-    "sensor_capture": "lidar_rgbd_no_periodic_archive",
+    "sensor_capture": "lidar_rgbd_with_periodic_native_archive",
     "lidar": {
       "passed": true,
-      "frames": 377,
-      "maximum_gap_s": 0.20137343488022452,
+      "frames": 380,
+      "maximum_gap_s": 0.20226139532314846,
       "gaps_over_035": 0,
       "capture_end_reason": "teleop_finished",
       "driver_exit_code": 0
     },
     "rgbd": {
-      "frames": 2305,
-      "maximum_depth_gap_s": 0.06721115112304688,
+      "frames": 2322,
+      "maximum_depth_gap_s": 0.06719541549682617,
       "skipped_repeated_framesets": 1
     },
+    "native_rgbd_archive": {
+      "frames": 156,
+      "period_s": 0.5,
+      "directory": "rgbd",
+      "clock": "SDK global_time converted to same-host monotonic",
+      "registration_applied": false,
+      "physical_sync_qualified": false
+    },
     "operator_report": "rotation and movement normal, recording finished",
-    "root_cause_confirmed": false
+    "root_cause_confirmed": false,
+    "s4_complete": false
   },
   "latest_interrupted_retest_evidence": "output/s4-full-archive-object-contact-20261112/report.json",
-  "current_hold_confirmed": false,
+  "current_hold_confirmed": true,
   "current_wheel_stop_confirmed": true,
   "last_drive_failure_history": [
     {
@@ -198,5 +208,6 @@
       "read_recoveries_at_final_stop": 0,
       "subsequent_read_only_hold_recovered": true
     }
-  ]
+  ],
+  "latest_response_recheck_evidence": "output/s4-full-archive-object-contact-20261112/recheck-response-restored.json"
 }

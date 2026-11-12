@@ -89,7 +89,10 @@
     "Sensor-capture-off retest passed all six directions: 297 ACKs over 16.271 s, max command gap 60.289 ms, zero hold read retries, final wheel stop and hold confirmed. Operator reported no abnormalities. Prior LDS 600 ms gap occurred about 100 s before drive, not concurrently with right-arm failure. A single pass does not identify the original cause; lidar-only comparison next.",
     "Lidar-only concurrent retest: 21.713 s, 405 ACKs, zero hold read retries, final stop and hold confirmed. Recorded F/B/L/A/Z directions; R/D absent in this session. LDS 414 scans, max gap 201.515 ms, zero >350 ms gaps. No firmware/reset changes. Next comparison adds RGB-D reception without periodic image archiving; cause remains unresolved.",
     "RGB-D reception without periodic archive passed: 32.991 s, 595 ACKs, zero hold retries, final wheel stop and hold confirmed. F/R/A/D/Z recorded. LDS 377 scans max gap 201.373 ms, RGB-D 2305 frames max depth gap 67.211 ms. Next comparison restores the original periodic archive without firmware, rate or threshold changes. Archive causality is not established.",
-    "2026-11-12 archive comparison 05: operator reported riding over an object; slot 7 address 33 read failure also occurred. Preserve both; exclude this trial from clean cause comparison. Sensors passed (349 scans, max gap 201.167 ms, 143 native RGB-D pairs), but drive failed. After fresh wheel stop and explicit mechanical support confirmation, controller-only reset completed without flash or motor power cycle. Subsequent read-only HOLD still fails slot 7 with sensors stopped; wheel goal zero/torque OFF verified. No new web/drive session. Right-arm indicator/cables visually normal per operator; root cause unresolved. Evidence: output/s4-full-archive-object-contact-20261112/report.json."
+    "2026-11-12 archive comparison 05: operator reported riding over an object; slot 7 address 33 read failure also occurred. Preserve both; exclude this trial from clean cause comparison. Sensors passed (349 scans, max gap 201.167 ms, 143 native RGB-D pairs), but drive failed. After fresh wheel stop and explicit mechanical support confirmation, controller-only reset completed without flash or motor power cycle. Subsequent read-only HOLD still fails slot 7 with sensors stopped; wheel goal zero/torque OFF verified. No new web/drive session. Right-arm indicator/cables visually normal per operator; root cause unresolved. Evidence: output/s4-full-archive-object-contact-20261112/report.json.",
+    "Subsequent user-requested read-only recheck: right-arm response restored, zero read retries; HOLD fails because right-arm torque is OFF. Setup plan reads all 13 axes successfully: left six and lift torque ON, right six torque OFF, lift 3693. No hold activation or drive performed; recovery cause unconfirmed. Evidence: output/s4-full-archive-object-contact-20261112/recheck-response-restored.json.",
+    "Operator confirmed supports and requested right-arm hold/retest. Existing hold-here completed SETUP_HOLD_READY; all 13 axes hold verified, fault false, zero retries, wheel stop confirmed, lift 3693. New manual session 20261112T090513Z-8d6f6d18 and concurrent lidar/native RGB-D archive 06 are prepared; physical outcome pending. No firmware installation or controller reset this step.",
+    "Full periodic native RGB-D archive retest 06 completed normally: 37.042 s, 658 ACKs, no pauses or read retries, final wheel goal zero/torque OFF and all holds confirmed, lift 3693. Commands F138/A65/D410/Z45; B/L/R absent despite general operator movement report. LDS 380 scans max gap 202.261 ms, no >350 ms gaps; RGB-D 2322 frames and 156 original pairs archived. No fault reproduced this trial; original root cause remains unresolved. Existing encoder analyzer passed record integrity but floor-travel calibration remains false. Evidence: output/s4-full-archive-retest-20261112/report.json."
   ],
   "target_observed_on": "2026-11-12",
   "target_environment": {
@@ -119,13 +122,13 @@
     "controller_replacement_requires_admin_authentication": false,
     "controller_inspection_evidence": "config/home_assistant/s4_response_diagnostics.observed.json",
     "controller_scope": "Manual wheel/hold teleop; explicit setup-only arm/lift writes; autonomous binary motion endpoint not installed",
-    "right_arm_current_state_verified": false,
-    "right_arm_response_restored": false,
+    "right_arm_current_state_verified": true,
+    "right_arm_response_restored": true,
     "right_arm_root_cause_confirmed": false,
     "controller_inspection_release": "s4-inspection-4b60ea01f357",
     "controller_teleop_release": "wheel-hold-a2e478ef6660",
     "controller_teleop_evidence": "config/home_assistant/s4_teleop.prepared.json",
-    "manual_teleop_available": false,
+    "manual_teleop_available": true,
     "manual_teleop_web_active": false,
     "latest_floor_drive_evidence": "config/home_assistant/s4_floor_teleop.observed.json"
   },
