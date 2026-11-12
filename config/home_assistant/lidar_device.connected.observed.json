@@ -2,7 +2,7 @@
   "schema_version": 1,
   "checked_on_local_date": "2026-11-12",
   "timezone": "Asia/Seoul",
-  "status": "usb_detected_rotation_confirmed_no_rx_data",
+  "status": "replacement_stream_verified_cadence_issue_open",
   "model_expected": "LDS-01",
   "usb_adapter": "CP2102 10c4:ea60",
   "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
@@ -80,7 +80,7 @@
   "range_accuracy_validated": false,
   "cadence_verified": false,
   "clock_note": "Target UTC is approximately nine hours behind PC UTC; target capture timestamps preserved verbatim. User-facing date uses Asia/Seoul client context. Cross-host time alignment unverified. Target timedatectl reports NTP enabled and synchronized; which host clock is correct is not established.",
-  "conclusion": "USB and sensor start command path observed; no return bytes during active raw acquisition. Sensor output, sensor supply and return wiring remain unresolved; not attributed solely to ROS.",
+  "conclusion": "Replacement LDS-01 received on both local PC and Jetson. Jetson diagnostic flush wait was reproduced and removed; earlier original-unit no-byte results have not been explained. Official ROS stream still has gaps exceeding the existing 0.35-second threshold.",
   "historical_evidence": "config/home_assistant/lidar_device.observed.json",
   "local_evidence": "output/s4-lidar-connected",
   "target_evidence": "/home/hyper/robot/shared/diagnostics/s4-lidar-connected",
@@ -224,5 +224,118 @@
     },
     "local_evidence": "output/s4-lidar-connected/local-second-unit",
     "conclusion": "Real bytes received with same acquisition algorithm and actual OS port settings verified. Host and sensor changed together; original sensor vs Jetson fault not isolated. Two missing sectors remain; not navigation-qualified."
+  },
+  "jetson_replacement_test": {
+    "raw": {
+      "host": "jetson",
+      "unit": "replacement_same_model_reported_by_user",
+      "serial_configuration": {
+        "requested": {
+          "baudrate": 230400,
+          "bytesize": 8,
+          "parity": "N",
+          "stopbits": 1,
+          "xonxoff": false,
+          "dsrdtr": false,
+          "rtscts": false,
+          "timeout": 0.05,
+          "write_timeout": 1,
+          "inter_byte_timeout": null
+        },
+        "rts": true,
+        "dtr": true,
+        "os_input_baud_is_230400": true,
+        "os_output_baud_is_230400": true,
+        "os_receiver_enabled": true,
+        "os_8bit": true,
+        "os_parity_enabled": false,
+        "os_two_stop_bits": false,
+        "os_software_flow_enabled": false,
+        "os_hardware_flow_enabled": false,
+        "os_canonical": false
+      },
+      "captured_at_utc": "2026-11-11T16:17:58.331683+00:00",
+      "mode": "sensor_start_pause_raw_capture",
+      "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+      "baud": 230400,
+      "serial_command_bytes_sent": 2,
+      "robot_motion_commands": 0,
+      "duration_s": 20.108394165999925,
+      "bytes": 234865,
+      "raw_sha256": "889ab8ddda8ee02fb9840234ed47b2d6f1e13168cc7100efd786ccac7b0d9a43",
+      "sectors": 5592,
+      "discarded_bytes": 0,
+      "checksum_failed_sectors": 0,
+      "checksum_method": "LDS specification p5: (255-sum(first40)) mod256 matches byte40 or41",
+      "sequence_errors": [
+        {
+          "packet": 1,
+          "previous": 40,
+          "next": 0
+        }
+      ],
+      "sequence_error_count": 1,
+      "complete_scans": 93,
+      "scan_starts": 94,
+      "scan_gaps_over_035s": 0,
+      "range_accuracy_validated": false,
+      "mount_calibrated": false,
+      "scan_start_interval_s": {
+        "min": 0.20026600800019878,
+        "median": 0.2008257219999905,
+        "max": 0.20203537399993365
+      },
+      "rpm_median": 298.4,
+      "valid_points": {
+        "min": 238,
+        "median": 243,
+        "max": 245
+      }
+    },
+    "official_ros": {
+      "captured_at_utc": "2026-11-11T16:19:29.371195+00:00",
+      "driver": "hls_lfcd_lds_driver 2.1.1",
+      "frames": 90,
+      "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+      "robot_motion_commands": 0,
+      "sensor_start_pause_commands": true,
+      "driver_exit_code": 255,
+      "frame_ids": [
+        "lidar_a"
+      ],
+      "samples_per_scan": [
+        360
+      ],
+      "stamp_semantics": "upstream publication timestamp; first-ray acquisition time not qualified",
+      "range_accuracy_validated": false,
+      "mount_calibrated": false,
+      "motion_authorized": false,
+      "stamp_interval_s": {
+        "min": 0.2002403736114502,
+        "median": 0.20074915885925293,
+        "max": 0.3992633819580078
+      },
+      "gaps_over_035s": 2,
+      "valid_points": {
+        "min": 238,
+        "median": 242.0,
+        "max": 244
+      },
+      "max_publication_age_s": 0.0013835430145263672,
+      "scan_time_median_s": 0.20134228467941284
+    },
+    "software_fix": {
+      "symptom": "unbounded Serial.flush / usb_serial_generic_wait_until_sent before timed capture, repeated during cleanup",
+      "action": "removed tcdrain calls; one-byte writes use write_timeout=1; cleanup reports stop-write failures",
+      "permanent_tool": "tools/diagnostics/lds01_capture.py",
+      "regression_tests_passed": 7,
+      "physical_stop_verified": false
+    },
+    "steady_raw_sequence_error_count": 0,
+    "startup_partial_sequence_reset_count": 1,
+    "cadence_qualified_for_navigation": false,
+    "current_replacement_mount_transform_verified": false,
+    "evidence_root": "/home/hyper/robot/shared/diagnostics/s4-lidar-connected/",
+    "original_unit_fault_confirmed": false
   }
 }

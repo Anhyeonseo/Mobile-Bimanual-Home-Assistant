@@ -72,8 +72,10 @@
     "controller_reset_or_flashed": false,
     "motor_commands_sent": 0,
     "report": "docs/S4_JETSON_PREPARATION.md",
-    "lidar_stream_received": false,
+    "lidar_stream_received": true,
     "lidar_checked_on": "2026-11-12",
-    "lidar_evidence": "config/home_assistant/lidar_device.connected.observed.json"
+    "lidar_evidence": "config/home_assistant/lidar_device.connected.observed.json",
+    "lidar_ros_scan_received": true,
+    "lidar_cadence_qualified": false
   }
 }
