@@ -248,6 +248,8 @@ def main():
     parser.add_argument("--bind", default="127.0.0.1", help="Browser listener IP, e.g. Pi LAN address")
     parser.add_argument("--web-port", type=int, default=8765)
     parser.add_argument("--record-dir", default="teleop-sessions", help="Browser session JSONL directory")
+    parser.add_argument('--localization-status', help='Optional live observer status, bound to the new browser recording')
+    parser.add_argument('--localization-map', help='Frozen occupancy.json shown by the browser')
     parser.add_argument("--run", action="store_true", help="Enable wheels and start keyboard teleop")
     parser.add_argument('--preserve-hold', action='store_true',
         help='Require hold-monitor firmware; web Hold action explicitly prepares current-pose holding')
@@ -256,6 +258,8 @@ def main():
     parser.add_argument('--execute',action='store_true',help='With --prepare-hold, explicitly enable current-pose holding; no wheel motion')
     parser.add_argument('--stop-wheels',action='store_true',help='Explicit wheel zero/OFF before hold setup; does not change arm/lift torque')
     args = parser.parse_args()
+    if bool(args.localization_status)!=bool(args.localization_map) or args.localization_status and not args.web:
+        parser.error('localization status and map must be supplied together with --web')
     PRESERVE_HOLD = args.preserve_hold or args.check_hold or args.prepare_hold or args.stop_wheels
     if args.web and args.run: parser.error("choose --web or --run")
     if args.check_hold and (args.web or args.run): parser.error('--check-hold cannot enable wheels')
@@ -272,7 +276,8 @@ def main():
                 elif args.check_hold: print(json.dumps(check_hold(port), indent=2))
                 elif args.web:
                     from base_teleop_web import run_web
-                    run_web(port, args.bind, args.web_port, args.record_dir)
+                    run_web(port, args.bind, args.web_port, args.record_dir,
+                            localization_path=args.localization_status,map_path=args.localization_map)
                 elif args.run: run(port, sys.stdin.fileno())
                 else: print(json.dumps(inspect(port), indent=2))
         return 0

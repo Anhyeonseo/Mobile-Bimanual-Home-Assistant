@@ -66,9 +66,14 @@ class TeleopCompletion:
                         row.get('firmware', {}).get('firmware') != 'mobile-base-hold-teleop-v7'):
                     raise ValueError('identified teleop session required')
                 self.header = True
+            self.consume(row)
             if row.get('event') == 'finished':
                 self.finished = row
         return self.finished
+
+    def consume(self, row):
+        """Optional read-only observer hook; never changes the recording."""
+        pass
 
 
 class RGBDArchive:

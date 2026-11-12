@@ -2,6 +2,8 @@
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import hashlib
+import math
 import secrets
 import os
 from pathlib import Path
@@ -11,6 +13,21 @@ import time
 from teleop_mobile_base import inspect, send, receive, frame, validate, stop, PERIOD, response_timeout, prepare_hold, check_hold, stop_failure_message
 
 BROWSER_LEASE = .25
+
+
+def localization_status(path, recording, map_hash, now):
+    """Bound to this run and map; a stale sidecar cannot enable a new session."""
+    unavailable=dict(ready=False,message='라이다 위치 확인 준비 중',pose_xy_yaw=None,scan_points=[])
+    try:
+        with Path(path).open() as stream:raw=stream.read(65537)
+        if len(raw)>65536:return unavailable
+        value=json.loads(raw);stamp=value['host_monotonic_s']
+        if (value.get('schema_version')!=1 or value.get('teleop_record')!=str(recording) or
+            value.get('map_sha256')!=map_hash or type(stamp) not in (int,float) or
+            not math.isfinite(stamp) or not 0<=now-stamp<=.75):return unavailable
+        value['ready']=value.get('ready') is True
+        return value
+    except (OSError,ValueError,KeyError,TypeError):return unavailable
 
 
 def failure_status(stopped):
@@ -41,6 +58,8 @@ class Control:
         self.ended = False
         self.recording = ""
         self.feedback = False
+        self.localization = None
+        self.localization_map = None
 
     def claim(self, owner, now):
         if not isinstance(owner, str) or not 16 <= len(owner) <= 64: return False
@@ -82,7 +101,7 @@ class Control:
         with self.lock:
             return dict(active=self.active, status=self.status, busy=self.busy,
                         ready=self.ready, ended=self.ended, recording=self.recording,
-                        feedback=self.feedback)
+                        feedback=self.feedback,localization=self.localization)
 
     def set_status(self, active, status):
         with self.lock:
@@ -167,6 +186,7 @@ h1{font-size:26px}#status{padding:16px;background:#233447;border-radius:12px;mar
 </style><h1>AlohaMini 베이스 조종</h1><p>키나 버튼을 누르고 있으면 이동하고, 놓으면 멈춥니다.</p>
 <div class="actions"><button id="hold" disabled>자세 유지</button><button id="start" disabled>조종 시작</button><button id="finish" disabled>기록·종료</button></div>
 <label id="support-row"><input type="checkbox" id="supported"> 양팔과 리프트를 받쳤어요</label>
+<section id="localization-panel" hidden><p id="localization-status"></p><canvas id="localization-map" width="600" height="360" style="width:100%;background:#ccd4db;border-radius:12px"></canvas><small>화살표: 로봇 앞쪽 · 초록 점: 현재 라이다 관측 · 흰색: 관측된 빈 공간 · 회색: 미확인 영역<br>위치 확인은 수동 조종 준비이며 자율 주행 허가는 아닙니다.</small></section>
 <div id="record"></div><div id="status">연결 준비 중…</div><div class="grid">
 <button data-key="q">Q ↶<br>왼쪽 회전</button><button data-key="w">W ↑<br>전진</button><button data-key="e">E ↷<br>오른쪽 회전</button>
 <button data-key="a">A ←<br>왼쪽 이동</button><button id="stop">Space<br>정지</button><button data-key="d">D →<br>오른쪽 이동</button>
@@ -181,11 +201,23 @@ const holdButton=document.querySelector('#hold'),startButton=document.querySelec
 function render(r){active=r.active;status.textContent=r.status;
  holdButton.disabled=active||r.busy||r.ended||!supported.checked;
  for(const b of buttons)b.disabled=!active;
- startButton.disabled=active||r.busy||r.ended||!r.ready;
+ startButton.disabled=active||r.busy||r.ended||!r.ready||(r.localization&&!r.localization.ready);
  finishButton.disabled=r.busy||r.ended;
  recordLabel.textContent='조종 기록: '+(r.recording||'준비 중')+' · '+(r.feedback?'바퀴 피드백 포함':'명령 기록 · 바퀴 피드백 없음');
  if(!active){pressed.clear();paint();}
  if(r.ended){claimed=false;active=false;}
+ if(r.localization){document.querySelector('#localization-panel').hidden=false;document.querySelector('#localization-status').textContent=r.localization.message;drawLocalization(r.localization);}
+}
+let savedMap=null,mapLoading=false;
+function drawLocalization(loc){
+ if(!savedMap){if(!mapLoading){mapLoading=true;post('/localization-map',{}).then(r=>{savedMap=r.map;mapLoading=false;if(savedMap)drawLocalization(loc);}).catch(()=>{mapLoading=false;});}return;}
+ const canvas=document.querySelector('#localization-map'),ctx=canvas.getContext('2d'),m=savedMap;
+ const scale=Math.min(canvas.width/m.width,canvas.height/m.height),ox=(canvas.width-m.width*scale)/2,oy=(canvas.height-m.height*scale)/2;
+ ctx.fillStyle='#ccd4db';ctx.fillRect(0,0,canvas.width,canvas.height);
+ for(let y=0;y<m.height;y++)for(let x=0;x<m.width;x++){const v=m.data[y*m.width+x];ctx.fillStyle=v<0?'#ccd4db':v>=65?'#263746':'#fafafa';ctx.fillRect(ox+x*scale,oy+(m.height-1-y)*scale,scale+.5,scale+.5);}
+ const xy=(x,y)=>[ox+(x-m.origin[0])/m.resolution*scale,oy+(m.height-(y-m.origin[1])/m.resolution)*scale];
+ ctx.fillStyle='#009c80';for(const p of loc.scan_points||[]){const [x,y]=xy(...p);ctx.fillRect(x-1,y-1,2,2);}
+ if(loc.pose_xy_yaw){const [x,y,a]=loc.pose_xy_yaw,[px,py]=xy(x,y);ctx.save();ctx.translate(px,py);ctx.rotate(-a);ctx.fillStyle=loc.ready?'#dd592e':'#a17629';ctx.beginPath();ctx.moveTo(11,0);ctx.lineTo(-7,-6);ctx.lineTo(-4,0);ctx.lineTo(-7,6);ctx.closePath();ctx.fill();ctx.restore();}
 }
 let latest={};
 supported.addEventListener('change',()=>render(latest));
@@ -261,6 +293,8 @@ def handler_for(control, token):
                 self.connection.settimeout(.3)
                 data = json.loads(self.rfile.read(n))
                 if not isinstance(data, dict): raise ValueError()
+                if self.path == '/localization-map':
+                    self.respond(200,dict(map=control.localization_map));return
                 now = time.monotonic()
                 if self.path == "/claim": ok = control.claim(data.get("client"), now)
                 elif self.path == "/action": ok = control.request(data.get("client"), data.get("sequence"), data.get("action"), now)
@@ -271,7 +305,7 @@ def handler_for(control, token):
     return Handler
 
 
-def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions"):
+def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions", *, localization_path=None, map_path=None):
     info = inspect(port)
     record = SessionRecord(record_dir)
     control, token = Control(), secrets.token_urlsafe(24)
@@ -282,6 +316,16 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions")
     server = None
     thread = None
     arm_sent, ever_armed, stopped, error = False, False, None, None
+    map_hash=None
+    if localization_path:
+        if not map_path:raise ValueError('localization status requires a map')
+        raw=Path(map_path).read_bytes();map_hash=hashlib.sha256(raw).hexdigest()
+        control.localization_map=json.loads(raw)
+        control.configure(localization=localization_status(localization_path,record.path,map_hash,time.monotonic()))
+    def refresh_localization():
+        if localization_path:
+            control.configure(localization=localization_status(localization_path,record.path,map_hash,time.monotonic()))
+        return control.localization is None or control.localization['ready']
     def pause_drive(reason):
         nonlocal arm_sent, stopped
         control.configure(active=False, busy=True, motion="Z",
@@ -292,11 +336,14 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions")
         arm_sent = False
         record.write("paused", reason=reason, stop=stopped)
         control.configure(busy=False, ready=True,
-                          status="일시정지 · 연결 복구 후 조종 시작을 눌러 주세요")
+                          status="일시정지 · 위치 확인 후 조종 시작을 눌러 주세요" if reason=='localization_unavailable' else "일시정지 · 연결 복구 후 조종 시작을 눌러 주세요")
 
     try:
         record.write("session", firmware=info, calibrated_odometry=False,
                      clock_note="Host timestamps bracket replies; MCU ticks wrap at 2^32 ms. Not hardware synchronized.")
+        if localization_path:
+            stopped=stop(port)
+            record.write('stationary_baseline',stop=stopped,localization_map_sha256=map_hash)
         server = ThreadingHTTPServer((bind, web_port), handler_for(control, token))
         server.daemon_threads = True
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -307,8 +354,11 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions")
         seq, nonce = 0, 0
         while True:
             tick = time.monotonic()
+            localization_ready=refresh_localization()
             action = control.take_action(tick)
             if action == "finish": break
+            if arm_sent and not localization_ready:
+                pause_drive('localization_unavailable');continue
             if action == "hold":
                 control.set_status(False, "현재 자세 유지 설정 중 · 받침을 유지하세요")
                 record.write("hold_requested")
@@ -317,8 +367,12 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions")
                 control.configure(ready=True, busy=False)
                 control.set_status(False, "자세 유지 확인 · 조종 시작을 눌러 주세요")
             elif action == "start":
+                if not localization_ready:
+                    control.configure(busy=False,status='위치 확인 후 조종 시작을 눌러 주세요');continue
                 if held_mode:
                     record.write("hold_checked", reply=check_hold(port))
+                if not refresh_localization():
+                    control.configure(busy=False,status='위치 확인 후 조종 시작을 눌러 주세요');continue
                 # A slow preparation cannot turn an expired click into motion.
                 control.desired(time.monotonic())
                 if control.expired:

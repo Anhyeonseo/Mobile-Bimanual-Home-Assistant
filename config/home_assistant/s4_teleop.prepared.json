@@ -2,7 +2,7 @@
   "release": "wheel-hold-a2e478ef6660",
   "firmware": "mobile-base-hold-teleop-v7",
   "wheel_feedback": true,
-  "state": "FULL_SENSOR_ARCHIVE_ALL_SIX_DIRECTIONS_PASSED",
+  "state": "LIVE_LOCALIZATION_STATIONARY_READY_MANUAL_TRACKING_PENDING",
   "source_date": "2026-11-12",
   "hardware_drive_tested": true,
   "hold_activated": true,
@@ -10,7 +10,7 @@
   "full_flash_backup_bytes": 524288,
   "boot_journal_preserved": true,
   "preflight": "2217 ACKs over 122.8 s; all six directions recorded, no pauses or read retries; final wheel stop and arm/lift hold confirmed.",
-  "required_next_action": "Review new capture against saved map and qualify localization startup before live navigation.",
+  "required_next_action": "Operator reviews map direction, then explicit Hold/Start for live tracking trial.",
   "local_tests_passed": 217,
   "browser_preview_flow_verified": true,
   "installed_info": {
@@ -35,11 +35,12 @@
   "raw_evidence_directory": "output/s4-hold-read-recovery-20261112",
   "local_build_verified": true,
   "web_session": {
-    "state": "completed",
-    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T100243Z-fa0d0fef.jsonl",
+    "state": "prepared_waiting_for_operator",
+    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T103453Z-31441425.jsonl",
     "port": 18766,
     "sensor_capture": "lidar_rgbd_with_periodic_native_archive",
-    "sensor_evidence": "/home/hyper/robot/shared/diagnostics/s4-mapping-capture-20261112-08-localization-retry"
+    "sensor_evidence": "/home/hyper/robot/shared/diagnostics/s4-live-localization-20261112-01/capture-final",
+    "localization_evidence": "/home/hyper/robot/shared/diagnostics/s4-live-localization-20261112-01"
   },
   "firmware_installed_by_release": "wheel-hold-a2e478ef6660",
   "hold_partially_applied": false,
@@ -236,5 +237,8 @@
       "firmware_flashed": false
     }
   ],
-  "latest_response_recheck_evidence": "output/s4-full-archive-object-contact-20261112/recheck-response-restored.json"
+  "latest_response_recheck_evidence": "output/s4-full-archive-object-contact-20261112/recheck-response-restored.json",
+  "host_ui_release": "s4-local-5c0309aae7c6",
+  "live_localization_release": "s4-local-356442ebe1fc",
+  "live_localization_tests_passed": 119
 }
