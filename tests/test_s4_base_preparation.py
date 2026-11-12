@@ -57,3 +57,67 @@ def test_discontinuous_or_ambiguous_measurements_are_rejected(fault):
     if fault=='invalid':records[5]['wheels'][0]['ok']=False
     if fault=='host_reset':records[5].update(host_started_s=0,host_received_s=.002)
     with pytest.raises(ValueError):review_capture(records)
+
+
+def teleop_capture():
+    records=[dict(event='session',host_monotonic_ns=0,
+        firmware=dict(firmware='mobile-base-hold-teleop-v7',wheel_feedback=True)),
+        dict(event='armed',host_monotonic_ns=1,reply=dict(session=123,sequence=0,
+             armed=True,fault=False,hold_confirmed=True))]
+    for n,row in enumerate(sample_capture()[1:],1):
+        stamp=n*40_000_000
+        records.append(dict(event='command',host_monotonic_ns=stamp,
+            session=123,sequence=n,motion='F' if n<=20 else 'B'))
+        records.append(dict(event='reply',host_monotonic_ns=stamp+2_000_000,
+            reply=dict(type='ack',session=123,sequence=n,armed=True,fault=False,
+                hold_confirmed=True,wheel_feedback=[dict(id=w['id'],position_raw=w['position_raw'],
+                    speed_raw=w['speed_raw'],tick_begin_ms=w['started_tick_ms'],
+                    tick_end_ms=w['ended_tick_ms']) for w in row['wheels']])))
+    records.append(dict(event='finished',host_monotonic_ns=2_000_000_000,error=None,
+        stop=dict(armed=False,fault=False,stop_confirmed=True,hold_confirmed=True)))
+    return records
+
+
+def test_powered_teleop_reuses_fit_without_claiming_read_only_or_floor_calibration():
+    from home_robot_tasks.s4_base_preparation import review_teleop_capture
+    result=review_teleop_capture(teleop_capture())
+    assert result['all_candidates_available']
+    assert result['source_mode']=='powered_manual_teleop'
+    assert result['acknowledged_samples']==40
+    assert result['missing_directions']==['L','R','A','D']
+    assert not result['floor_travel_scale_qualified']
+    with pytest.raises(ValueError):review_capture(teleop_capture())
+
+
+@pytest.mark.parametrize('fault',['missing_ack','wrong_session','wrong_sequence','stop_failed','unfinished','clock_reset'])
+def test_powered_teleop_rejects_incomplete_evidence(fault):
+    from home_robot_tasks.s4_base_preparation import review_teleop_capture
+    records=teleop_capture()
+    if fault=='missing_ack':del records[3]
+    if fault=='wrong_session':records[3]['reply']['session']=456
+    if fault=='wrong_sequence':records[3]['reply']['sequence']=99
+    if fault=='stop_failed':records[-1]['stop']['stop_confirmed']=False
+    if fault=='unfinished':records.pop()
+    if fault=='clock_reset':records[5]['host_monotonic_ns']=0
+    with pytest.raises(ValueError):review_teleop_capture(records)
+
+
+def test_resumed_teleop_does_not_fit_motion_across_a_pause():
+    from home_robot_tasks.s4_base_preparation import review_teleop_capture
+    first=teleop_capture();second=teleop_capture()
+    pause=first.pop();pause.update(event='paused');pause.pop('error')
+    records=first+[pause]
+    for row in second[1:]:
+        row['host_monotonic_ns']+=10_000_000_000
+        if 'session' in row:row['session']=456
+        if 'reply' in row:
+            row['reply']['session']=456
+            for wheel in row['reply'].get('wheel_feedback',[]):
+                wheel['position_raw']=(wheel['position_raw']+1500)%4096
+        records.append(row)
+    result=review_teleop_capture(records)
+    assert result['verified_pauses']==1 and result['acknowledged_samples']==80
+    single=review_teleop_capture(teleop_capture())
+    for wheel,original in zip(result['wheels'],single['wheels']):
+        assert wheel['raw_per_encoder_rad_s']==pytest.approx(original['raw_per_encoder_rad_s'])
+        assert wheel['encoder_travel_counts']==[2*v for v in original['encoder_travel_counts']]

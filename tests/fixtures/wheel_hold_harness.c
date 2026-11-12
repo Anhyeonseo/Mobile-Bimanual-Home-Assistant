@@ -115,8 +115,17 @@ int main(int argc,char **argv){
     case 28:
         for(unsigned id=7;id<=9;id++)reg[0][id][56]+=10;
         drive('B');feed("STOP\n");zero_wheels();preserved();break;
-    case 29:case 30:case 31:
+    case 29:case 30:
         drive('B');assert(strstr(output,"\"fault\":true"));zero_wheels();preserved();break;
+    case 31:
+        drive('B');assert(strstr(output,"\"type\":\"paused\""));zero_wheels();preserved();break;
+    case 32:
+        tick+=401;SingleArmApp_Process();zero_wheels();preserved();
+        assert(strstr(output,"\"type\":\"paused\""));
+        assert(!strstr(output,"\"fault\":true"));
+        packet("ARM 9876ABCD");
+        packet("D 9876ABCD 00000001 F");
+        feed("STOP\n");zero_wheels();preserved();assert(WheelHold_Confirmed());break;
     case 1:tick+=401;SingleArmApp_Process();zero_wheels();preserved();break;
     case 2:packet("D 1234ABCD 00000001 F");zero_wheels();preserved();break;
     case 3:reg[0][6][40]=0;break;
@@ -144,6 +153,6 @@ int main(int argc,char **argv){
         if(scenario==25)assert(strstr(output,"LIFT_POSITION_HOLD_REQUIRED"));
     }
     unsigned prior=nonzero;
-    if(scenario!=18 && scenario!=19 && scenario!=0 && scenario!=26 && scenario!=28){packet("ARM 1234ABCD");assert(nonzero==prior);}
+    if(scenario!=18 && scenario!=19 && scenario!=0 && scenario!=26 && scenario!=28 && scenario!=32){packet("ARM 1234ABCD");assert(nonzero==prior);}
     puts(output);
 }

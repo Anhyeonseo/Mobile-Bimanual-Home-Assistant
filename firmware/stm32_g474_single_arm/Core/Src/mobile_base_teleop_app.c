@@ -199,7 +199,13 @@ static void stop_all(bool latch,const char *why){
 }
 static bool lease_ok(void){
     if(armed && (uint32_t)(HAL_GetTick()-last_command)>=LEASE_MS){
+#if HOST_MOBILE_BASE_PRESERVE_HOLD
+        /* A communication gap is resumable only after verified wheel stop and
+         * unchanged payload hold. stop_all still latches any failed check. */
+        stop_all(false,"HOST_TIMEOUT");reply(fault?"fault":"paused");return false;
+#else
         stop_all(true,"HOST_TIMEOUT");reply("fault");return false;
+#endif
     }
     return armed;
 }

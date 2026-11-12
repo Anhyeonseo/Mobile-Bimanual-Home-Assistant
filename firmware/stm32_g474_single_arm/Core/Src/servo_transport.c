@@ -242,7 +242,7 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
         ((held && ((data[5]==33 && data[6]==1) || (data[5]==40 && data[6]==8) ||
                    ((data[5]==3 || data[5]==56) && data[6]==4) ||
                    (left && data[2]==ACTUATOR_LIFT_ID &&
-                    ((data[5]==9 && data[6]==4) ||
+                    ((data[5]==9 && data[6]==4) || (data[5]==31 && data[6]==3) ||
                      ((data[5]==40 || data[5]==55) && data[6]==1) ||
                      (data[5]==42 && data[6]==2))))) ||
          (wheel && ((data[5]==3 && data[6]==4) ||

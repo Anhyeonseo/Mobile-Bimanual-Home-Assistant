@@ -154,7 +154,7 @@ def test_explicit_actions_share_sequence_and_cannot_survive_expiry():
     assert state.take_action(2.02) == 'start'
 
 
-@pytest.mark.parametrize('scenario', ['idle_finish', 'drive_finish', 'loss', 'bad_ack', 'disk_error', 'hold'])
+@pytest.mark.parametrize('scenario', ['idle_finish', 'drive_finish', 'loss', 'bad_ack', 'disk_error', 'hold', 'resume', 'controller_pause'])
 def test_web_lifecycle_uses_explicit_actions_and_always_cleans_up(monkeypatch, tmp_path, scenario):
     import base_teleop_web as web
     import json
@@ -172,9 +172,12 @@ def test_web_lifecycle_uses_explicit_actions_and_always_cleans_up(monkeypatch, t
                 if scenario == 'idle_finish': return 'finish'
                 return 'hold' if scenario == 'hold' else 'start'
             if scenario == 'hold': return 'finish'
-            if scenario == 'loss':
+            if scenario in ('loss', 'resume') and self.round==2:
                 self.configure(expired=True)
                 return None
+            if scenario=='resume' and self.round==3:
+                self.configure(expired=False,last=stamp)
+                return 'start'
             return 'finish'
     class Server:
         server_port = 12345
@@ -189,11 +192,13 @@ def test_web_lifecycle_uses_explicit_actions_and_always_cleans_up(monkeypatch, t
     monkeypatch.setattr(web, 'send', lambda port, data: calls.append(data.decode().split()))
     def receive(port, timeout):
         command = calls[-1]
+        if scenario=='controller_pause' and command[0]=='D':
+            return dict(type='paused',armed=False,fault=False,stop_confirmed=True,hold_confirmed=True)
         return dict(type='armed' if command[0]=='ARM' else 'ack', armed=True,
                     fault=scenario=='bad_ack' and command[0]=='D',
                     session=int(command[1],16), sequence=0 if command[0]=='ARM' else int(command[2],16))
     monkeypatch.setattr(web, 'receive', receive)
-    monkeypatch.setattr(web, 'stop', lambda port: calls.append('stop') or {'stop_confirmed':True})
+    monkeypatch.setattr(web, 'stop', lambda port: calls.append('stop') or {'stop_confirmed':True,'fault':False})
     if scenario == 'disk_error':
         original = web.SessionRecord.write
         def write(self, event, **data):
@@ -212,6 +217,12 @@ def test_web_lifecycle_uses_explicit_actions_and_always_cleans_up(monkeypatch, t
     else:
         assert calls[0][0]=='ARM' and calls[-1]=='stop'
         assert lines[-1]['stop']['stop_confirmed']
+    if scenario in ('loss','resume','controller_pause'):
+        assert any(row['event']=='paused' for row in lines)
+        arms=[c for c in calls if isinstance(c,list) and c[0]=='ARM']
+        assert len(arms)==(2 if scenario=='resume' else 1)
+        drives=[c for c in calls if isinstance(c,list) and c[0]=='D']
+        assert all(c[2]=='00000001' and c[3]=='Z' for c in drives)
     if scenario=='disk_error': assert not any(isinstance(c,list) and c[0]=='D' for c in calls)
 
 
@@ -222,3 +233,17 @@ def test_live_feedback_requires_all_ids_and_bounded_fresh_read_window():
     for bad in (None, samples[:2], [samples[0]]*3, [dict(samples[0],tick_end_ms=999),*samples[1:]],
                 [dict(samples[0],position_raw=True),*samples[1:]]):
         with pytest.raises(RuntimeError): validate_feedback({'wheel_feedback':bad})
+
+
+
+def test_idle_background_tab_does_not_expire_or_enable_motion():
+    state=Control(); assert state.claim('a'*16, 0)
+    for sequence in range(1, 10):
+        assert state.update('a'*16, sequence, 'Z', sequence*30.)
+        assert state.desired(sequence*30.)=='Z'
+        assert not state.active and not state.expired
+    state.configure(ready=True)
+    assert state.request('a'*16, 10, 'start', 270.01)
+    # Once starting, the unchanged short lease applies again.
+    assert state.take_action(270.30) is None
+    assert not state.active and state.expired

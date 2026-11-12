@@ -56,8 +56,13 @@ def review_capture(records):
             or inventory.get('info',{}).get('motion_enabled') is not False
             or inventory.get('info',{}).get('wheel_samples_supported') is not True):
         raise ValueError('read-only identified wheel capture required')
+    return _review_samples(records[1:])
+
+
+def _review_samples(records, boundaries=()):
     previous=None;ratios={i:[] for i in (7,8,9)};travel={i:[0,0] for i in ratios}
-    for record in records[1:]:
+    for index_record,record in enumerate(records):
+        if index_record in boundaries:previous=None
         if type(record.get('sequence')) is not int or not 0<=record['sequence']<2**32:
             raise ValueError('invalid sequence')
         if previous and (record['sequence']-previous['sequence'])%2**32!=1:
@@ -102,3 +107,75 @@ def review_capture(records):
     return dict(mode='encoder_feedback_scale_review',hardware_enabled=False,motion_authorized=False,
         command_speed_gain_qualified=False,floor_travel_scale_qualified=False,
         wheels=wheels,all_candidates_available=all(w['candidate_available'] for w in wheels))
+
+
+def review_teleop_capture(records):
+    """Reuse encoder fitting with explicitly identified, commanded-drive evidence.
+
+    Paused epochs are separated; never disguise powered teleop as a read-only
+    motor capture or bridge a missing command/ACK with fabricated samples.
+    """
+    if not records or records[0].get('event')!='session':
+        raise ValueError('teleop session header required')
+    info=records[0].get('firmware',{})
+    if info.get('firmware')!='mobile-base-hold-teleop-v7' or info.get('wheel_feedback') is not True:
+        raise ValueError('identified live-feedback teleop required')
+    samples=[];boundaries=[];pending=None;session=None;sequence=0;last_time=-1
+    counts={k:0 for k in 'FBLRADZ'};seen=set();finished=False;pauses=0
+    for record in records:
+        stamp=record.get('host_monotonic_ns')
+        if type(stamp) is not int or stamp<last_time:
+            raise ValueError('host timestamp regression')
+        last_time=stamp;event=record.get('event')
+        if finished:raise ValueError('records after finished event')
+        if event=='armed':
+            reply=record['reply'];nonce=reply.get('session')
+            if (session is not None or pending is not None or nonce in seen or type(nonce) is not int
+                    or nonce<=0 or reply.get('sequence')!=0 or reply.get('armed') is not True
+                    or reply.get('fault') is not False or reply.get('hold_confirmed') is not True):
+                raise ValueError('invalid armed epoch')
+            session=nonce;sequence=0;seen.add(nonce);boundaries.append(len(samples))
+        elif event=='command':
+            if (pending is not None or session is None or record.get('session')!=session
+                    or record.get('sequence')!=sequence+1 or record.get('motion') not in counts):
+                raise ValueError('unpaired command or sequence gap')
+            pending=record;sequence+=1;counts[record['motion']]+=1
+        elif event=='reply':
+            reply=record['reply']
+            if pending is None:raise ValueError('reply without command')
+            if reply.get('type')=='paused':
+                if not _confirmed_stop(reply):raise ValueError('unconfirmed controller pause')
+                pending=None
+                continue
+            if (reply.get('type')!='ack' or reply.get('session')!=session or reply.get('sequence')!=sequence
+                    or reply.get('armed') is not True or reply.get('fault') is not False
+                    or reply.get('hold_confirmed') is not True):
+                raise ValueError('rejected or mismatched drive reply')
+            wheels=reply.get('wheel_feedback')
+            if not isinstance(wheels,list) or len(wheels)!=3:raise ValueError('missing wheel feedback')
+            samples.append(dict(sequence=sequence,
+                host_started_s=pending['host_monotonic_ns']/1e9,host_received_s=stamp/1e9,
+                wheels=[dict(id=w['id'],ok=True,hal_status=0,position_raw=w['position_raw'],
+                    speed_raw=w['speed_raw'],started_tick_ms=w['tick_begin_ms'],ended_tick_ms=w['tick_end_ms']) for w in wheels]))
+            pending=None
+        elif event=='paused':
+            if pending is not None or not _confirmed_stop(record.get('stop',{})):
+                raise ValueError('unconfirmed pause')
+            session=None;pauses+=1
+        elif event=='finished':
+            if pending is not None or record.get('error') is not None or not _confirmed_stop(record.get('stop') or {}):
+                raise ValueError('incomplete drive or final stop')
+            finished=True
+        elif event not in ('session','hold_requested','hold_ready','hold_checked','arm_requested','browser_expired'):
+            raise ValueError('unknown session event')
+    if not finished or not samples:raise ValueError('complete drive recording required')
+    result=_review_samples(samples,set(boundaries))
+    result.update(source_mode='powered_manual_teleop',command_counts=counts,acknowledged_samples=len(samples),
+        verified_pauses=pauses,final_stop_confirmed=True,
+        missing_directions=[k for k in 'FBLRAD' if not counts[k]])
+    return result
+
+
+def _confirmed_stop(reply):
+    return (reply.get('armed') is False and reply.get('fault') is False
+            and reply.get('stop_confirmed') is True and reply.get('hold_confirmed') is True)

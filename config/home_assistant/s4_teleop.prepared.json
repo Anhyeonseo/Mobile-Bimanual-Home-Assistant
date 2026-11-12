@@ -1,17 +1,17 @@
 {
-  "release": "wheel-hold-984477805a80",
+  "release": "wheel-hold-8b1afa8c0e3d",
   "firmware": "mobile-base-hold-teleop-v7",
   "wheel_feedback": true,
-  "state": "INSTALLED_READ_ONLY_PREFLIGHT_PASSED",
+  "state": "MANUAL_FLOOR_TRANSLATION_TESTED_STOPPED_HOLD_MAINTAINED",
   "source_date": "2026-11-12",
-  "hardware_drive_tested": false,
-  "hold_activated": false,
-  "motor_write_commands": 0,
+  "hardware_drive_tested": true,
+  "hold_activated": true,
+  "motor_write_commands": null,
   "full_flash_backup_bytes": 524288,
   "boot_journal_preserved": true,
-  "preflight": "SETUP_PLAN_READY; all 13 held axes torque OFF; lift in speed mode, explicit hold required",
-  "required_next_action": "Operator-supported Hold then Start in the browser; no automatic movement",
-  "local_tests_passed": 222,
+  "preflight": "Fresh hold plan and explicit hold passed; 13 axes maintained through manual drive and verified wheel stop",
+  "required_next_action": "Record both Q/E rotations during the next floor mapping session; qualify metric floor motion and actual SLAM",
+  "local_tests_passed": 237,
   "browser_preview_flow_verified": true,
   "installed_info": {
     "firmware": "mobile-base-hold-teleop-v7",
@@ -32,12 +32,28 @@
     "wheel_feedback": true
   },
   "postinstall_plan_reason": "SETUP_PLAN_READY",
-  "raw_evidence_directory": "output/s4-teleop-usability-20261112",
+  "raw_evidence_directory": "output/s4-floor-teleop-20261112",
   "local_build_verified": true,
   "web_session": {
-    "state": "idle_no_motor_commands",
-    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T072132Z-5790fc42.jsonl",
-    "port": 18766,
-    "required_next_action": "operator current-pose hold and manual drive"
-  }
+    "state": "closed_after_verified_stop_and_recording",
+    "recording": "/home/hyper/robot/shared/diagnostics/teleop-sessions/20261112T075056Z-3700c4fc.jsonl",
+    "port": 18766
+  },
+  "firmware_installed_by_release": "wheel-hold-8b1afa8c0e3d",
+  "hold_partially_applied": false,
+  "prepared_recovery_release": "wheel-hold-8b1afa8c0e3d",
+  "recovery_installation": "completed_backup_and_journal_verified",
+  "recovery_local_tests_passed": 237,
+  "hold_failure": {
+    "reason": "SETUP_LIFT_MODE_POSITION_CHANGED",
+    "before_raw": 3778,
+    "after_raw": 3693,
+    "stored_offset_raw": 85,
+    "last_observed_lift_torque": 0,
+    "last_observed_lift_mode": 0,
+    "operator_observed_motion": false,
+    "raw_evidence": "output/s4-floor-teleop-20261112/hold-failure.jsonl",
+    "scope": "Historical failed attempt; superseded by successful hold and drive. Not the current torque state."
+  },
+  "latest_physical_evidence": "config/home_assistant/s4_floor_teleop.observed.json"
 }

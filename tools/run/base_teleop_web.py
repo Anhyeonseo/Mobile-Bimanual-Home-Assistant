@@ -59,7 +59,7 @@ class Control:
 
     def _expire(self, now):
         # Called with lock held, including in update before accepting late input.
-        if self.owner is not None and now - self.last >= BROWSER_LEASE:
+        if (self.active or self.busy) and self.owner is not None and now - self.last >= BROWSER_LEASE:
             self.expired, self.motion = True, "Z"
 
     def desired(self, now):
@@ -160,11 +160,11 @@ h1{font-size:26px}#status{padding:16px;background:#233447;border-radius:12px;mar
 <button data-key="q">Q ↶<br>왼쪽 회전</button><button data-key="w">W ↑<br>전진</button><button data-key="e">E ↷<br>오른쪽 회전</button>
 <button data-key="a">A ←<br>왼쪽 이동</button><button id="stop">Space<br>정지</button><button data-key="d">D →<br>오른쪽 이동</button>
 <div></div><button data-key="s">S ↓<br>후진</button></div>
-<small>한 방향씩 조작합니다. 창을 벗어나면 정지 요청을 보냅니다. 통신이 끊기면 정지하고, 조종 화면을 다시 실행해 새 주소로 접속하세요.<br>저장하고 종료는 바퀴를 끄고 조종 기록을 저장합니다. 지도 저장은 별도 매핑 기능에서 합니다. 정지하지 않으면 모터 12V를 차단하세요.</small>
+<small>한 방향씩 조작합니다. 창을 벗어나면 정지 요청을 보냅니다. 통신이 끊기면 잠시 정지하고 연결을 다시 확인합니다. 연결 복구 후 조종 시작을 눌러 이어가세요.<br>저장하고 종료는 바퀴를 끄고 조종 기록을 저장합니다. 지도 저장은 별도 매핑 기능에서 합니다. 정지하지 않으면 모터 12V를 차단하세요.</small>
 <script>
 const token=location.hash.slice(1), newClient=()=>crypto.randomUUID?crypto.randomUUID():Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
 const mapping={w:'F',s:'B',a:'L',d:'R',q:'A',e:'D'},pressed=new Map();
-let client,seq=0,claimed=false,active=false,inFlight=false,pending=false,action=null;
+let client,seq=0,claimed=false,active=false,inFlight=false,pending=false,action=null,heartbeat=null;
 const status=document.querySelector('#status'), buttons=[...document.querySelectorAll('[data-key]')];
 const holdButton=document.querySelector('#hold'),startButton=document.querySelector('#start'),finishButton=document.querySelector('#finish'),supported=document.querySelector('#supported'),recordLabel=document.querySelector('#record');
 function render(r){active=r.active;status.textContent=r.status;
@@ -185,7 +185,7 @@ finishButton.addEventListener('click',()=>requestAction('finish'));
 function motion(){const keys=[...pressed.values()];return mapping[keys[keys.length-1]]||'Z';}
 function paint(){for(const b of buttons)b.classList.toggle('on',[...pressed.values()].includes(b.dataset.key));}
 async function post(path,data){
- const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),200);
+ const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),1500);
  try{
   const r=await fetch(path,{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(data),cache:'no-store',signal:abort.signal});
   if(!r.ok)throw Error('HTTP '+r.status);
@@ -203,7 +203,9 @@ async function transmit(){
   latest=r;render(r);
  }catch(e){
   claimed=false;active=false;pressed.clear();paint();
-  status.textContent='연결 만료 · 키를 놓고 조종 화면을 다시 실행하세요';
+  action=null;clearInterval(heartbeat);heartbeat=null;
+  render({...latest,active:false,busy:true,ended:false,status:'일시정지 · 연결을 다시 확인하고 있어요'});
+  setTimeout(claim,1000);
  }finally{
   inFlight=false;
   if(pending&&claimed){pending=false;transmit();}
@@ -216,7 +218,7 @@ window.addEventListener('keyup',e=>{const k=keyName(e);if(mapping[k]){e.preventD
 for(const b of buttons){b.addEventListener('pointerdown',e=>{e.preventDefault();if(active){b.setPointerCapture(e.pointerId);pressed.set('ptr:'+e.pointerId,b.dataset.key);paint();transmit();}});for(const kind of ['pointerup','pointercancel','lostpointercapture'])b.addEventListener(kind,e=>{pressed.delete('ptr:'+e.pointerId);paint();transmit();});}
 document.querySelector('#stop').addEventListener('pointerdown',release);
 window.addEventListener('blur',release);window.addEventListener('pagehide',release);document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
-async function claim(){client=newClient();seq=0;if(!token){status.textContent='실행 시 표시된 전체 조종 주소로 접속하세요.';return;}try{const r=await post('/claim',{client});claimed=true;latest=r;render(r);setInterval(transmit,100);}catch(e){status.textContent='연결 대기 · 다른 조종창은 닫아주세요.';setTimeout(claim,1000);}}
+async function claim(){client=newClient();seq=0;if(!token){status.textContent='실행 시 표시된 전체 조종 주소로 접속하세요.';return;}try{const r=await post('/claim',{client});claimed=true;latest=r;render(r);clearInterval(heartbeat);heartbeat=setInterval(transmit,100);}catch(e){status.textContent='연결 대기 · 다른 조종창은 닫아주세요.';setTimeout(claim,1000);}}
 claim();
 </script></html>'''
 
@@ -268,7 +270,19 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions")
     control.set_status(False, "현재 자세를 유지한 뒤 조종을 시작하세요" if held_mode else "조종 시작을 눌러 주세요")
     server = None
     thread = None
-    arm_sent, stopped, error = False, None, None
+    arm_sent, ever_armed, stopped, error = False, False, None, None
+    def pause_drive(reason):
+        nonlocal arm_sent, stopped
+        control.configure(active=False, busy=True, motion="Z",
+                          status="입력 연결 확인 중 · 바퀴 정지 중")
+        stopped = stop(port)  # also consumes any already queued controller reply
+        if stopped.get("fault") is not False:
+            raise RuntimeError("controller fault requires inspection: " + json.dumps(stopped))
+        arm_sent = False
+        record.write("paused", reason=reason, stop=stopped)
+        control.configure(busy=False, ready=True,
+                          status="일시정지 · 연결 복구 후 조종 시작을 눌러 주세요")
+
     try:
         record.write("session", firmware=info, calibrated_odometry=False,
                      clock_note="Host timestamps bracket replies; MCU ticks wrap at 2^32 ms. Not hardware synchronized.")
@@ -301,18 +315,20 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions")
                     continue
                 nonce = secrets.randbelow(0xffffffff) + 1
                 record.write("arm_requested", session=nonce)
-                arm_sent = True
+                arm_sent = ever_armed = True
+                stopped = None
+                seq = 0
                 send(port, frame(f"ARM {nonce:08X}"))
                 reply = receive(port, 6)
                 validate(reply, "armed", nonce, 0)
                 record.write("armed", reply=reply)
-                control.configure(busy=False)
-                control.set_status(True, "조종 중 · 키나 버튼을 놓으면 멈춥니다")
+                control.configure(busy=False, active=True, status="조종 중 · 키나 버튼을 놓으면 멈춥니다")
             if arm_sent:
                 motion = control.desired(time.monotonic())
                 if control.expired:
                     record.write("browser_expired")
-                    break
+                    pause_drive("browser_input_gap")
+                    continue
                 seq += 1
                 if seq > 0xffffffff: raise RuntimeError("sequence exhausted")
                 # Write intent before issuing a command. Disk errors never lead to
@@ -321,6 +337,11 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions")
                 send(port, frame(f"D {nonce:08X} {seq:08X} {motion}"))
                 reply = receive(port, response_timeout())
                 record.write("reply", reply=reply)
+                if (reply.get("type") == "paused" and reply.get("armed") is False
+                        and reply.get("fault") is False and reply.get("stop_confirmed") is True
+                        and (not held_mode or reply.get("hold_confirmed") is True)):
+                    pause_drive("controller_input_gap")
+                    continue
                 validate(reply, "ack", nonce, seq)
                 if info.get("wheel_feedback") is True: validate_feedback(reply)
             remaining = PERIOD - (time.monotonic() - tick)
@@ -335,14 +356,14 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions")
             error = RuntimeError(f"{error or 'exit'}; STOP failed: {exc}. Cut motor 12 V power.")
         try:
             record.write("finished", stop=stopped, error=str(error) if error else None,
-                         wheel_session_started=arm_sent, map_saved=False)
+                         wheel_session_started=ever_armed, map_saved=False)
             record.close()
         except Exception as exc:
             error = RuntimeError(f"{error or 'exit'}; recording save failed: {exc}")
             if not record.file.closed: record.file.close()
-        control.configure(ended=True, busy=False)
-        control.set_status(False, "정지·기록 저장 완료 · 팔과 리프트의 힘은 유지됩니다" if not error and held_mode and arm_sent
-                           else "기록 저장 완료" if not error else "종료 중 문제 발생 · 실행 로그를 확인하세요")
+        control.configure(ended=True, busy=False, active=False, motion="Z",
+                          status="정지·기록 저장 완료 · 팔과 리프트의 힘은 유지됩니다" if not error and held_mode and ever_armed
+                          else "기록 저장 완료" if not error else "종료 중 문제 발생 · 실행 로그를 확인하세요")
         # Let the page receive the final persisted result before closing HTTP.
         if server:
             try:

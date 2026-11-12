@@ -37,7 +37,7 @@ int main(void){
     for(unsigned b=0;b<2;b++)for(unsigned id=0;id<256;id++)for(unsigned addr=0;addr<72;addr++)
     for(unsigned length=1;length<=16;length++){
         bool held=(id>=1&&id<=6)||(!b&&id==10),wheel=!b&&id>=7&&id<=9;
-        bool ok=(held&&((addr==33&&length==1)||(addr==40&&length==8)||((addr==3||addr==56)&&length==4)||(!b&&id==10&&((addr==9&&length==4)||((addr==40||addr==55)&&length==1)||(addr==42&&length==2)))))||
+        bool ok=(held&&((addr==33&&length==1)||(addr==40&&length==8)||((addr==3||addr==56)&&length==4)||(!b&&id==10&&((addr==9&&length==4)||(addr==31&&length==3)||((addr==40||addr==55)&&length==1)||(addr==42&&length==2)))))||
             (wheel&&((addr==3&&length==4)||((addr==33||addr==40||addr==55)&&length==1)||
                 ((addr==46||addr==58||addr==56)&&length==2)));
         uint8_t p[8]={255,255,id,4,2,addr,length,0};check(b,0,p,8,ok,false);

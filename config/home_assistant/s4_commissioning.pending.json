@@ -20,11 +20,17 @@
   },
   "measurement_inputs": {
     "wheel_geometry_and_raw_speed_scale": {
-      "status": "reuse_verified_teleop_direction_layout_pending_numeric_floor_scale",
+      "status": "manual_floor_translation_passed_encoder_speed_candidates_available_floor_scale_pending",
       "geometry": "config/home_assistant/s4_base.nominal.json",
       "raw_per_rad_s": null,
       "hardware_enabled": false,
-      "evidence": "config/home_assistant/s4_response_diagnostics.observed.json"
+      "evidence": "config/home_assistant/s4_floor_teleop.observed.json",
+      "candidate_raw_per_encoder_rad_s": [
+        627.4524476454882,
+        621.3408978307593,
+        627.4524476454882
+      ],
+      "candidate_applied": false
     },
     "lidar_base_extrinsics": {
       "status": "operator_reviewed_nominal_not_precision_calibrated",
@@ -74,7 +80,9 @@
     "2026-11-12: user authenticated; read-only inspection firmware installed with full flash backup and boot journal preservation. Wheel/lift queries and concurrent LDS/D415 capture verified; no motor writes. Right-arm pre-install timeouts and wheel 8 stationary speed discrepancy remain unqualified for motion.",
     "2026-11-12 follow-up: fixed-block inventory added to read-only inspection image. Right arm initially timed out, then recovered without another commanded reset; 154 complete 16-device rounds passed. Wheel 8 +/-50 register reports persist across reset and changed position with torque/current zero and a one-count band. Manual movement did not qualify bidirectional scale; no stop gate relaxed.",
     "Existing S1 policy and v7 teleop already cover +/-50 stationary speed reports with 400 ms encoder stability <=8 counts, goal speed zero and torque OFF. The observed 1-count band is within that existing range. Raised-wheel prerequisite withdrawn; reuse established floor teleop and LDS/encoder comparison. No threshold or raw feedback changed.",
-    "2026-11-12: existing wheel/hold teleop extended with explicit browser Hold/Start/Finish and raw wheel feedback recording. Release wheel-hold-984477805a80 installed with full flash backup and journal preservation; all 16 devices responded with torque OFF before installation, read-only post-install hold plan passed. No motor write or physical drive was performed. Numeric floor scale and autonomous S4 acceptance remain pending."
+    "2026-11-12: existing wheel/hold teleop extended with explicit browser Hold/Start/Finish and raw wheel feedback recording. Release wheel-hold-984477805a80 installed with full flash backup and journal preservation; all 16 devices responded with torque OFF before installation, read-only post-install hold plan passed. No motor write or physical drive was performed. Numeric floor scale and autonomous S4 acceptance remain pending.",
+    "2026-11-12 actual setup: browser idle expiry fixed by host-only update. Twelve arm holds applied before lift position changed 3778 to 3693 on mode 1 to 0, exactly matching stored +85 offset; operator saw no movement. Setup stopped with lift torque OFF/mode 0 and wheel ARM never sent. Prepared recovery release wheel-hold-8b1afa8c0e3d corrects mode coordinates and resumes verified communication pauses without reset; 237 regressions passed; subsequently installed and tested as recorded below. Do not assume all torque OFF.",
+    "2026-11-12 actual floor teleop: wheel-hold-8b1afa8c0e3d installed with full backup/journal verification. Explicit hold succeeded. 1433 ACKs over 76.14 s, no communication pauses or controller faults, operator reported no abnormalities. Commands contain F/B/L/R but no A/D rotation; do not accept yaw qualification from the operator report alone. Final wheel stop verified, both arms and lift remain torque ON. Web session closed. Encoder speed candidates are not an adopted floor-distance calibration; autonomous endpoint and actual SLAM remain pending."
   ],
   "target_observed_on": "2026-11-12",
   "target_environment": {
@@ -83,17 +91,17 @@
     "python": "3.12.3",
     "runtime_scope": "user-owned isolated prefix; not an active robot service",
     "lidar_connected": true,
-    "controller_stop_latched": null,
+    "controller_stop_latched": false,
     "controller_firmware": "mobile-base-hold-teleop-v7",
     "controller_reset_or_flashed": true,
-    "motor_commands_sent": 0,
+    "motor_commands_sent": null,
     "report": "docs/S4_JETSON_PREPARATION.md",
     "lidar_stream_received": true,
     "lidar_checked_on": "2026-11-12",
     "lidar_evidence": "config/home_assistant/lidar_device.connected.observed.json",
     "lidar_ros_scan_received": true,
     "lidar_cadence_qualified": true,
-    "lidar_cadence_scope": "stationary concurrent RGB-D 60 seconds; 291 lidar frames, max gap 0.201432 s, no gaps over 0.35 s; moving timing/load unqualified",
+    "lidar_cadence_scope": "120 s LDS-only capture including all short manual translations; 589 scans, max gap 0.202323 s, no gaps over 0.35 s. Moving RGB-D and deskew remain unqualified",
     "replacement_lidar_mount_fixed_user_confirmed": true,
     "mobile_endpoint_available": false,
     "mobile_endpoint_inspection": "Previous inspection endpoint replaced by manual INFO/HOLD/PREP/HSET/ARM/D/STOP; binary autonomous motion endpoint is not installed",
@@ -108,9 +116,11 @@
     "right_arm_response_restored": true,
     "right_arm_root_cause_confirmed": false,
     "controller_inspection_release": "s4-inspection-4b60ea01f357",
-    "controller_teleop_release": "wheel-hold-984477805a80",
+    "controller_teleop_release": "wheel-hold-8b1afa8c0e3d",
     "controller_teleop_evidence": "config/home_assistant/s4_teleop.prepared.json",
-    "manual_teleop_available": true
+    "manual_teleop_available": true,
+    "manual_teleop_web_active": false,
+    "latest_floor_drive_evidence": "config/home_assistant/s4_floor_teleop.observed.json"
   },
   "operator_reported_state": {
     "local_date": "2026-11-12",
@@ -118,6 +128,6 @@
     "arms_supported": true,
     "lift_lowest": true,
     "grippers_empty": true,
-    "scope": "operator confirmation for this stationary inspection, not reusable live travel interlocks"
+    "scope": "Supported manual floor drive, no abnormalities reported; not reusable future travel clearance"
   }
 }
