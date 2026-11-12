@@ -89,7 +89,7 @@ def test_stop_consumes_prior_ack_and_requires_actual_confirmation():
     with pytest.raises(RuntimeError): module.stop(Port([dict(type="stopped", armed=False, stop_confirmed=False)]))
 
 
-@pytest.mark.parametrize("bad_ack", [False, True])
+@pytest.mark.parametrize("bad_ack", [False, True, 'write_timeout'])
 def test_interactive_exit_or_error_always_stops_and_restores_terminal(monkeypatch, bad_ack):
     class InteractivePort(Port):
         def __init__(self): super().__init__([])
@@ -101,6 +101,7 @@ def test_interactive_exit_or_error_always_stops_and_restores_terminal(monkeypatc
             elif data.startswith(b"ARM "):
                 response = dict(type="armed", session=123, sequence=0, armed=True, fault=False)
             elif data.startswith(b"D "):
+                if bad_ack=='write_timeout':raise OSError('Write timeout')
                 response = dict(type="ack", session=123, sequence=99 if bad_ack else 1, armed=True, fault=False)
             else:
                 assert data == b"STOP\n"
@@ -118,7 +119,7 @@ def test_interactive_exit_or_error_always_stops_and_restores_terminal(monkeypatc
     monkeypatch.setattr(module.secrets, "randbelow", lambda n: 122)
     port = InteractivePort()
     if bad_ack:
-        with pytest.raises(RuntimeError): module.run(port, 1)
+        with pytest.raises((RuntimeError,OSError)): module.run(port, 1)
     else: assert module.run(port, 1)["stop_confirmed"]
     assert restored == [["saved"]]
     assert port.writes[-1] == b"STOP\n"
@@ -153,13 +154,14 @@ termios.tcsetattr = lambda *a: None
 tty.setcbreak = lambda *a: None
 class Port:
     data = bytearray()
-    def __init__(self, *a, **k): pass
+    def __init__(self, *a, **k): self.read_timeout=k['timeout'];self.write_timeout=k['write_timeout']
     def __enter__(self): return self
     def __exit__(self, *a): pass
     def reset_input_buffer(self): pass
     def read(self, n):
         result = bytes(self.data[:n]); del self.data[:n]; return result
     def write(self, data):
+        assert self.read_timeout==.01 and .03<self.write_timeout<.3
         parts = data.decode().split()
         with open(log, "a") as f: f.write(parts[0]+"\n")
         if parts[0] == "INFO":

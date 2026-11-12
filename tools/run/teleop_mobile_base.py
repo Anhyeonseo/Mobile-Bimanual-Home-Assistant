@@ -25,6 +25,7 @@ from so101_arm_bridge.serial_port import open_exclusive_serial
 KEYS = {"w": "F", "s": "B", "a": "L", "d": "R", "q": "A", "e": "D"}
 INPUT_LEASE = .3
 PERIOD = .05
+WRITE_TIMEOUT_S = .1
 PRESERVE_HOLD = False
 
 
@@ -270,6 +271,9 @@ def main():
         import serial
         with stopping_signals(), acquire_backend_lease("stm32", 0):
             with open_exclusive_serial(serial, args.port, 921600, .01) as port:
+                # Reading polls quickly; a USB write needs a separate bounded
+                # scheduling budget. Never retry a motion command after failure.
+                port.write_timeout = WRITE_TIMEOUT_S
                 if args.stop_wheels:
                     inspect(port);print(json.dumps(settle_wheels(port),indent=2))
                 elif args.prepare_hold:print(json.dumps(prepare_hold(port,args.execute),indent=2))

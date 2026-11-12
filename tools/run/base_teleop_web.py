@@ -322,9 +322,19 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions",
         raw=Path(map_path).read_bytes();map_hash=hashlib.sha256(raw).hexdigest()
         control.localization_map=json.loads(raw)
         control.configure(localization=localization_status(localization_path,record.path,map_hash,time.monotonic()))
+    last_localization_ready=None
     def refresh_localization():
+        nonlocal last_localization_ready
         if localization_path:
             control.configure(localization=localization_status(localization_path,record.path,map_hash,time.monotonic()))
+            ready=control.localization['ready']
+            if ready!=last_localization_ready:
+                record.write('localization_changed',policy='manual_advisory_after_start',
+                             localization={k:v for k,v in control.localization.items() if k!='scan_points'})
+                last_localization_ready=ready
+            if arm_sent:
+                control.configure(status='조종 중 · 키나 버튼을 놓으면 멈춥니다' if ready else
+                                  '위치 갱신 지연 · 지도 표시 참고용 · 수동 조종 중')
         return control.localization is None or control.localization['ready']
     def pause_drive(reason):
         nonlocal arm_sent, stopped
@@ -357,8 +367,10 @@ def run_web(port, bind="127.0.0.1", web_port=8765, record_dir="teleop-sessions",
             localization_ready=refresh_localization()
             action = control.take_action(tick)
             if action == "finish": break
-            if arm_sent and not localization_ready:
-                pause_drive('localization_unavailable');continue
+            # This screen is operator-driven teleop, not autonomous navigation.
+            # Location readiness gates initial Start, but map-quality loss alone
+            # is advisory during manual driving. Input leases, ACK/hold checks
+            # and STOP verification remain authoritative and unchanged.
             if action == "hold":
                 control.set_status(False, "현재 자세 유지 설정 중 · 받침을 유지하세요")
                 record.write("hold_requested")

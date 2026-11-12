@@ -93,14 +93,15 @@ def test_missing_localization_cannot_arm_even_with_forged_start_action(tmp_path,
     assert records[-1]['wheel_session_started'] is False
 
 
-def test_localization_loss_stops_wheels_without_automatic_restart(tmp_path,monkeypatch):
+@pytest.mark.parametrize('ack_failure',[False,True])
+def test_manual_localization_warning_does_not_pause_but_ack_failure_still_stops(tmp_path,monkeypatch,ack_failure):
     import base_teleop_web as web
     sent=[]
     class Control(web.Control):
         calls=0
         def take_action(self,now):
             self.calls+=1
-            return {1:'start',3:'finish'}.get(self.calls)
+            return {1:'start',4:'finish'}.get(self.calls)
     class Server:
         server_port=1234
         def __init__(self,*args):pass
@@ -120,13 +121,24 @@ def test_localization_loss_stops_wheels_without_automatic_restart(tmp_path,monke
     monkeypatch.setattr(web,'stop',stop)
     monkeypatch.setattr(web,'send',lambda port,data:sent.append(data.decode().split()[0]))
     monkeypatch.setattr(web,'receive',lambda *args:dict(type='ack',fault=False))
-    monkeypatch.setattr(web,'validate',lambda *args:None)
+    def validate(*args):
+        if ack_failure and sent.count('D')==2:raise RuntimeError('ack missing')
+    monkeypatch.setattr(web,'validate',validate)
     monkeypatch.setattr(web.time,'sleep',lambda _:None)
     map_path=tmp_path/'map.json';map_path.write_text('{}')
-    web.run_web(None,record_dir=tmp_path/'records',localization_path=tmp_path/'status',map_path=map_path)
-    assert sent==['STOP','ARM','D','STOP']
+    def run():web.run_web(None,record_dir=tmp_path/'records',localization_path=tmp_path/'status',map_path=map_path)
+    if ack_failure:
+        with pytest.raises(RuntimeError,match='ack missing'):run()
+        assert sent==['STOP','ARM','D','D','STOP']
+    else:
+        run()
+        assert sent==['STOP','ARM','D','D','D','STOP']
     records=[json.loads(row) for row in next((tmp_path/'records').glob('*.jsonl')).read_text().splitlines()]
-    assert any(r['event']=='paused' and r['reason']=='localization_unavailable' for r in records)
+    assert not any(r['event']=='paused' for r in records)
+    changes=[r for r in records if r['event']=='localization_changed']
+    assert [r['localization']['ready'] for r in changes]==[True,False]
+    assert changes[-1]['policy']=='manual_advisory_after_start'
+    assert records[-1]['stop']['stop_confirmed']
 
 
 def test_fresh_arm_positions_bridge_idle_to_first_feedback_without_grace():

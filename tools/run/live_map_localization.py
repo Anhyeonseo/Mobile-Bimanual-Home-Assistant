@@ -137,12 +137,18 @@ def main():
     offset=node.get_clock().now().nanoseconds/1e9-time.monotonic()
     def ros_stamp(stamp):return Time(nanoseconds=round((stamp+offset)*1e9)).to_msg()
     def write_status(ready,message):
+        now=time.monotonic()
         data=dict(schema_version=1,teleop_record=str(a.teleop_record),map_sha256=map_hash,
             host_monotonic_s=time.monotonic(),ready=ready,message=message,
+            scan_age_s=None if health.scan_stamp is None else now-health.scan_stamp,
+            localization_age_s=None if health.localization_stamp is None else now-health.localization_stamp,
+            encoder_age_s=None if encoder.last_feedback is None else now-encoder.last_feedback,
             initialized=initialized,fit_fraction=fit,health=health.report(),encoder_ready=encoder.valid(time.monotonic()),pose_xy_yaw=None if last_pose is None else last_pose['xy_yaw'],
             scan_points=display_points,odometry_basis='verified_stop_stationary_assumption' if encoder.stationary else 'measured_encoder_positions',
             autonomous_navigation_authorized=False)
         temporary=a.status.with_suffix('.pending');temporary.write_text(json.dumps(data,allow_nan=False));temporary.replace(a.status)
+        with (a.output/'health.jsonl').open('a') as stream:
+            stream.write(json.dumps({k:v for k,v in data.items() if k!='scan_points'},allow_nan=False)+'\n')
     def scan_received(m):
         nonlocal last_scan
         observed=m.header.stamp.sec+m.header.stamp.nanosec/1e9-offset
@@ -224,7 +230,7 @@ def main():
                     if bad>=2:fit_ready=False
             ready=health.ready() and encoder.valid(now) and fit_ready
             if now>=next_status:
-                message='위치 확인 완료 · 지도와 로봇 방향을 확인해 주세요' if ready else '라이다 위치를 확인하고 있어요 · 바퀴 정지 유지'
+                message='위치 확인 완료 · 지도와 로봇 방향을 확인해 주세요' if ready else '위치 갱신 지연 · 지도 표시를 이동 판단에 사용하지 마세요'
                 write_status(ready,message);next_status=now+.1
     except (Exception,KeyboardInterrupt) as exc:
         error=str(exc) or 'observer interrupted'

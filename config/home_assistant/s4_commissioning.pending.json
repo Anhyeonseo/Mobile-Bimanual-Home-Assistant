@@ -51,16 +51,17 @@
     "restart_sensor_localization_arm_lift_readiness": null,
     "jetson_os_shutdown_and_safe_power_removal": null,
     "saved_map_localization": {
-      "status": "live_stationary_map_localization_ready_operator_driving_trial_pending",
+      "status": "live_manual_tracking_observed_advisory_policy_retest_pending",
       "evidence": "config/home_assistant/s4_recorded_mapping.observed.json",
       "profile": "ros2_ws/src/home_robot_tasks/config/localization.replay.yaml",
       "physical_accuracy_qualified": false,
-      "live_service_activated": true,
+      "live_service_activated": false,
       "global_uniform_initialization_accepted": false,
       "initial_scan_hypothesis_seconds": 2.715498750010738,
       "independent_physical_accuracy_qualified": false,
       "live_service_scope": "explicit bounded observer for manual teleop, no autonomous controller",
-      "live_moving_tracking_qualified": false
+      "live_moving_tracking_qualified": false,
+      "latest_manual_trial": "output/s4-live-localization-20261112/trial/review.json"
     }
   },
   "local_acceptance": [
@@ -147,7 +148,7 @@
     "controller_teleop_release": "wheel-hold-a2e478ef6660",
     "controller_teleop_evidence": "config/home_assistant/s4_teleop.prepared.json",
     "manual_teleop_available": true,
-    "manual_teleop_web_active": true,
+    "manual_teleop_web_active": false,
     "latest_floor_drive_evidence": "config/home_assistant/s4_floor_teleop.observed.json",
     "current_wheel_stop_confirmed": true,
     "current_arm_lift_hold_confirmed": true
