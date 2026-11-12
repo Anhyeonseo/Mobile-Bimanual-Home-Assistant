@@ -17,6 +17,8 @@ def furniture_category(label):
     if not isinstance(label, str):
         return None
     category = label.strip().lower().rstrip('.').strip().replace(' ', '_')
+    category = {'desk_table':'table','table_desk':'table','fridge':'refrigerator',
+                'storage_cabinet':'cabinet','shelf':'bookshelf'}.get(category,category)
     return category if category in FURNITURE_CATEGORIES else None
 
 

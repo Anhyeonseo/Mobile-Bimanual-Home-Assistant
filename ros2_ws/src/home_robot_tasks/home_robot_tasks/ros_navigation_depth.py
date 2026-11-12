@@ -13,7 +13,7 @@ from .navigation import number
 from .ros_rgbd_source import image_array, quaternion_transform, RosRGBDSource
 
 
-def projected_grid(volume, *, origin_xy, width, height, now, historical_free=False):
+def projected_grid(volume, *, origin_xy, width, height, now, historical_free=False, height_interval_m=None):
     """Full-height projection: occupied wins; unknown stays -1.
 
 Historical free cells may guide a global route proposal after a scan. They are
@@ -30,8 +30,18 @@ default fresh-only mode and TravelGuard independently checks live depth.
     if len(origin)!=2 or any(abs(v/r-round(v/r))>1e-6 for v in origin):
         raise InvalidTask('grid origin must align with voxel lattice')
     ox,oy=(round(v/r) for v in origin)
-    lo,hi=math.floor(volume.p.minimum_height_m/r),math.ceil(volume.p.maximum_height_m/r)
-    occupied=volume.projected_obstacles()
+    bottom,top=volume.p.minimum_height_m,volume.p.maximum_height_m
+    if height_interval_m is not None:
+        if not isinstance(height_interval_m,(tuple,list)) or len(height_interval_m)!=2:
+            raise InvalidTask('bounded robot height interval required')
+        bottom,top=(number(v,'robot height interval') for v in height_interval_m)
+        if not volume.p.minimum_height_m <= bottom < top <= volume.p.maximum_height_m:
+            raise InvalidTask('robot height interval outside depth coverage')
+    lo,hi=math.floor(bottom/r),math.ceil(top/r)
+    # Keep intersecting voxels, including partially overlapping boundary cells.
+    # Above-body observations cannot block a shorter posture or demand free sky.
+    occupied=frozenset((x,y) for (x,y,z),(hit,stamp) in volume.cells.items()
+                       if hit and lo <= z < hi)
     def free(cell):
         if not historical_free:
             return volume.free(cell,now)

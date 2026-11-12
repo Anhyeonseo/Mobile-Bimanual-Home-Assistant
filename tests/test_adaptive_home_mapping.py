@@ -112,7 +112,7 @@ def test_rgb_categories_and_masked_shapes_share_existing_detector(environment):
     now, service, _ = environment
     class Model:
         def detect(self, image, prompt):
-            assert 'coffee table' in prompt
+            assert 'table' in prompt and 'refrigerator' in prompt
             return [{'label':'desk','score':.9,'box_xyxy':[1,1,19,19]}], None
     class Segmenter:
         def segment(self, image, boxes):

@@ -165,7 +165,8 @@ class AdaptiveMap:
             if 0 <= x < nav.width and 0 <= y < nav.height:
                 laser[y][x] = '#'
         projection = projected_grid(volume, origin_xy=(nav.ox,nav.oy), width=nav.width,
-                                    height=nav.height, now=now_s)
+                                    height=nav.height, now=now_s,
+                                    height_interval_m=(nav.floor_z,nav.floor_z+envelope.height_m))
         chars = {100:'#', 0:'.', -1:'?'}
         depth = [''.join(chars[v] for v in projection[y*nav.width:(y+1)*nav.width])
                  for y in range(nav.height)]

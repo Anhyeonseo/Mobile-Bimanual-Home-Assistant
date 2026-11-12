@@ -15,8 +15,12 @@ from .perception import TransformSample
 
 
 FURNITURE_CATEGORIES = ('bed', 'sofa', 'desk', 'table', 'coffee_table', 'chair',
-                        'wardrobe', 'bookshelf', 'nightstand', 'cabinet')
-FURNITURE_PROMPT = ' . '.join(c.replace('_', ' ') for c in FURNITURE_CATEGORIES) + ' .'
+                        'wardrobe', 'bookshelf', 'nightstand', 'cabinet', 'refrigerator')
+# Major household landmarks only. Native depth keeps every obstacle, including
+# unnamed small objects; semantic filtering never changes collision geometry.
+# Distractor classes prevent baskets/fans being forced into a furniture label.
+# They are deliberately absent from FURNITURE_CATEGORIES and are not mapped.
+FURNITURE_PROMPT = 'table . chair . sofa . bed . cabinet . bookshelf . wardrobe . refrigerator . nightstand . storage basket . appliance .'
 
 
 def masked_furniture(*, category, detector_score, detection_id, mask, depth_m,
