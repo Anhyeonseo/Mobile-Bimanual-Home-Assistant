@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>HOMETEKHU · 시연 시나리오</title>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      .manual-page {
+        background: white;
+        max-width: 1000px;
+        margin: 35px auto;
+        border: 1px solid #e4e8ef;
+        border-radius: 24px;
+        padding: 52px 58px;
+      }
+      .manual-page p,
+      .manual-page li {
+        color: #657083;
+      }
+      .manual-page h2 {
+        color: #405a77;
+      }
+      .scenario-script {
+        margin: 30px 0;
+        border-top: 1px solid #e5e9ef;
+        padding-top: 15px;
+      }
+      .meta {
+        font-size: 11px;
+        letter-spacing: 1px;
+        color: #8295aa;
+        margin-bottom: 10px;
+      }
+      .quote {
+        border-left: 3px solid #8199b5;
+        padding: 13px 18px;
+        background: #f1f4f8;
+        font-size: 14px;
+        line-height: 1.9;
+        color: #526b88;
+        margin: 16px 0;
+      }
+      .manual-page .logo {
+        width: 180px;
+      }
+      .manual-page .note {
+        margin: 24px 0;
+        color: #657d96;
+      }
+      .manual-page table td {
+        vertical-align: top;
+        color: #657083;
+      }
+      .manual-page table th {
+        background: #f1f4f8;
+        color: #5a718d;
+      }
+      .manual-page .btn {
+        color: #fff;
+      }
+      .sample-tag {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 5px;
+        background: #edf1f6;
+        color: #6a829e;
+        font-size: 10px;
+        margin-right: 8px;
+      }
+      @media (max-width: 600px) {
+        .manual-page {
+          margin: 0;
+          padding: 30px 22px;
+          border: 0;
+          border-radius: 0;
+        }
+        .manual-page h1 {
+          font-size: 28px;
+        }
+        .manual-page table {
+          font-size: 11px;
+        }
+        .manual-page th,
+        .manual-page td {
+          padding: 10px 7px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="manual-page">
+      <img src="assets/hometekhu-logo.svg" class="logo" alt="HOMETEKHU" />
+      <div class="meta">ROBOTICS FOR EVERYDAY · DEMO PLAYBOOK</div>
+      <h1>기능 대신, 일상을 보여주세요.</h1>
+      <p>
+        로봇을 처음 만나는 순간부터 반복되는 부탁까지. 사용자 관점에서 이어지는 여섯 가지 시연
+        시나리오입니다. 전체 시연은 약 8~10분입니다.
+      </p>
+      <div class="note blue">
+        이 앱은 예시 데이터로 동작하는 인터랙티브 프로토타입입니다. 실제 로봇, 카메라, Bluetooth,
+        Wi-Fi, 계정 서비스에 연결하지 않습니다. 화면 위쪽 ‘체험’에서 각 시나리오의 진행 안내를 켤 수
+        있습니다.
+      </div>
+      <a class="btn btn-primary" href="./">앱 열기 →</a>
+
+      <section class="scenario-script">
+        <div class="meta">SCENARIO 01 · 약 2분</div>
+        <h2>처음 만나는 로미</h2>
+        <p>
+          <strong>사용자:</strong>
+          로봇을 구매하고 앱을 처음 켠 지우. 기술 지식 없이 집 안에서 로봇을 쓸 준비를 마치고
+          싶습니다.
+        </p>
+        <div class="quote">
+          “로봇을 샀을 때 가장 먼저 필요한 건 기능 목록이 아니라, ‘지금 무엇을 하면 되는지’에 대한
+          안내입니다.”
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 12%">순서</th>
+              <th style="width: 46%">직접 보여줄 행동</th>
+              <th>사용자가 확인하는 결과</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>시연 가이드 → ‘처음 만나는 로미’ 시작. 이름과 집 이름 입력.</td>
+              <td>개인화된 환영과 우리 집 정보.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>주변 기기·네트워크 안내 확인 → 로미 찾기.</td>
+              <td>권한이 필요한 이유, 선택 가능한 알림.</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>HK-2026-001 확인 → 로봇 이름 지정 → 예시 Wi-Fi 연결.</td>
+              <td>기기 식별과 연결 완료. 실패 체험 버튼으로 재시도 안내도 확인.</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>집 지도 만들기. 약 15초 동안 탐색 → 저장.</td>
+              <td>진행률과 길쭉한 실내 지도, 12개 가구 관측점. 중간에 멈추고 재개 가능.</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>‘첫 부탁 하러 가기’ 선택.</td>
+              <td>‘검은 머그컵을 침실 협탁으로’라는 첫 요청이 준비됨.</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="quote">
+          “연결을 마치고 끝내지 않습니다. 집을 기억하고 첫 부탁을 해보는 순간까지 안내합니다.”
+        </div>
+      </section>
+
+      <section class="scenario-script">
+        <div class="meta">SCENARIO 02 · 약 1분</div>
+        <h2>컵 하나에서 시작되는 여유</h2>
+        <p>
+          <strong>사용자:</strong>
+          침실에서 쉬고 있는 지우. 거실에 두고 온 머그컵을 가져오고 싶습니다.
+        </p>
+        <div class="quote">
+          “‘컵 좀 가져다줘’라고 말했을 때, 로봇은 어떤 컵인지 먼저 확인해야 합니다.”
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>순서</th>
+              <th>직접 보여줄 행동</th>
+              <th>사용자가 확인하는 결과</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>부탁하기에 ‘컵을 침실로 가져다줘’ 입력.</td>
+              <td>컵이 둘이라 바로 실행하지 않고 물건 선택 화면 표시.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>검은 머그컵 선택 → 침실 확인 → 부탁 확인하기.</td>
+              <td>출발 위치·도착 위치·실행 순서가 하나의 계획으로 표시.</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>‘확인하고 시작’ 선택.</td>
+              <td>경로 확인 → 이동 → 재확인 → 집기 → 운반 → 내려놓기.</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>약 25초 후 완료 확인 → ‘잘 받았어요’ 선택.</td>
+              <td>기억한 물건의 위치가 침실로 갱신되고 기록이 추가됨.</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="quote">
+          “사용자가 확인한 뒤에 움직이고, 지금 하는 일을 보여주며, 끝난 결과까지 알려줍니다.”
+        </div>
+      </section>
+
+      <section class="scenario-script">
+        <div class="meta">SCENARIO 03 · 약 1분</div>
+        <h2>예상 밖의 상황도 차분하게</h2>
+        <p>
+          <strong>사용자:</strong>
+          서재에서 일하는 지우. 물병을 가져오는 길에 물건이 놓여 있는 상황입니다.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>순서</th>
+              <th>직접 보여줄 행동</th>
+              <th>사용자가 확인하는 결과</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>‘물병을 서재 책상으로 옮겨줘’ → 계획 확인 → 시작.</td>
+              <td>물건과 목적지가 명확하면 바로 실행 전 확인으로 연결.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>진행 화면의 ‘상황 대응 체험 → 장애물 발견’ 클릭.</td>
+              <td>진행률과 이동이 멈추고, 이유와 다음 행동 안내.</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>장애물을 정리했다는 상황으로 ‘이어서 진행’ 클릭.</td>
+              <td>기존 진행 상태에서 재개.</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>완료 후 활동 기록 열기.</td>
+              <td>완료 시간·목적지·상태 확인, 같은 부탁 반복 가능.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <strong>추가로 보여줄 수 있는 상황:</strong>
+          연결 끊김 → 기기 관리에서 다시 연결 → 직접 재개. 긴급 정지 → 주변 확인 후 해제 → 직접
+          재개. 긴급 정지를 해제해도 자동으로 움직이지 않습니다.
+        </p>
+        <div class="quote">
+          “오류를 숨기지 않고, 왜 멈췄는지와 어떻게 다시 시작할지를 알려줍니다.”
+        </div>
+      </section>
+
+      <section class="scenario-script">
+        <div class="meta">SCENARIO 04 · 약 1분</div>
+        <h2>나만의 일상 루틴 만들기</h2>
+        <p>
+          <strong>사용자:</strong>
+          매일 아침 책상에서 일을 시작하는 지우. 물병을 가져오는 부탁을 반복하고 싶습니다.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>순서</th>
+              <th>직접 보여줄 행동</th>
+              <th>사용자가 확인하는 결과</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>루틴 → ‘업무 시작 전, 물 한 병’ 추천 선택.</td>
+              <td>이름·시간·물건·목적지가 채워진 작성 화면.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>09:30, 평일, 물병, 서재를 선택하고 저장.</td>
+              <td>반복 요일과 실행 내용이 담긴 새 카드.</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>카드의 ‘지금 실행’ → 계획 확인.</td>
+              <td>같은 작업 실행 흐름으로 연결.</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>루틴 켜기·끄기, 수정 후 새로고침.</td>
+              <td>이 브라우저에 설정이 유지됨.</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="quote">
+          “자주 하는 부탁은 한 번만 정해두면 됩니다. 체험에서는 ‘지금 실행’으로 확인하고, 실제 예약
+          실행은 로봇 서비스와 연결하는 단계입니다.”
+        </div>
+      </section>
+
+      <section class="scenario-script">
+        <div class="meta">SCENARIO 05 · 약 2분</div>
+        <h2>SLAM 지도로 첫 이동</h2>
+        <p>
+          <strong>사용자:</strong>
+          저장한 집 지도를 불러와 로봇의 현재 위치를 맞추고, 낮은 탁자 앞으로 이동하려는 지우.
+        </p>
+        <div class="quote">
+          “집을 기억하는 것과 지금 로봇이 어디에 있는지 아는 것은 별개입니다. 먼저 위치를 맞추고
+          이동할 곳을 확인합니다.”
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>순서</th>
+              <th>직접 보여줄 행동</th>
+              <th>사용자가 확인하는 결과</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>상단 우리 집 / SLAM으로 두 보기를 비교한 뒤, SLAM 시연 → 저장 지도 불러오기.</td>
+              <td>위치 확인 필요 상태. 위치를 맞추기 전에는 이동이 비활성화됩니다.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>현재 위치 맞추기 → 작업 책상 앞 → 위치 확인 시작.</td>
+              <td>약 4초의 예시 정합 진행 후 지도에 시작 위치 표시.</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>관측한 가구와 이름에서 낮은 탁자 별칭 확인.</td>
+              <td>관측 위치와 사용자가 부르는 이름을 구분.</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>가구 관측 지점 → 낮은 탁자 선택. 도착 방향을 90°로 변경.</td>
+              <td>
+                가구 점과 떨어진 접근 후보 표시. 우리 집 / SLAM을 전환해도 같은 위치와 경로 유지.
+              </td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>경로 확인하고 이동 → 확인하고 시작.</td>
+              <td>약 25초 이동과 도착 방향 표시. 완료 기록에서 목적지 확인.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          추가 체험: 진입 금지 구역을 켜고 경로를 확인하거나, 새 지도를 만들다가 일시
+          정지·저장·이어하기를 사용합니다.
+        </p>
+        <div class="quote">
+          “지도 위 점은 가구를 관측한 곳입니다. 로봇은 그 점에 겹쳐 서지 않고, 별도로 표시한 접근
+          위치로 이동합니다.”
+        </div>
+      </section>
+      <section class="scenario-script">
+        <div class="meta">SCENARIO 06 · 약 1분</div>
+        <h2>리모컨, 여기로 가져다줘</h2>
+        <p>
+          <strong>사용자:</strong>
+          침실에서 쉬는 지우. 거실에 둔 리모컨으로 TV를 켜고 싶습니다.
+        </p>
+        <div class="quote">“거실에 있는 리모컨을 침실로 가져다줘.”</div>
+        <ol>
+          <li>홈의 부탁 패널을 펼치고 ‘리모컨 가져오기’를 누릅니다. 요청 문장이 입력됩니다.</li>
+          <li>부탁하기를 누르고 소파 옆 테이블의 리모컨과 목적지인 침실을 확인합니다.</li>
+          <li>
+            확인하고 시작을 누릅니다. 지도에서 로미가 이동하고, 확대된 집기 장면에서 리모컨 표시가
+            로미에 붙습니다. 이후 함께 이동해 목적지에서 내려놓습니다.
+          </li>
+          <li>
+            잠시 멈추기와 이어서 진행으로 동작이 함께 정지·재개되는지 확인합니다. 약 25초 후 같은
+            지도에서 전달 완료를 확인합니다. ‘잘 받았어요’를 누르고 기록에서 결과를 확인합니다.
+          </li>
+          <li>
+            진행 화면 위에서 우리 집 / SLAM을 전환합니다. 로미와 리모컨 위치, 전달 단계가
+            이어집니다.
+          </li>
+        </ol>
+        <p>시연을 다시 하면 리모컨의 출발 위치는 이전 실행에서 저장한 마지막 위치로 표시됩니다.</p>
+      </section>
+      <h2>구매 이후의 사용 흐름과 기능</h2>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 18%">사용 단계</th>
+            <th style="width: 47%">앱에서 직접 가능한 체험</th>
+            <th>연동이 필요한 실제 서비스</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>첫 사용</td>
+            <td>프로필, 권한 안내, 기기 식별, 이름 짓기, Wi-Fi 성공·실패, 초기 지도</td>
+            <td>계정 인증, Bluetooth 발견·페어링, Wi-Fi 프로비저닝</td>
+          </tr>
+          <tr>
+            <td>집 이해</td>
+            <td>탐색 진행·일시 정지·저장·이어하기, 가구 등록·편집·삭제, 별칭, 진입 금지 구역</td>
+            <td>실제 SLAM·센서·가구 인식·사진 스트림</td>
+          </tr>
+          <tr>
+            <td>일상 부탁</td>
+            <td>예시 물건 요청 해석, 모호한 대상 선택, 목적지 확인, 승인, 단계별 실행, 피드백</td>
+            <td>언어 모델, 물체 인식·위치 확인, 집기·운반 제어</td>
+          </tr>
+          <tr>
+            <td>이동</td>
+            <td>목적지 선택, 벽·가구·금지 구역을 피하는 예시 경로, 수동 방향 조작, 충전 복귀</td>
+            <td>로봇 주행·정지·도킹, 안전 센서와 실시간 상태</td>
+          </tr>
+          <tr>
+            <td>반복 사용</td>
+            <td>시간·요일·물건·공간을 지정한 루틴 작성·수정·삭제, 켜기·끄기, 지금 실행</td>
+            <td>백그라운드 스케줄러, 시간대·부재 상태·중복 작업 처리</td>
+          </tr>
+          <tr>
+            <td>기록·관리</td>
+            <td>
+              완료·중단 필터, 상세 기록·피드백, 재실행, JSON 내보내기, 예시 가족 멤버, 기기 설정
+            </td>
+            <td>다중 계정·권한·푸시 알림, 클라우드 동기화, 실제 펌웨어 배포</td>
+          </tr>
+          <tr>
+            <td>상황 대응</td>
+            <td>
+              장애물 정지, 연결 끊김·재연결, 일시 정지·취소, 긴급 정지·해제, 배터리 부족 시 작업
+              차단
+            </td>
+            <td>장비 단위 안전 검증, 네트워크 타임아웃, 물체 낙하·집기 실패 감지</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>화면과 브랜드 방향</h2>
+      <p>
+        <span class="sample-tag">GRAPHITE #303743</span>
+        <span class="sample-tag">COOL GRAY #F1F3F6</span>
+        <span class="sample-tag">CHARCOAL #18212D</span>
+      </p>
+      <p>
+        제공된 HOMETEKHU 로고를 유지하고, 설치된 Pretendard를 로컬 웹폰트로 포함했습니다. 주요
+        버튼과 경로는 그래파이트, 글자는 차콜, 배경은 실버와 중립적인 쿨 그레이를 사용합니다. 투명한
+        재질과 또렷한 글자·버튼을 함께 유지합니다. 폰은 지도 캔버스와 끌어올리는 부탁 시트, 패드는
+        지도 옆에 펼친 반투명 패널을 사용합니다. 하단에는 유리 렌즈처럼 떠 있는 탭 메뉴를
+        배치했습니다. 로미는 경계를 부드럽게 흐린 반투명 캐릭터입니다. 배경을 제거한 HOMETEKHU
+        로고와 함께 사용합니다. 지도는 제공된 길쭉한 구조를 참고해 SVG 점군으로 다시 만들었으며,
+        캡처 이미지를 넣지 않았습니다. 같은 좌표에 바닥·소파·침대·책상 등을 그린 우리 집 보기와 SLAM
+        관측 보기를 상단에서 전환할 수 있습니다. 우리 집은 가구 배치에 기반한 시연용 재구성이며 실제
+        집 사진이나 센서로 복원한 결과는 아닙니다. 패널 드래그에 지도 깊이가 반응하고, 버튼·선택은
+        탄력 있게 복원됩니다. 실행 중 위치와 진행률은 연속적으로 움직이며 완료 시 체크가 그려집니다.
+        움직임 줄이기 설정을 지원합니다.
+      </p>
+      <h2>시연 전에 확인할 것</h2>
+      <ol>
+        <li>상단에 ‘체험 모드’가 표시되는지 확인합니다.</li>
+        <li>
+          깨끗한 시작이 필요하면 설정 → 체험 데이터 초기화를 사용합니다. 기존 체험 수정 내용이
+          삭제되니 필요한 기록은 먼저 내보냅니다.
+        </li>
+        <li>PC에서는 넓은 화면으로, 휴대폰에서는 세로 화면으로 엽니다.</li>
+        <li>진행 중인 부탁을 마치거나 취소한 뒤 다음 시나리오를 시작합니다.</li>
+        <li>가이드의 ‘다음 안내’는 설명만 바꿉니다. 실제 화면의 버튼은 시연자가 직접 누릅니다.</li>
+      </ol>
+      <div class="note blue">
+        프로토타입의 예시 실행은 실제 장비의 주행·집기 성능이나 제품 사양을 검증한 결과가 아닙니다.
+        실제 앱으로 발전시킬 때는 위 연동 항목을 현재 UI의 상태 전환에 연결하면 됩니다.
+      </div>
+      <a href="./" class="btn btn-primary">HOMETEKHU 앱으로 돌아가기 →</a>
+    </main>
+  </body>
+</html>

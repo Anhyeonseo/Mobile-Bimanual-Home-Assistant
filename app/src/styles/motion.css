@@ -1,0 +1,141 @@
+/* Small amounts of overshoot create weight without slowing down the task. */
+button {
+  transition:
+    background 0.18s,
+    box-shadow 0.18s,
+    scale 0.25s var(--spring);
+}
+button:active {
+  transform: none;
+  scale: 0.965;
+}
+button:disabled {
+  scale: 1;
+}
+.page-enter {
+  animation: page-arrive 0.42s cubic-bezier(0.22, 0.75, 0.3, 1);
+}
+@keyframes page-arrive {
+  from {
+    opacity: 0;
+    translate: 0 12px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+@keyframes tab-glide {
+  from {
+    transform: translateX(calc(var(--previous-tab) * 100%)) scale(0.93, 0.98);
+  }
+  to {
+    transform: translateX(calc(var(--tab-index) * 100%)) scale(1);
+  }
+}
+@keyframes sheet-arrive {
+  from {
+    opacity: 0;
+    translate: 0 65px;
+    scale: 0.96;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+/* Depth follows the sheet's actual drag position; foreground text stays sharp. */
+@media (max-width: 899px) {
+  .map-studio {
+    transform: translateY(calc(var(--sheet-reveal, 0) * -14px))
+      scale(calc(1 - var(--sheet-reveal, 0) * 0.035));
+    transform-origin: center 25%;
+    transition: transform 0.58s var(--spring);
+  }
+  .home-space:has(.is-dragging) .map-studio {
+    transition: none;
+  }
+  .scene-caption,
+  .space-actions {
+    opacity: calc(1 - var(--sheet-reveal, 0));
+    transition: opacity 0.2s;
+  }
+  .home-space:has(.native-composer.is-open) .scene-caption,
+  .home-space:has(.native-composer.is-open) .space-actions {
+    visibility: hidden;
+  }
+}
+
+.is-moving .route-line {
+  stroke: var(--accent);
+  animation: route-flow 1s linear infinite;
+}
+@keyframes route-flow {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+
+.success-orb {
+  position: relative;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.success-orb.celebrate {
+  animation: success-settle 0.65s var(--spring);
+}
+.success-orb.celebrate::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border: 1px solid var(--accent);
+  border-radius: inherit;
+  opacity: 0;
+  animation: success-ring 0.8s ease-out;
+}
+.success-orb.celebrate .icon path {
+  stroke-dasharray: 36;
+  animation: check-draw 0.5s ease-out both;
+}
+@keyframes success-settle {
+  0% {
+    scale: 0.7;
+  }
+  65% {
+    scale: 1.12;
+  }
+  100% {
+    scale: 1;
+  }
+}
+@keyframes success-ring {
+  from {
+    scale: 0.85;
+    opacity: 0.45;
+  }
+  to {
+    scale: 1.5;
+    opacity: 0;
+  }
+}
+@keyframes check-draw {
+  from {
+    stroke-dashoffset: 36;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

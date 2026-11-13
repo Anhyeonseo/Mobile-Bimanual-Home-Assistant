@@ -61,6 +61,20 @@ python tools/run/home_assistant.py serve
 앱: `http://127.0.0.1:18766/assistant`. 접속 키는 로컬 `output/home-assistant/access-key.txt`에 생성된다.
 키·장치별 설정·촬영 자료·실측 로그는 Git에 넣지 않는다. 모델 다운로드나 모터 동작은 위 명령으로 시작되지 않는다.
 
+## HOMETEKHU 폰·패드 앱
+
+브라우저에서 사용하는 디자인 시연 앱은 [`app/`](app/README.md)에 있습니다.
+우리 집 / SLAM 지도 전환, 리모컨 전달 애니메이션, 로봇 연결 안내와 루틴을 체험할 수 있습니다.
+실제 로봇 제어와 독립된 시뮬레이션이며 Node.js 22 이상에서 실행합니다.
+
+```bash
+cd app
+npm start
+```
+
+GitHub Pages 자동 배포는 [HOMETEKHU app 워크플로](.github/workflows/hometekhu-pages.yml)를 사용합니다.
+처음 한 번 필요한 Pages 설정과 로컬 검증 방법은 [앱 README](app/README.md#github-pages-배포)를 참고하세요.
+
 ## 개발 순서와 문서
 
 **S0 설치 조사 → S1 공통 제어 → S2 좌표 보정 → S3 고정 베이스 관측 집기 → S4 지도·주행·모바일 집기 → S5 자연어 전체 작업**

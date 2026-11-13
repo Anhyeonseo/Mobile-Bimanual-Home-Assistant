@@ -1,0 +1,85 @@
+name: HOMETEKHU app
+
+on:
+  push:
+    branches: [main, feature/hometekhu-app]
+    paths:
+      - "app/**"
+      - ".github/workflows/hometekhu-pages.yml"
+  pull_request:
+    paths:
+      - "app/**"
+      - ".github/workflows/hometekhu-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hometekhu-${{ github.event_name == 'pull_request' && github.ref || 'pages' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Check and package app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      pages_enabled: ${{ steps.pages.outputs.enabled }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: app
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Check JavaScript
+        run: npm run check
+      - name: Test requests, routing and delivery
+        run: npm test
+      - name: Build and verify project-path assets
+        run: npm run build
+      - name: Upload static app
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: app/dist
+      - name: Check whether Pages is enabled
+        id: pages
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          enabled=$(gh api "repos/$GITHUB_REPOSITORY" --jq '.has_pages')
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          if [ "$enabled" != 'true' ]; then
+            echo '::notice::Build is ready. A repository owner must set Settings > Pages > Source to GitHub Actions, then re-run all jobs.'
+            echo '### Pages setup required' >> "$GITHUB_STEP_SUMMARY"
+            echo 'The tested app artifact is ready. Set **Settings → Pages → Source → GitHub Actions**, then choose **Re-run all jobs** on this run.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  deploy:
+    name: Publish app
+    needs: build
+    if: >-
+      github.event_name != 'pull_request' &&
+      needs.build.outputs.pages_enabled == 'true' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/hometekhu-app')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Deploy app
+        id: deployment
+        uses: actions/deploy-pages@v4

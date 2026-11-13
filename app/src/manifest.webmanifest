@@ -1,0 +1,17 @@
+{
+  "name": "HOMETEKHU · 나의 로봇 라이프",
+  "short_name": "HOMETEKHU",
+  "lang": "ko",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f1f3f6",
+  "theme_color": "#f1f3f6",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
