@@ -16,7 +16,7 @@ Safety model, read before running:
 
 Run on the Jetson from inside the installed release folder, lift already at the tour height:
     python calib_tour.py TOUR.json OUT_DIR --lift-m 0.20 --left-attachment TL1 --right-attachment TR1
-Rehearse without hardware (PC or Jetson, from the repository root):
+Rehearse without hardware (Jetson: from the release folder; PC: from the repository root):
     python tools/diagnostics/extrinsic_capture/calib_tour.py TOUR.json OUT_DIR --lift-m 0.20 \
         --left-attachment X --right-attachment Y --simulate [--max-steps 6]
 """
@@ -42,7 +42,8 @@ if level is None:
     sys.exit(f'tour has no lift {args.lift_m}; available: {[l["lift_m"] for l in tour["levels"]]}')
 
 if args.simulate:
-    ROOT = Path(__file__).resolve().parents[3]
+    # the installed release folder (cwd on the Jetson) or the repository this file lives in
+    ROOT = Path.cwd() if (Path.cwd() / 'ros2_ws/src/so101_arm_bridge').is_dir() else Path(__file__).resolve().parents[3]
     sys.path[:0] = [str(ROOT / 'ros2_ws/src/so101_arm_bridge'), str(ROOT / 'ros2_ws/src/home_robot_tasks')]
     try:
         import serial  # noqa: F401
