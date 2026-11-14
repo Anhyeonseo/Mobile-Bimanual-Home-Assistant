@@ -32,3 +32,17 @@ echo "also: rawshot NAME LIFT_M  (use this if shot keeps saying 'outside recorde
 # livecam : browser preview + type shot names in this terminal (q to quit)
 livecam() { "$PY" $CAL/live_cam.py; }
 echo "also: livecam  (live preview; take shots by typing names)"
+
+# sweep NAME ARM LIFT_M [--camera --attachment TL1] : hand-guided free-space log (torque off, read-only)
+sweep() {
+  if [ $# -lt 3 ]; then echo "usage: sweep NAME left|right LIFT_M [--camera --attachment TL1]"; return 2; fi
+  n=$1; a=$2; l=$3; shift 3
+  "$PY" $CAL/sweep_log.py $CAL/"$n" --arm "$a" --lift-m "$l" "$@"
+}
+# tour TOUR.json NAME LIFT_M LEFT_ATT RIGHT_ATT [--auto] : automatic tour for one lift height (MOVES THE ARMS)
+tour() {
+  if [ $# -lt 5 ]; then echo "usage: tour TOUR.json NAME LIFT_M LEFT_ATT RIGHT_ATT [--auto]"; return 2; fi
+  t=$1; n=$2; l=$3; la=$4; ra=$5; shift 5
+  "$PY" $CAL/calib_tour.py "$t" $CAL/"$n" --lift-m "$l" --left-attachment "$la" --right-attachment "$ra" "$@"
+}
+echo "also: sweep NAME ARM LIFT_M  (hand-guided log, torque off) | tour TOUR.json NAME LIFT_M LATT RATT  (MOVES ARMS)"
