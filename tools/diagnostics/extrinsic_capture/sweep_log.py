@@ -76,7 +76,8 @@ def save_shot(name, record, images, before, after, lift_raw):
     b, a = dict(before, **{'lift/id10': lift_raw}), dict(after, **{'lift/id10': lift_raw})
     (folder/'joints.json').write_text(json.dumps(dict(
         kind='sweep_still_shot', lift_m_operator=args.lift_m, raw_before=b, raw_after=a, camera_record=record,
-        calibration_group=dict(arm=args.arm, attachment=args.attachment, level=f'{args.lift_m:.2f}', lift_m=args.lift_m),
+        calibration_group=dict(arm=args.arm, attachment=args.attachment, level=f'{args.lift_m:.2f}', lift_m=args.lift_m,
+                               session=out.resolve().parent.name),
         motor_write_commands=0), indent=2, default=str))
 
 

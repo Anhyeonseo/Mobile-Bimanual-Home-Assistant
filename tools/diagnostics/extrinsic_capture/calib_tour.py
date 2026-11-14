@@ -252,7 +252,8 @@ def capture(step, adapter, t, camera, log):
         raw_before={**before, 'lift/id10': lift}, raw_after={**after, 'lift/id10': lift},
         commanded_raw=step['target_raw'], settle_error_raw=err, approach_from=step['approach_from'],
         repeat_of=step['base_name'] if step['name'] != step['base_name'] else None,
-        calibration_group=dict(arm=arm, attachment=ATT[arm], level=f'{args.lift_m:.2f}', lift_m=args.lift_m),
+        calibration_group=dict(arm=arm, attachment=ATT[arm], level=f'{args.lift_m:.2f}', lift_m=args.lift_m,
+                               session=args.out.resolve().parent.name),
         tour_sha256=TOUR_SHA, camera_record=record, motor_write_commands='tour'), indent=2, default=str))
     log.append(dict(step=step['name'], status='SAVED', settle_error_raw=err))
     print(f'  saved {step["name"]}  settle error (raw) {err}', flush=True)

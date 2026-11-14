@@ -44,10 +44,11 @@ def group_of(name, joints=None, session=''):
     """(arm, marker attachment, lift level) of one shot, or None to skip it.
 
     Shots from sweep_log.py / calib_tour.py carry a calibration_group; their level is
-    '<session folder>@<lift>' because the lift height is re-established in every session.
+    '<session>@<lift>' because the lift height is re-established in every session (the session is
+    the capture day folder, written by the tools; folders without it count as their own session).
     2026-11-13 shots are grouped by their folder names."""
     g = (joints or {}).get('calibration_group')
-    if g: return g['arm'], g['attachment'], f'{session}@{g["level"]}'
+    if g: return g['arm'], g['attachment'], f'{g.get("session", session)}@{g["level"]}'
     if name.startswith('L'): return 'left', 'L', {'1': 'L1', '2': 'L2', '3': 'H50'}[name[1]]
     if name.startswith('R3'): return 'right', 'R3', 'H50'     # same lift encoder reading as L3
     if name.startswith('RD'): return 'right', 'RD', 'RCD'
@@ -114,12 +115,22 @@ class Context:
             if tilt > 62 or side < 35 or max(abs(raw[q] - before[q]) for q in raw if q.startswith(arm)) > 3: continue
             cm = np.eye(4); cm[:3, :3] = R; cm[:3, 3] = t
             ang = self.s2.model_angles({q: raw[arm + '/' + q] for q in self.s2.JOINTS}, self.P['arms'][arm]['alignment'])
-            shots.append(dict(name=name, arm=arm, att=att, lvl=lvl, c=c, K=K, ang=ang, lift=raw['lift/id10'], cm=cm, tilt=tilt))
+            shots.append(dict(name=name, arm=arm, att=att, lvl=lvl, c=c, K=K, ang=ang, lift=raw['lift/id10'], cm=cm, tilt=tilt,
+                              session=(j.get('calibration_group') or {}).get('session', pathlib.Path(d).name), lift_op=float(j.get('lift_m_operator', self.op[lvl]))))
         ref = {}
         for s in shots: ref.setdefault(s['lvl'], s['lift'])
         self.K = shots[0]['K']
         # lift drift within one level (a few mm), relative to that level's first shot
         for s in shots: s['dc'] = (s['lift'] - ref[s['lvl']] + 2048) % 4096 - 2048
+        # continuous lift: encoder counts since the session's first shot, unwrapped over whole turns
+        # with the operator-entered heights (84 mm per turn; operator heights are good to a few cm)
+        self.sessions = list(dict.fromkeys(s['session'] for s in shots)); self.lift_ref = {}; self.lift_ref_raw = {}
+        for sess in self.sessions:
+            r = next(s for s in shots if s['session'] == sess); self.lift_ref[sess] = r['lift_op']; self.lift_ref_raw[sess] = r['lift']
+            for s in shots:
+                if s['session'] != sess: continue
+                w = (s['lift'] - r['lift'] + 2048) % 4096 - 2048
+                s['counts'] = w + 4096 * round(((s['lift_op'] - r['lift_op']) / self.MPC - w) / 4096)
         self.shots = shots
 
     def _load_planes(self):
@@ -188,7 +199,11 @@ class Model:
         spec = [('cam', 6)] + [('gm_' + a, 6) for a in ctx.atts] + [('dh_' + l, 1) for l in ctx.levels] + [('rm', 6)]
         spec += [(f'z_{a}_{j}', 1) for a in ARMS for j in ZJ] + [(f's_{a}_{l}', 1) for a in ARMS for l in ('upper', 'fore')]
         spec += [(f'c_{a}_{j}', 1) for a in ARMS for j in CJ]
+        # continuous lift (used when 'lk' is free): height = session reference + lo_<session>
+        #   + lk * metres_per_count * counts, along the CAD lift axis tilted by (lt_x, lt_y)
+        spec += [('lk', 1), ('lt_x', 1), ('lt_y', 1)] + [('lo_' + s, 1) for s in ctx.sessions[1:]]
         self.spec = spec
+        self.lift_linear = 'lk' in free
         self.slices, i = {}, 0
         for n, w in spec: self.slices[n] = slice(i, i + w); i += w
         self.size = i
@@ -203,7 +218,7 @@ class Model:
                 self.units += ['deg'] * 3 + ['mm'] * 3
             else:
                 self.labels.append(n)
-                self.units.append('%' if n.startswith('s_') else 'deg' if n.startswith('z_') else
+                self.units.append('%' if n.startswith('s_') or n == 'lk' else 'deg' if n.startswith(('z_', 'lt_')) else
                                   'deg/10cm' if n.startswith('c_') else 'mm')
 
     def nominal(self):
@@ -214,8 +229,17 @@ class Model:
             L = np.eye(4); L[:3, 3] = c.AXIS * c.op[s['lvl']]
             p[self.slices['gm_' + a]] = V(np.linalg.inv(L @ c.MOUNT[s['arm']] @ c.fk(s['ang'], {}, {})) @ c.X0 @ s['cm'])
         for n, w in self.spec:
-            if n.startswith('s_'): p[self.slices[n]] = 1.0
+            if n.startswith('s_') or n == 'lk': p[self.slices[n]] = 1.0
         return p
+
+    def expand(self, p):
+        """A parameter vector saved before later parameters were appended (e.g. the continuous lift):
+        keep its values and fill the missing tail with nominal values."""
+        p = np.asarray(p, float)
+        if len(p) == self.size: return p
+        if len(p) > self.size: raise ValueError('parameter vector longer than this layout: different data folders?')
+        q = self.nominal(); q[:len(p)] = p
+        return q
 
     def unpack(self, p):
         d = {}
@@ -224,10 +248,15 @@ class Model:
             d[n] = T(v) if w == 6 else float(v[0])
         return d
 
-    def tool_in_base(self, arm, ang, lvl, dc, d):
+    def tool_in_base(self, arm, ang, lvl, dc, d, shot=None):
         c = self.ctx
-        h = c.op[lvl] + d.get('dh_' + lvl, 0.0) + dc * c.MPC
-        L = np.eye(4); L[:3, 3] = c.AXIS * h
+        if self.lift_linear and shot is not None:
+            sess = shot['session']
+            h = c.lift_ref[sess] + d.get('lo_' + sess, 0.0) + d['lk'] * c.MPC * shot['counts']
+            axis = Rot.from_rotvec([d['lt_x'], d['lt_y'], 0.0]).apply(c.AXIS)
+        else:
+            h = c.op[lvl] + d.get('dh_' + lvl, 0.0) + dc * c.MPC; axis = c.AXIS
+        L = np.eye(4); L[:3, 3] = axis * h
         m = c.MOUNT[arm] @ d['rm'] if arm == 'right' else c.MOUNT[arm]
         zero = {j: d[f'z_{arm}_{j}'] for j in ZJ}
         sc = {'elbow_flex': d[f's_{arm}_upper'], 'wrist_flex': d[f's_{arm}_fore']}
@@ -235,7 +264,7 @@ class Model:
         return L @ m @ c.fk(ang, zero, sc, comp)
 
     def marker_in_cam(self, s, d):
-        return np.linalg.inv(d['cam']) @ self.tool_in_base(s['arm'], s['ang'], s['lvl'], s['dc'], d) @ d['gm_' + s['att']]
+        return np.linalg.inv(d['cam']) @ self.tool_in_base(s['arm'], s['ang'], s['lvl'], s['dc'], d, s) @ d['gm_' + s['att']]
 
     def residuals(self, p, shots, planes):
         d = self.unpack(p); out = []

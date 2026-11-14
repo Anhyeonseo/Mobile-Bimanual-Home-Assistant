@@ -26,7 +26,7 @@ class Designer:
         zeros = {f'z_{a}_{j}' for a in ARMS for j in ZJ} - {'z_left_base', 'z_right_base'}
         sag = {f'c_{a}_{j}' for a in ARMS for j in CJ}
         self.model = Model(ctx, base | zeros | sag)
-        self.p = np.array(calib[model_name]['p'])
+        self.p = self.model.expand(calib[model_name]['p'])
         self.sigma = calib[model_name]['sigma_px']
         self.free = np.flatnonzero(self.model.mask)
         self.lab = [self.model.labels[i] for i in self.free]

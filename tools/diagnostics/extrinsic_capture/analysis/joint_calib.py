@@ -29,11 +29,16 @@ BASE = {'cam', 'rm'} | {'gm_' + a for a in ctx.atts} | {'dh_' + l for l in ctx.l
 ZEROS = {f'z_{a}_{j}' for a in ARMS for j in ZJ} - {'z_left_base', 'z_right_base'}
 SCALES = {f's_{a}_{l}' for a in ARMS for l in ('upper', 'fore')}
 SAG = {f'c_{a}_{j}' for a in ARMS for j in CJ}
+LEVEL_OFFSETS = {'dh_' + l for l in ctx.levels}
+LIFT = {'lk'} | {'lo_' + x for x in ctx.sessions[1:]}
 MODELS = {
     'A zeros': BASE | ZEROS,
     'B zeros + link lengths': BASE | ZEROS | SCALES,
     'C zeros + gravity sag': BASE | ZEROS | SAG,
     'D zeros + link lengths + gravity sag': BASE | ZEROS | SCALES | SAG,
+    # one continuous lift model instead of a free offset per lift level
+    'E zeros + gravity sag + linear lift': (BASE - LEVEL_OFFSETS) | ZEROS | SAG | LIFT,
+    'F zeros + gravity sag + linear lift + lift tilt': (BASE - LEVEL_OFFSETS) | ZEROS | SAG | LIFT | {'lt_x', 'lt_y'},
 }
 FULL = 'D zeros + link lengths + gravity sag'
 

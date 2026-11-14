@@ -20,7 +20,7 @@ usage: python3 plan_tour.py REPO DATA JOINT_CALIB.json OUT_TOUR.json --sweeps DI
 import sys, os, json, glob, hashlib, argparse, datetime
 import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
-from calib_model import Context, OP, ARMS
+from calib_model import Context, ARMS
 from design_poses import Designer
 from tour_safety import Roadmap, load_sweep, JOINTS6, MOVING, DEG, vec
 
@@ -48,7 +48,7 @@ from so101_arm_bridge.bimanual_stream_adapter import TimedJointPoint, CANONICAL_
 RANGES_PATH = args.repo + '/config/home_assistant/arm_ranges.development.json'
 RANGES = json.load(open(RANGES_PATH))['arms']
 DIR = {a: {j: RANGES[a][j]['positive_raw_direction'] for j in JOINTS6} for a in ARMS}
-LEVEL_OF = {round(v, 2): k for k, v in OP.items() if k != 'RCD'}           # 0.20 L1, 0.35 L2, 0.50 H50
+LIFT_TRAVEL = json.load(open(args.repo + '/config/home_assistant/s2_coordinates.development.json'))['lift']['travel_m']
 POINT_MS = 40
 rng = np.random.default_rng(args.seed)
 sha = lambda p: hashlib.sha256(open(p, 'rb').read()).hexdigest()
@@ -59,7 +59,7 @@ sources = []
 for d in args.sweeps:
     head, samples = load_sweep(os.path.join(d, 'sweep.jsonl'))
     lift = round(float(head['lift_m_operator']), 2)
-    if lift not in LEVEL_OF: sys.exit(f'{d}: lift {lift} m is not one of {sorted(LEVEL_OF)}')
+    if not 0.05 <= lift <= LIFT_TRAVEL - 0.05: sys.exit(f'{d}: lift {lift} m outside 0.05..{LIFT_TRAVEL - 0.05:.2f}')
     sweeps.setdefault((head['arm'], lift), []).append(samples)
     sources.append(dict(folder=os.path.abspath(d), arm=head['arm'], lift_m=lift, samples=len(samples),
                         sha256=sha(os.path.join(d, 'sweep.jsonl'))))
@@ -83,6 +83,13 @@ print('rest poses:', REST)
 
 ctx = Context(args.repo, args.data)
 designer = Designer(ctx, json.load(open(args.calib)))
+
+
+def level_key(lift):
+    """Any lift height: a planning-only level at the nominal height (no fitted offset)."""
+    key = f'plan@{lift:.2f}'; ctx.op[key] = lift; return key
+
+
 maps = {}
 for (arm, lift), v in sweeps.items():
     other = 'right' if arm == 'left' else 'left'
@@ -101,14 +108,14 @@ for arm in ARMS:
     cands = []
     for (a, lift), rm in maps.items():
         if a != arm: continue
-        lvl = LEVEL_OF[lift]
+        lvl = level_key(lift)
         idx = [i for i in rng.permutation(len(rm.nodes))
                if designer.usable(arm, {**rm.nodes[i], 'gripper': REST[arm]['gripper']}, lvl)][:args.cand]
         reach = [i for i in idx if rm.shortest(rm.rest_node, i)[0] is not None]
         cands += [(lift, i) for i in reach]
         print(f'{arm}@{lift}: {len(idx)} visible candidates, {len(reach)} reachable from rest', flush=True)
     if not cands: continue
-    Js = [designer.rows(arm, {**maps[(arm, l)].nodes[i], 'gripper': REST[arm]['gripper']}, LEVEL_OF[l]) for l, i in cands]
+    Js = [designer.rows(arm, {**maps[(arm, l)].nodes[i], 'gripper': REST[arm]['gripper']}, level_key(l)) for l, i in cands]
     pick, M = designer.select(Js, M, args.n)
     for c in rng.choice(len(Js), min(args.n, len(Js)), replace=False): Mr = Mr + Js[c].T @ Js[c]
     chosen[arm] = [cands[c] for c in pick]
@@ -196,7 +203,7 @@ for lift in sorted({l for _, l in maps}):
         if not np.allclose(m1['points'][-1][1], m2['points'][0][1], atol=1e-6):
             sys.exit(f'discontinuous route at {m1["to_name"]} -> {m2["from_name"]}')
     shots = sum(s['kind'] == 'shot' for s in steps); dur = sum(s['duration_s'] for s in moves)
-    levels_out.append(dict(lift_m=lift, level=LEVEL_OF[lift], shots=shots, motion_s=round(dur, 1), steps=steps))
+    levels_out.append(dict(lift_m=lift, level=level_key(lift), shots=shots, motion_s=round(dur, 1), steps=steps))
     print(f'lift {lift:.2f} m: {shots} shots, {len(moves)} moves, {dur / 60:.1f} min of motion')
 
 tour = dict(kind='extrinsic_calibration_tour', schema_version=1,
