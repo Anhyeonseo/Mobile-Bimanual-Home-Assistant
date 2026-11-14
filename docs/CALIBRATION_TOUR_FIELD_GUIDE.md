@@ -13,7 +13,7 @@
 
 ---
 
-## 1. 왜 이렇게 찍나 (3줄 요약)
+## 1. 왜 이렇게 찍나 (요약)
 
 1. 11/13 데이터로는 "카메라 위치가 틀렸다"와 "팔 관절 0점이 틀렸다"가 사진상 똑같이 보여서 구분이 안 됐다.
    둘은 **팔 자세가 다양해야** 구분된다. 어떤 자세가 좋은지는 PC에서 계산해서 고른다.
@@ -212,7 +212,7 @@ python3 $A/intrinsics_check.py ~/cal_YYYYMMDD --square-mm <실측 칸 크기> --
 가짜 제어기는 실제 시간대로 움직이므로 `--max-steps 6`으로 앞부분만 돌린다.
 
 ```bash
-tour ~/cal_YYYYMMDD/tour.json rehearsal20 0.20 TL1 TR1 --simulate --max-steps 6
+tour ~/cal_YYYYMMDD/tour.json rehearsal15 0.15 TL1 TR1 --simulate --max-steps 6
 ```
 
 `COMPLETED`와 `토크 꺼짐 확인`이 나오면 된다.
@@ -237,8 +237,8 @@ tour ~/cal_YYYYMMDD/tour.json T15 0.15 TL1 TR1       # 높이 0.15 (폴더 이�
 |---|---|
 | `준비됐으면 yes 입력` | 위 확인이 끝났으면 `yes` |
 | `Enter = 양팔 토크 켜고 휴식 자세 유지 시작` | Enter. 양팔에 토크가 들어가고 휴식 자세로 살짝 맞춘다 |
-| `다음: left → T20-L-03 (6.2s)` | 경로에 사람·물건이 없는지 보고 Enter |
-| `saved T20-L-03 ...` | 사진 저장. 다음 이동으로 넘어간다 |
+| `다음: left → T15-L-03 (6.2s)` | 경로에 사람·물건이 없는지 보고 Enter |
+| `saved T15-L-03 ...` | 사진 저장. 다음 이동으로 넘어간다 |
 | 몇 번 지켜보고 괜찮으면 | `a` 입력: 이후 이동은 자동 |
 | 끝내고 싶을 때 | `q`: 미리 확인된 길로 휴식 자세까지 돌아간다 |
 | `휴식 자세 도착. 양팔을 손으로 받친 뒤 Enter = 토크 끄기` | **양팔을 손으로 받친 다음** Enter |
@@ -273,7 +273,7 @@ tour ~/cal_YYYYMMDD/tour.json T15 0.15 TL1 TR1       # 높이 0.15 (폴더 이�
 
 `~/cal_YYYYMMDD` 폴더 전체(`T15`~`T55`의 `tour_run.json`, `TCP-*`, `IN-*` 포함)를 1차와 같은 방법으로 보낸다.
 
-## 6-4. 촬영 후 분석 (PC)
+### 6-4. 촬영 후 분석 (PC)
 
 ```bash
 A=tools/diagnostics/extrinsic_capture/analysis
