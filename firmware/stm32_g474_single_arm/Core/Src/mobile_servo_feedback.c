@@ -3,10 +3,13 @@
 #include "servo_bus_reader.h"
 #include "control_tick.h"
 #include "timebase.h"
+#include "single_arm_config.h"
 #include <string.h>
 
 static actuator_mobile_feedback_reader_t reader;
 static actuator_mobile_lift_evidence_t lift;
+static uint32_t recovery_attempts, recovery_ms;
+static bool recovery_waiting_zero;
 static bool have_lift, have_lift_stamp, request_sent, transport_quiet;
 static UART_HandleTypeDef *left_uart;
 static actuator_bus_schedule_config_t schedule;
@@ -35,7 +38,7 @@ bool MobileServoFeedback_Configure(UART_HandleTypeDef *uart,
         period >= UINT32_C(0x80000000) || !quiet ||
         timing->arm_period_us != CONTROL_TICK_PERIOD_US ||
         !actuator_bus_schedule_init(&validated, timing, Timebase_NowUs())) return false;
-    uint64_t wire = (UINT64_C(29) * 10000000u + uart->Init.BaudRate - 1u) / uart->Init.BaudRate;
+    uint64_t wire = (UINT64_C(30) * 10000000u + uart->Init.BaudRate - 1u) / uart->Init.BaudRate;
     if (wire + 2u * (uint64_t)quiet >= budget || budget >= period ||
         budget > timing->arm_period_us - timing->arm_reserved_us - timing->guard_us ||
         (uint64_t)budget >= (uint64_t)c->response_timeout_ms * 1000u ||
@@ -45,6 +48,9 @@ bool MobileServoFeedback_Configure(UART_HandleTypeDef *uart,
     actuator_mobile_feedback_reader_t candidate;
     if (!actuator_mobile_feedback_reader_init(&candidate, s, c) ||
         !ServoTransport_Register(uart) || !ServoBus_PrepareReader(uart, proof)) return false;
+#if HOST_S4_UNIFIED_CANDIDATE
+    candidate.read_drive_state=true;candidate.confirm_temperature_spike=true;
+#endif
     reader = candidate; left_uart = uart; schedule = *timing;
     period_us = period; budget_us = budget; quiet_us = quiet;
     required_wire_us = (uint32_t)wire + quiet;
@@ -86,6 +92,12 @@ void MobileServoFeedback_OnTxComplete(UART_HandleTypeDef *uart) {
 }
 void MobileServoFeedback_OnUartError(UART_HandleTypeDef *uart) {
     if (reader.configured && uart == left_uart && gate_token) uart_error = 1;
+}
+bool MobileServoFeedback_EnterTransport(void) {
+    if(!reader.configured || reader.fault!=MOBILE_FEEDBACK_OK || reader.active ||
+       gate_token || launching || reader.temperature_pending)return false;
+    reader.supervisor->transport_only=true;reader.cursor=0;reader.dirty=0;
+    return true;
 }
 void MobileServoFeedback_Poll(void) {
     if (!reader.configured || launching) return;
@@ -161,4 +173,37 @@ bool MobileServoFeedback_Reset(void) {
         !actuator_mobile_feedback_reset(&reader, true, true)) return false;
     have_lift = false; have_lift_stamp = false; clear_events(); last_request_us = Timebase_NowUs() - period_us;
     return true;
+}
+
+/* Main-loop fault service, outside the periodic reader. A read timeout may own
+ * the UART needed by STOP. Abort that read first, then wait for zero completion.
+ * Bounded to three recovery transactions per boot; never clears output/global
+ * STOP, changes mode/torque, arms, or retries a motor write. */
+void MobileServoFeedback_ServiceStopped(bool board_stop_latched) {
+    const actuator_mobile_output_t *o=MobileServoOutput_State();
+    if(!board_stop_latched || !reader.configured || launching ||
+       reader.fault==MOBILE_FEEDBACK_OK || !o->configured || !o->stop_requested)return;
+    if(!recovery_waiting_zero){
+        uint32_t now=HAL_GetTick();
+        if(recovery_attempts>=3 || (recovery_attempts && now-recovery_ms<100))return;
+        recovery_ms=now;++recovery_attempts;
+        if(gate_token && !MobileServoFeedback_RecoverTransport())return;
+        recovery_waiting_zero=true;
+    }
+    if(o->stop_written && MobileServoFeedback_Reset())recovery_waiting_zero=false;
+}
+void MobileServoFeedback_Diagnostics(uint32_t out[24]) {
+    memset(out,0,24*sizeof(*out));
+    out[0]=reader.failure_count;out[1]=recovery_attempts;
+    out[2]=reader.fault;out[3]=reader.dirty;
+    if(!reader.failure_count)return;
+    const actuator_mobile_feedback_failure_t *f=&reader.first_failure;
+    out[4]=f->fault;out[5]=f->axis;out[6]=f->response.expected_id;out[7]=f->fields;
+    out[8]=f->started_ms;out[9]=f->previous.observed_ms;
+    out[10]=f->previous.temperature;out[11]=f->previous.valid;
+    out[12]=f->reading_mode;out[13]=f->response.expected_data_length;
+    out[14]=f->response.terminal;out[15]=f->response.servo_status;out[16]=f->response.last_reject;
+    /* Preserve the actual parser body including status and checksum. */
+    for(unsigned i=0;i<sizeof(f->response.body);i++)out[17+i/4]|=(uint32_t)f->response.body[i]<<(8*(i%4));
+    out[22]=f->previous.mode_ms;out[23]=f->previous.drive_valid;
 }

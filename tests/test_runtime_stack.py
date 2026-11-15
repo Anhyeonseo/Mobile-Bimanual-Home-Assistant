@@ -135,6 +135,21 @@ def test_profile_export_hashes_and_simulation_compile_guard(tmp_path):
     p['mode']='measured'
     with pytest.raises(ValueError):validate_board_profile(p)
 
+def test_commissioning_profile_preserves_unqualified_boundary(tmp_path):
+    import hashlib
+    p=read('mobile_board.simulation.json');p['mode']='commissioning'
+    record=tmp_path/'observation';record.write_text('fixture observation, not physical')
+    p['measurement_records']={k:dict(path=str(record),sha256=hashlib.sha256(record.read_bytes()).hexdigest())
+        for k in ('motor_identity','joint_limits','lift_geometry','camera_extrinsics')}
+    result=export_profile(p,tmp_path/'profile')
+    assert not result['hardware_authorized'] and not result['automatic_homing']
+    assert 'lift_hold' in result['pending_physical_acceptance']
+    assert '#if !HOST_S4_UNIFIED_CANDIDATE' in (tmp_path/'profile/mobile_profile.h').read_text()
+    p['mode']='measured'
+    with pytest.raises(ValueError):validate_board_profile(p)
+    p['mode']='commissioning';record.write_text('changed')
+    with pytest.raises(ValueError):validate_board_profile(p)
+
 
 @pytest.mark.parametrize('section,key,value',[
     ('lift','maximum_encoder_step_raw',2048),('mobile','lift_max_um',1),

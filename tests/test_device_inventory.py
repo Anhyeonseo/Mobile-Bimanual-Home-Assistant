@@ -192,12 +192,13 @@ def test_actual_maintenance_gate_rejects_every_motion_owner(tmp_path):
 #include <assert.h>
 enum {ACTUATOR_V2_EXECUTOR_CLOSED=0};
 static unsigned host_stop_latched,host_binary_servos_configured,host_right_arm_output_active;
-static unsigned host_v2_executor_ready=1,host_v2_executor_clock_active,buffered,mobile,stop,observer;
+static unsigned host_v2_executor_ready=1,host_v2_executor_clock_active,buffered,mobile,stop,observer,maintenance;
 static struct {unsigned active;} host_binary_motion;
 static struct {struct {unsigned state;} diagnostics;} host_v2_stream_executor;
 static unsigned Host_BufferedExecutionIsActive(void){return buffered;}
 static unsigned MobileBoard_IsConfigured(void){return mobile;}
 static unsigned MobileBoard_StopActive(void){return stop;}
+static unsigned MobileBoard_MaintenanceAllowed(void){return maintenance;}
 static unsigned MobileArmObserver_OwnsFeedback(void){return observer;}
 '''
     source+='static bool Host_InventoryPermitted(void){'+body+'}\n'
@@ -208,6 +209,12 @@ int main(void){
  &host_v2_stream_executor.diagnostics.state,&mobile,&stop,&observer};
  assert(Host_InventoryPermitted());
  for(unsigned i=0;i<sizeof(blocked)/sizeof(blocked[0]);i++){
+  *blocked[i]=1;assert(!Host_InventoryPermitted());*blocked[i]=0;
+ }
+ // Configured but inactive maintenance can read; it never bypasses any owner.
+ mobile=1;maintenance=1;assert(Host_InventoryPermitted());
+ for(unsigned i=0;i<sizeof(blocked)/sizeof(blocked[0]);i++){
+  if(blocked[i]==&mobile)continue;
   *blocked[i]=1;assert(!Host_InventoryPermitted());*blocked[i]=0;
  }
  host_v2_executor_ready=0;assert(!Host_InventoryPermitted());return 0;

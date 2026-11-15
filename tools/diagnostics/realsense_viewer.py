@@ -98,8 +98,8 @@ def save_snapshot(output, rgb, aligned_raw, native_raw, preview, metadata, filte
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", help="D415 serial; required if multiple D415s are connected")
-    parser.add_argument("--width", type=int, default=640)
-    parser.add_argument("--height", type=int, default=480)
+    parser.add_argument("--width", type=int, default=1280)
+    parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--depth-width", type=int, default=1280, help="Native depth width; D415 quality mode defaults to 1280")
     parser.add_argument("--depth-height", type=int, default=720)
     parser.add_argument("--depth-filter", choices=("off", "spatial", "temporal"), default="spatial",

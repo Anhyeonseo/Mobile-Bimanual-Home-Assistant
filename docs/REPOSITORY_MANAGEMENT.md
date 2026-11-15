@@ -1,6 +1,6 @@
 # 저장소·배포 파일 관리
 
-2026-10-29. 소스의 기준은 `codex/home-assistant-v02` 브랜치다.
+2026-11-16. 이번 S4/S5 변경의 작업 브랜치는 `codex/s4-local-integration`이며 PR 기준은 `main`이다.
 현재 PC에서는 바깥 수건 프로젝트 안의 `workspaces/home-assistant`가 이 브랜치의 Git 작업 폴더다.
 GitHub에 올릴 때는 **이 작업 폴더 안에서** 변경을 확인한다. 바깥 저장소의 다른 브랜치와 섞지 않는다.
 새로 clone한 사용자는 이 문서가 있는 저장소 루트에서 실행하며, 바깥 폴더나 `tmp` 링크가 필요 없다.

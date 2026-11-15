@@ -20,8 +20,8 @@ def main():
     parser.add_argument('--library',type=Path,default=ROOT/'build/offline-core/libactuator_host_simulator.so')
     args=parser.parse_args()
     import rclpy
-    from geometry_msgs.msg import TwistStamped,TransformStamped
-    from sensor_msgs.msg import Image,CameraInfo
+    from geometry_msgs.msg import TwistStamped,TransformStamped,PoseWithCovarianceStamped
+    from sensor_msgs.msg import Image,CameraInfo,LaserScan
     from nav_msgs.msg import Odometry,OccupancyGrid
     from rclpy.qos import qos_profile_sensor_data,QoSProfile,DurabilityPolicy
     from tf2_ros import Buffer,TransformListener,StaticTransformBroadcaster
@@ -29,6 +29,7 @@ def main():
     from home_robot_tasks.base_driver import BaseProfile,MobileBaseDriver,RosBaseIO
     from home_robot_tasks.navigation_depth import DepthProfile,DepthVolume,TravelGuard,TravelEvidence
     from home_robot_tasks.ros_navigation_depth import RosNavigationDepth
+    from home_robot_tasks.navigation_health import NavigationHealth,NavigationHealthProfile,RosNavigationHealth
     from so101_arm_bridge.host_simulator import NativeHostSerial
     from so101_arm_bridge.mobile_client import MobileClient
     from so101_arm_bridge.stream_transport_v2 import StreamValidationTransportV2,MobileV2Exchange
@@ -73,6 +74,27 @@ def main():
         assert (10,0) not in volume.projected_obstacles()
         assert (20,0) in volume.projected_obstacles(),volume.projected_obstacles()
         assert volume.last_stamp>original
+        health=NavigationHealth(NavigationHealthProfile('synthetic_laser',map_frame='odom'),clock)
+        # Use the already-qualified synthetic static frame as this isolated
+        # health fixture's base. This is not a measured robot localization.
+        health_source=RosNavigationHealth(node,health,buffer,scan_topic='health_scan',
+            localization_topic='health_pose',base_frame='depth')
+        scan_pub=node.create_publisher(LaserScan,'health_scan',qos_profile_sensor_data)
+        pose_pub=node.create_publisher(PoseWithCovarianceStamped,'health_pose',10)
+        spin_until(lambda:scan_pub.get_subscription_count()>0 and pose_pub.get_subscription_count()>0)
+        last_scan=None
+        for index in range(3):
+            message=LaserScan();message.header.frame_id='synthetic_laser';message.header.stamp=node.get_clock().now().to_msg()
+            message.range_min=.12;message.range_max=3.5;message.ranges=[1.]*360
+            scan_pub.publish(message);spin_until(lambda:health.scans>=index+1);last_scan=message
+        pose=PoseWithCovarianceStamped();pose.header.frame_id='odom';pose.header.stamp=node.get_clock().now().to_msg()
+        pose.pose.pose.orientation.w=1.
+        for index in (0,7,35):pose.pose.covariance[index]=.001
+        pose_pub.publish(pose)
+        try:spin_until(health.ready)
+        except TimeoutError as error:raise RuntimeError(str(health.report())) from error
+        scan_pub.publish(last_scan);spin_until(lambda:not health.ready())
+        assert 'replayed' in health.scan_error,health.report()
         # Separate, explicit synthetic full-volume fixture for all-direction travel.
         travel=DepthVolume(volume.p);travel.reset('base-1')
         def refresh_clear_fixture():
@@ -117,7 +139,7 @@ def main():
         assert stops and driver.owner=='bridge-test'
         print(json.dumps(dict(passed=True,mode='simulation',hardware_commands=0,physical_task_completed=False,
             real_dds=True,native_c_plant=True,depth_grid_messages=len(grids),odom_messages=len(odoms),
-            stale_command_mobile_stop=True,depth_motion_quality='synthetic qualification only')))
+            stale_command_mobile_stop=True,scan_localization_health_dds=True,replayed_scan_rejected=True,depth_motion_quality='synthetic qualification only')))
         return 0
     finally:
         if source is not None:source.close()

@@ -18,6 +18,99 @@ from home_robot_tasks.search_simulator import simulate_search
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def surface_window(heights):
+    return [dict(capture_id=f'frame-{i}',observed_s=2+i*.25,height_m=h,
+                 pose_revision='stopped-1',surface_id='table',calibration_id='cal-1')
+            for i,h in enumerate(heights)]
+
+
+def test_surface_window_rejects_bounce_but_not_one_depth_spike():
+    from home_robot_tasks.stationary_rgbd import settled_surface_height
+    steady=surface_window([.318,.319,.318,.340,.318,.317,.318,.318])
+    r=settled_surface_height(steady,stopped_s=0.)
+    assert r['status']=='SETTLED_SURFACE' and r['height_m']==pytest.approx(.318)
+    assert 'frame-3' not in r['retained_capture_ids']
+    assert not r['motion_authorized'] and not r['physical_accuracy_verified']
+    assert settled_surface_height(surface_window([.31,.33]*4),stopped_s=0.)['status']=='RETRY_CAPTURE'
+    assert settled_surface_height(surface_window([.318]*8),stopped_s=2.)['status']=='RETRY_CAPTURE'
+
+
+def test_surface_window_never_mixes_moved_pose_or_duplicate_frames():
+    from home_robot_tasks.stationary_rgbd import settled_surface_height
+    rows=surface_window([.318]*8);rows[-1]['pose_revision']='moved-2'
+    with pytest.raises(InvalidTask,match='configuration changed'):
+        settled_surface_height(rows,stopped_s=0.)
+    rows=surface_window([.318]*8);rows[-1]['capture_id']='frame-0'
+    with pytest.raises(InvalidTask,match='unique ordered'):
+        settled_surface_height(rows,stopped_s=0.)
+
+
+def test_surface_window_does_not_confuse_stability_with_height_accuracy():
+    from home_robot_tasks.stationary_rgbd import settled_surface_height
+    r=settled_surface_height(surface_window([.333]*8),stopped_s=0.)
+    assert r['status']=='SETTLED_SURFACE' and r['height_m']==pytest.approx(.333)
+    assert not r['physical_accuracy_verified']
+
+
+def test_observed_floor_height_handles_pose_offset_without_changing_arm_transform():
+    import numpy as np
+    from home_robot_tasks.stationary_rgbd import observed_floor_height_model
+    profile=json.loads((ROOT/'config/home_assistant/s2_coordinates.development.json').read_text())
+    transform=np.array(profile['base_from_optical']);original=transform.copy()
+    x,y=np.meshgrid(np.linspace(.25,1.45,50),np.linspace(-.85,.85,50))
+    floor=np.c_[x.ravel(),y.ravel(),profile['ground_z_m']+.01+.015*x.ravel()+.008*y.ravel()]
+    normal=np.array([-.015,-.008,1.]);normal/=np.linalg.norm(normal)
+    target=np.array([.8,.2,profile['ground_z_m']+.01+.015*.8+.008*.2])+.318*normal
+    optical=(floor-transform[:3,3])@transform[:3,:3]
+    target_optical=(target-transform[:3,3])@transform[:3,:3]
+    model,evidence=observed_floor_height_model(ROOT,optical)
+    assert evidence['floor_observed'] and not evidence['rigid_transform_changed']
+    assert not evidence['arm_calibration_changed']
+    assert model.heights(target_optical)==pytest.approx(.318,abs=1e-7)
+    np.testing.assert_array_equal(transform,original)
+
+
+def test_observed_floor_height_explicitly_falls_back_without_floor():
+    import numpy as np
+    from home_robot_tasks.stationary_rgbd import observed_floor_height_model,load_surface_height_model
+    cloud=np.array([[0.,0.,1.],[.1,0.,1.],[0.,.1,1.]])
+    model,evidence=observed_floor_height_model(ROOT,cloud)
+    assert evidence['source']=='calibrated_height_fallback' and not evidence['floor_observed']
+    assert model.model_id==load_surface_height_model(ROOT).model_id
+
+
+def test_calibrated_height_is_absolute_distance_dependent_and_leaves_input_unchanged():
+    import numpy as np
+    from home_robot_tasks.stationary_rgbd import load_surface_height_model
+    height=load_surface_height_model(ROOT)
+    points=np.array([[0.,0.,.4],[0.,0.,1.],[.1,0.,1.]])
+    original=points.copy();actual=height.heights(points)
+    # Independent full precision row from yeoeun/fit_best model 3. A fixed
+    # 9.1mm or 14.6mm subtraction cannot satisfy both depths and lateral roll.
+    expected=1.0100224280799914-height.ground_z_m + np.array([
+        -.7203967709309439*.4,-.7203967709309439,
+        -.7203967709309439-.021361692866709636*.1])
+    np.testing.assert_allclose(actual,expected,atol=1e-12,rtol=0)
+    np.testing.assert_array_equal(points,original)
+    assert height.heights([0.,0.,0.])==pytest.approx(1.0100224280799914-height.ground_z_m)
+    assert not np.isclose(actual[1]-actual[0],-.7071067811865475*.6)
+
+
+def test_height_model_rejects_tampered_projection_and_wrong_profile(tmp_path):
+    from home_robot_tasks.stationary_rgbd import load_surface_height_model
+    folder=tmp_path/'config/home_assistant';folder.mkdir(parents=True)
+    for name in ('camera_height.calibrated.json','s2_coordinates.development.json'):
+        (folder/name).write_bytes((ROOT/'config/home_assistant'/name).read_bytes())
+    cfg=json.loads((folder/'camera_height.calibrated.json').read_text())
+    cfg['base_z_from_optical'][3]-=.0091
+    (folder/'camera_height.calibrated.json').write_text(json.dumps(cfg))
+    with pytest.raises(InvalidTask,match='binding mismatch'):load_surface_height_model(tmp_path)
+    (folder/'camera_height.calibrated.json').write_bytes((ROOT/'config/home_assistant/camera_height.calibrated.json').read_bytes())
+    profile=json.loads((folder/'s2_coordinates.development.json').read_text());profile['calibration_id']='other'
+    (folder/'s2_coordinates.development.json').write_text(json.dumps(profile))
+    with pytest.raises(InvalidTask,match='binding mismatch'):load_surface_height_model(tmp_path)
+
+
 def frame(**changes):
     value = RGBDFrame(
         "frame1",

@@ -1,10 +1,32 @@
 """One resident arm stream for planned motion and calibrated jaw commands."""
+from dataclasses import dataclass
 from .classical import route_for_arm
 from .fetch import InvalidTask
 from .navigation import number
 from .manipulation_port import PlanningContext
 from .jaw_calibration import JawCalibration
 from so101_arm_bridge.bimanual_stream_adapter import TimedJointPoint
+
+
+@dataclass(frozen=True)
+class ContactEnvelope:
+    axis: int
+    minimum_rad: float
+    maximum_rad: float
+    command_rad: float
+    object_id: str
+    capture_id: str
+    release_goal_rad: float | None = None
+
+    def __post_init__(self):
+        if self.axis not in (5,11) or not self.object_id or not self.capture_id:
+            raise InvalidTask('identified installed gripper contact required')
+        for v in (self.minimum_rad,self.maximum_rad,self.command_rad):number(v,'contact bound')
+        if not self.minimum_rad<=self.maximum_rad or self.maximum_rad-self.minimum_rad>.3:
+            raise InvalidTask('bounded contact interval required')
+        if self.release_goal_rad is not None:number(self.release_goal_rad,'release goal')
+        if not self.minimum_rad-.15<=self.command_rad<=self.maximum_rad+.15:
+            raise InvalidTask('bounded pressure command required')
 
 
 class ResidentRouteBuilder:
@@ -15,10 +37,11 @@ class ResidentRouteBuilder:
     through MoveIt; both branches get the same final validation here.
     """
     def __init__(self, *, minimum_rad, maximum_rad, max_speed_rad_s,
-                 max_acceleration_rad_s2, max_jerk_rad_s3, validate_route):
+                 max_acceleration_rad_s2, max_jerk_rad_s3, validate_route, contact_guard=None):
         if not callable(validate_route):
             raise InvalidTask("current-scene trajectory validator required")
         self.validate = validate_route
+        self.contact_guard = contact_guard
         self.limits = dict(minimum_rad=tuple(minimum_rad), maximum_rad=tuple(maximum_rad),
             max_speed_rad_s=tuple(max_speed_rad_s), max_acceleration_rad_s2=tuple(max_acceleration_rad_s2),
             max_jerk_rad_s3=tuple(max_jerk_rad_s3))
@@ -35,7 +58,13 @@ class ResidentRouteBuilder:
         if len(raw) != 12 or any(type(v) is not int for v in raw):
             raise InvalidTask("measured twelve-axis snapshot required")
         anchor = tuple(v / 1e6 for v in raw)
-        if set(parameters) == {'trajectory', 'context'}:
+        contact=parameters.get('contact_envelope')
+        if contact is not None:
+            if (not isinstance(contact,ContactEnvelope) or not callable(self.contact_guard)
+                    or self.contact_guard(contact,snapshot) is not True
+                    or not contact.minimum_rad-1e-6<=anchor[contact.axis]<=contact.maximum_rad+1e-6):
+                raise InvalidTask('live gripper contact envelope required')
+        if set(parameters) in ({'trajectory','context'},{'trajectory','context','contact_envelope'}):
             c = parameters['context']
             if not isinstance(c, PlanningContext) or len(c.anchor_rad) != 12:
                 raise InvalidTask("planning context required")
@@ -65,7 +94,23 @@ class ResidentRouteBuilder:
                         p.positions_rad,previous.positions_rad,self.limits['max_speed_rad_s'])):
                     raise InvalidTask("route time or speed bound")
             previous = p
-        if any(abs(a-b) > .02 for a,b in zip(points[0].positions_rad,anchor)):
+        if contact is not None:
+            values=[p.positions_rad[contact.axis] for p in points]
+            if contact.release_goal_rad is None:
+                if any(abs(v-contact.command_rad)>1e-6 for v in values):
+                    raise InvalidTask('held pressure must remain constant')
+            else:
+                delta=contact.release_goal_rad-contact.command_rad
+                if abs(delta)<1e-6:raise InvalidTask('nonzero calibrated release required')
+                progress=[(v-contact.command_rad)/delta for v in values]
+                if (abs(progress[0])>1e-5 or abs(progress[-1]-1)>1e-5
+                        or any(v< -1e-5 or v>1+1e-5 for v in progress)
+                        or any(b<a-1e-6 for a,b in zip(progress,progress[1:]))
+                        or any(abs(p.positions_rad[i]-points[0].positions_rad[i])>1e-6
+                               for p in points for i in range(12) if i!=contact.axis)):
+                    raise InvalidTask('release must only open the supported gripper monotonically')
+        if any(abs(a-b) > (.15 if contact is not None and i==contact.axis else .02)
+               for i,(a,b) in enumerate(zip(points[0].positions_rad,anchor))):
             raise InvalidTask("route does not start at measured anchor")
         if self.validate(points, snapshot) is not True:
             raise InvalidTask("current-scene route validation failed")

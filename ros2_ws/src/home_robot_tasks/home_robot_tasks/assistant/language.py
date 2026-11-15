@@ -2,8 +2,8 @@
 
 No remote model or microphone is opened. Ambiguity/unsupported constraints are
 returned as data; they never become invented objects, destinations or motion.
-The production direction is API semantic extraction through meaning.py; this
-parser is the offline development fallback, not the final language approach.
+The agreed first S5 backend is local model extraction through meaning.py;
+this parser remains the offline development fallback, not the model itself.
 """
 from copy import deepcopy
 import re

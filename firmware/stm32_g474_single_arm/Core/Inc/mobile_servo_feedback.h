@@ -14,6 +14,8 @@ bool MobileServoFeedback_Configure(UART_HandleTypeDef *left_uart,
     bool whole_stop_confirmed);
 bool MobileServoFeedback_AcceptsOutput(const actuator_mobile_supervisor_t *s,
     const actuator_mobile_output_config_t *config);
+/* Admit only between actual UART transactions. Board validates initial posture. */
+bool MobileServoFeedback_EnterTransport(void);
 void MobileServoFeedback_Poll(void);
 void MobileServoFeedback_OnTxComplete(UART_HandleTypeDef *uart);
 void MobileServoFeedback_OnUartError(UART_HandleTypeDef *uart);
@@ -25,5 +27,8 @@ bool MobileServoFeedback_RecoverTransport(void);
 /* Restart READs after cleanup and STOP transmission, keeping motion inhibited.
  * Physical stop proof is required later by output Rearm, not to observe it. */
 bool MobileServoFeedback_Reset(void);
+/* Main-loop service after global STOP; bounded read-only recovery, no rearm. */
+void MobileServoFeedback_ServiceStopped(bool board_stop_latched);
+void MobileServoFeedback_Diagnostics(uint32_t out[24]);
 const actuator_mobile_feedback_reader_t *MobileServoFeedback_State(void);
 #endif

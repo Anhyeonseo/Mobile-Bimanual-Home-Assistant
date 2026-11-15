@@ -70,3 +70,82 @@ def test_python_client_preserves_sensor_age_through_actual_c_receiver(core):
     now[0]=1.2
     with pytest.raises(ValueError):client.publish(1.02,arms_safe=True,lift_hold=True,payload_safe=True)
     assert len(packets)==1
+
+def test_native_mcu_snapshot_skips_duplicates_without_renewing_real_c_lease(core):
+    now=[1.05];packets=[]
+    clock=MobileClock();clock.sample=(1000,1002,SimpleNamespace(boot_id=42,mcu_tick_ms=1000))
+    mobile=SimpleNamespace(clock=clock,boot_id=42,now=lambda:round(now[0]*1000),refresh_clock=lambda:None)
+    class Transport:
+        def exchange_mobile(self,q):
+            packets.append(q);ok,reply=exchange(core,q,round(now[0]*1000));assert ok;return reply
+    c=RobotEvidenceClient(Transport(),mobile,lambda:now[0],maximum_age_ms=100)
+    def snap(tick,age):
+        return SimpleNamespace(status_code=0,joint_count=12,present_mask=4095,
+                               firmware_tick_ms=tick,sample_age_ms=(age,)*12)
+    assert c.publish_mcu_snapshot(snap(1048,20),1.046,1.049,arms_safe=True,lift_hold=False,payload_safe=True)
+    assert struct.unpack_from('<I',packets[-1],12)[0]==1028
+    now[0]=1.06
+    assert not c.publish_mcu_snapshot(snap(1058,30),1.056,1.059,arms_safe=True,lift_hold=False,payload_safe=True)
+    assert len(packets)==1 and c.sequence==1
+    # A genuine new oldest sample advances without host clock rounding drift.
+    now[0]=1.07
+    assert c.publish_mcu_snapshot(snap(1068,20),1.066,1.069,arms_safe=True,lift_hold=False,payload_safe=True)
+    assert struct.unpack_from('<I',packets[-1],12)[0]==1048
+    with pytest.raises(ValueError):c.publish_mcu_snapshot(snap(1068,30),1.066,1.069,arms_safe=True,lift_hold=False,payload_safe=True)
+    assert len(packets)==2
+    with pytest.raises(ValueError):c.publish(1.068,arms_safe=True,lift_hold=False,payload_safe=True)
+
+@pytest.mark.parametrize('defect',['old','missing','future_host','roundtrip','wrong_boot','bad_flags'])
+def test_native_snapshot_cannot_publish_invalid_or_stale_evidence(core,defect):
+    now=[1.05];clock=MobileClock();clock.sample=(1000,1002,SimpleNamespace(boot_id=42,mcu_tick_ms=1000))
+    mobile=SimpleNamespace(clock=clock,boot_id=42,now=lambda:1050,refresh_clock=lambda:None)
+    class Transport:
+        def exchange_mobile(self,q):raise AssertionError('invalid evidence must not be sent')
+    c=RobotEvidenceClient(Transport(),mobile,lambda:now[0],maximum_age_ms=100)
+    s=SimpleNamespace(status_code=0,joint_count=12,present_mask=4095,firmware_tick_ms=1048,sample_age_ms=(20,)*12)
+    sent,received=1.046,1.049;flags=dict(arms_safe=True,lift_hold=False,payload_safe=True)
+    if defect=='old':s.sample_age_ms=(99,)*12
+    elif defect=='missing':s.present_mask=2047
+    elif defect=='future_host':received=1.06
+    elif defect=='roundtrip':sent=.94
+    elif defect=='wrong_boot':clock.sample=(1000,1002,SimpleNamespace(boot_id=43,mcu_tick_ms=1000))
+    elif defect=='bad_flags':flags['arms_safe']=1
+    with pytest.raises((ValueError,RuntimeError)):c.publish_mcu_snapshot(s,sent,received,**flags)
+
+
+def test_native_mcu_proof_does_not_wait_for_unneeded_host_clock_refresh(core):
+    now=2.05;clock=MobileClock();clock.sample=(1000,1002,SimpleNamespace(boot_id=42,mcu_tick_ms=1000))
+    def forbidden():raise AssertionError('native observation needs no host synchronization')
+    mobile=SimpleNamespace(clock=clock,boot_id=42,now=lambda:2050,refresh_clock=forbidden)
+    class Transport:
+        def exchange_mobile(self,q):
+            ok,reply=exchange(core,q,2050);assert ok;return reply
+    client=RobotEvidenceClient(Transport(),mobile,lambda:now,maximum_age_ms=100)
+    snapshot=SimpleNamespace(status_code=0,joint_count=12,present_mask=4095,firmware_tick_ms=2048,sample_age_ms=(20,)*12)
+    assert client.publish_mcu_snapshot(snapshot,2.046,2.049,arms_safe=True,lift_hold=False,payload_safe=True)
+    assert client.last_observed==2028
+
+
+def test_transport_mode_references_initial_measurement_without_refresh():
+    from so101_arm_bridge.robot_evidence import validate_request
+    clock=MobileClock();clock.sample=(1000,1002,SimpleNamespace(boot_id=42,mcu_tick_ms=1000))
+    mobile=SimpleNamespace(clock=clock,boot_id=42)
+    packets=[]
+    class Transport:
+        busy=True
+        def exchange_mobile(self,q):
+            validate_request(q);packets.append(q)
+            out=bytearray(64);out[:4]=b'AF\1\1';out[3]=130 if q[3]==2 and self.busy else q[3]
+            out[4:12]=q[4:12];struct.pack_into('<I',out,12,1050)
+            out[16:20]=q[12:16];out[20]=q[20]
+            struct.pack_into('<I',out,60,crc32c(out[:60]));return bytes(out)
+    t=Transport();client=RobotEvidenceClient(t,mobile,lambda:1.05,maximum_age_ms=100)
+    with pytest.raises(RuntimeError):client.enter_transport()
+    snap=SimpleNamespace(status_code=0,joint_count=12,present_mask=4095,firmware_tick_ms=1048,sample_age_ms=(20,)*12)
+    client.publish_mcu_snapshot(snap,1.046,1.049,arms_safe=True,lift_hold=False,payload_safe=True)
+    assert not client.enter_transport()
+    t.busy=False;assert client.enter_transport()
+    assert all(q[4:32]==packets[0][4:32] for q in packets)
+    assert client.last_observed==1028 and client.sequence==1
+    with pytest.raises(RuntimeError):
+        client.publish_mcu_snapshot(snap,1.046,1.049,arms_safe=True,lift_hold=False,payload_safe=True)

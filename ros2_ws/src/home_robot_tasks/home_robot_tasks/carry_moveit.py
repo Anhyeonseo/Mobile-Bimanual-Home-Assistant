@@ -293,3 +293,10 @@ class MoveItCarryPlanner:
         self.prepare(candidate, True)
         self.valid(q, candidate, True)
         return StagePath('close_geometry', np.array([q]), 'sampled jaw sweep; holding not verified')
+
+    def release(self, q, candidate):
+        """World-object/opening geometry only; does not command or prove release."""
+        self.prepare(candidate, False)
+        for angle in np.linspace(candidate.held_jaw_model_rad, candidate.open_jaw_model_rad, 16):
+            self.valid(q, candidate, False, jaw=angle)
+        return StagePath('release_geometry', np.array([q]), 'sampled release sweep; support not verified')

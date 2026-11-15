@@ -151,10 +151,138 @@ static void missing_lift_and_modes(void) {
     setup(100);r.config.maximum_sample_skew_ms=5;sweep();
     assert(!actuator_mobile_feedback_publish(&r,&lift,now));
 }
+static void drive_readback(void){
+    for(unsigned torque=0;torque<=1;torque++){
+        setup(100);r.read_drive_state=true;
+        uint8_t req[8],bytes[22],data[16]={0};uint32_t token;
+        assert(actuator_mobile_feedback_begin(&r,now,true,req,&token));
+        assert(req[5]==33&&req[6]==16);data[0]=1;data[7]=(uint8_t)torque;
+        data[13]=123;data[14]=128;
+        size_t n=reply(bytes,req[2],0,data,16);
+        assert(actuator_mobile_feedback_feed(&r,token,bytes,n,now+1));
+        bool ok=actuator_mobile_feedback_commit(&r,token,now+1,true,true);
+        assert(ok==(torque==1));
+        if(ok){
+            assert(r.axes[0].drive_valid&&r.axes[0].torque_enabled==1&&r.axes[0].goal_velocity_raw==-123);
+            r.cursor=0;now+=50;
+            assert(actuator_mobile_feedback_begin(&r,now,true,req,&token));
+            assert(req[5]==33&&req[6]==16); /* refresh before telemetry age expires */
+        }else assert(r.fault==MOBILE_FEEDBACK_DEVICE);
+    }
+}
+static void stopped_position_window(uint32_t start){
+    for(unsigned issue=0;issue<9;issue++){
+        setup(start);actuator_mobile_stationary_window_t windows[3]={0};
+        bool proof=false;
+        for(unsigned pass=0;pass<7;pass++){
+            now=start+1+pass*80;
+            for(unsigned i=0;i<3;i++){
+                r.axes[i]=(actuator_mobile_axis_sample_t){.position_raw=4095+(int)(pass%2),
+                    .velocity_raw=pass%2?50:-50,.moving=1,.observed_ms=now,.mode_ms=now,
+                    .valid=true,.mode_verified=true,.drive_valid=true,.torque_enabled=1};
+                r.axes[i].position_raw%=4096;
+            }
+            if(issue==1)r.axes[1].position_raw=(4095+pass)%4096; /* accumulated drift */
+            if(issue==2)r.axes[0].velocity_raw=51;
+            if(issue==3)r.axes[2].goal_velocity_raw=1;
+            if(issue==4)r.axes[2].torque_enabled=0;
+            if(issue==5)r.axes[2].observed_ms=start+1; /* repeated cached read */
+            if(issue==6)r.axes[2].mode_ms=start; /* pre-zero drive */
+            if(issue==7)r.fault=MOBILE_FEEDBACK_DEVICE;
+            if(issue==8)r.axes[0].moving=2;
+            proof=actuator_mobile_wheels_stop_observe(windows,&r,start,now);
+            if(pass<5)assert(!proof);
+        }
+        assert(proof==(issue==0));
+        assert(!actuator_mobile_wheels_stop_observe(windows,&r,start,now+100));
+    }
+}
+static bool read_temperature(uint8_t temperature,bool bad_voltage){
+    uint8_t req[8],data[15],bytes[21];uint32_t token;now+=4;
+    assert(actuator_mobile_feedback_begin(&r,now,true,req,&token));
+    assert(!r.reading_mode);telemetry(data);data[7]=temperature;
+    if(bad_voltage)data[6]=1;
+    size_t n=reply(bytes,req[2],0,data,15);
+    assert(actuator_mobile_feedback_feed(&r,token,bytes,n,now));
+    return actuator_mobile_feedback_commit(&r,token,now+1,true,true);
+}
+static void temperature_confirmation(uint32_t start){
+    for(unsigned issue=0;issue<12;issue++){
+        setup(start);sweep();r.confirm_temperature_spike=true;r.cursor=0;
+        uint32_t previous=r.axes[0].observed_ms;
+        if(issue==1)r.confirm_temperature_spike=false;
+        if(issue==2)r.axes[0].valid=false;
+        if(issue==3)r.axes[0].temperature=65;
+        if(issue==4)r.cursor=3; /* Lift still fails immediately. */
+        if(issue==5)r.axes[0].observed_ms=now-50;
+        bool eligible=issue==0||issue==6||issue>=8;
+        assert(read_temperature(issue==6?90:76,issue==7)==eligible);
+        if(!eligible){assert(r.fault==MOBILE_FEEDBACK_DEVICE);continue;}
+        assert(r.temperature_pending&&r.temperature_rechecks==1&&r.failure_count==0);
+        assert(r.axes[0].observed_ms==previous&&r.axes[0].temperature==30);
+        if(issue==8){assert(!read_temperature(76,false));assert(r.fault==MOBILE_FEEDBACK_DEVICE);}
+        else if(issue==9){
+            uint8_t req[8];uint32_t token;now+=4;
+            assert(actuator_mobile_feedback_begin(&r,now,true,req,&token));
+            actuator_mobile_feedback_reader_poll(&r,now+5);assert(r.fault==MOBILE_FEEDBACK_TIMEOUT);
+        }else if(issue==10){
+            /* No retry is scheduled: bounded even with no UART transaction. */
+            actuator_mobile_feedback_reader_poll(&r,r.temperature_last_recheck_ms[0]+50);
+            assert(r.fault==MOBILE_FEEDBACK_TIMEOUT);
+        }else if(issue==11){
+            /* A positive but still over-limit second sample is not recovery. */
+            assert(!read_temperature(71,false));assert(r.fault==MOBILE_FEEDBACK_DEVICE);
+        }else{
+            assert(read_temperature(35,false)&&!r.temperature_pending&&r.temperature_recovered==1);
+            assert(r.axes[0].observed_ms!=previous&&r.axes[0].temperature==35);
+            r.cursor=0;assert(read_temperature(76,false));
+            assert(r.temperature_pending&&r.temperature_rechecks==2);
+            assert(!read_temperature(76,false)); /* Consecutive hot replies still stop. */
+        }
+    }
+}
+static void recorded_temperature_spikes(uint32_t start){
+    const uint8_t spikes[]={89,92,255};
+    for(unsigned axis=0;axis<3;axis++)for(unsigned k=0;k<3;k++){
+        setup(start);sweep();r.confirm_temperature_spike=true;r.cursor=axis;
+        uint32_t previous=r.axes[axis].observed_ms;
+        assert(read_temperature(spikes[k],false));
+        assert(r.axes[axis].observed_ms==previous&&r.temperature_pending);
+        assert(read_temperature(34,false));
+        assert(r.fault==MOBILE_FEEDBACK_OK&&r.temperature_recovered==1);
+        assert(r.axes[axis].temperature==34);
+    }
+    /* Real thermal rise at the threshold never enters confirmation. */
+    setup(start);sweep();r.confirm_temperature_spike=true;r.cursor=0;
+    r.axes[0].temperature=69;
+    assert(!read_temperature(71,false));assert(r.fault==MOBILE_FEEDBACK_DEVICE);
+}
+static void recurrent_isolated_temperature_spikes(uint32_t start){
+    for(unsigned axis=0;axis<3;axis++){
+        setup(start);sweep();r.confirm_temperature_spike=true;
+        for(unsigned k=0;k<6;k++){
+            r.cursor=axis;uint32_t previous=r.axes[axis].observed_ms;
+            /* Recorded 35 -> 79 after an earlier recovered spike: the old
+             * 1000 ms cooldown rejected it without obtaining another sample. */
+            assert(read_temperature(79,false));
+            assert(r.temperature_pending&&r.axes[axis].observed_ms==previous);
+            assert(read_temperature(35,false));
+            assert(!r.temperature_pending&&r.temperature_recovered==k+1);
+            assert(r.fault==MOBILE_FEEDBACK_OK&&r.failure_count==0);
+        }
+        r.cursor=axis;assert(read_temperature(79,false));
+        assert(!read_temperature(79,false));
+        assert(r.fault==MOBILE_FEEDBACK_DEVICE&&r.failure_count==1);
+    }
+}
 int main(void) {
     good_sweep_and_expiry(100);good_sweep_and_expiry(UINT32_MAX-24);
     bad_mode_and_recovery();corruption_and_terminal();timeout_and_overflow();
-    decode_and_device_limits();missing_lift_and_modes();
+    decode_and_device_limits();missing_lift_and_modes();drive_readback();
+    stopped_position_window(100);stopped_position_window(UINT32_MAX-200);
+    temperature_confirmation(100);temperature_confirmation(UINT32_MAX-24);
+    recorded_temperature_spikes(100);recorded_temperature_spikes(UINT32_MAX-24);
+    recurrent_isolated_temperature_spikes(100);recurrent_isolated_temperature_spikes(UINT32_MAX-24);
     puts("mobile feedback: replies, freshness, modes, limits, fault recovery and clock wrap passed");
     return 0;
 }

@@ -126,3 +126,17 @@ def test_nested_children_share_root_stop_but_unrelated_or_late_calls_are_rejecte
     with pytest.raises(RuntimeError): backend.poll('run/03_search:3', t.now)
     lease.acquire('next')
     with pytest.raises(RuntimeError): backend.request('next', False, t.now)
+
+
+def test_base_transport_proof_never_unlocks_whole_robot_manipulation():
+    def scoped(**kw):
+        packet=bytearray(response(flags=31,**kw));packet[26]=1
+        struct.pack_into('<I',packet,60,crc32c(packet[:60]));return bytes(packet)
+    proof=SystemStopStatus.decode(scoped())
+    assert proof.base_confirmed and not proof.confirmed and proof.scope==1
+    assert not SystemStopStatus.decode(scoped(observed=110)).base_confirmed
+    assert not SystemStopStatus.decode(scoped(tick=219)).base_confirmed
+    t=Transport();t.exchange_mobile=lambda _:scoped()
+    backend=SystemStopBackend(SystemStopClient(t,42,lambda:t.now))
+    backend.request('run',True,t.now)
+    assert backend.poll('run',t.now).status!='STOPPED'

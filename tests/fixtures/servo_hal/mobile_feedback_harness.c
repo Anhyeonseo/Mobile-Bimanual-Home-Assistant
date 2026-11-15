@@ -3,6 +3,7 @@
 #include "servo_bus_reader.h"
 #include "control_tick.h"
 #include "actuator_core/mobile_endpoint.h"
+#include "actuator_core/mobile_ids.h"
 #include "actuator_core/crc32c.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,8 +12,11 @@
 static uint32_t elapsed,origin,tx_at,producer,last_lift_ms=UINT32_MAX;
 static uint8_t ring[256],packet[32];static size_t packet_size;
 static bool rx_healthy=true,automatic=true,answer=true,reply_pending,clock_valid=true,provide_lift=true;
-static bool corrupt,wrong_mode,duplicate,overflow;
-static unsigned reads,writes,zero_writes;
+static bool corrupt,wrong_mode,duplicate,overflow,hot,service_stopped;
+static unsigned hot_once;
+static bool hot_wheel_only;
+static uint8_t hot_temperature=76;
+static unsigned reads,writes,zero_writes,lift_reads,lift_writes;
 static int32_t device_speed[4];
 static bool check_direction;
 static UART_HandleTypeDef left={.Init={1000000},.gState=HAL_UART_STATE_READY};
@@ -23,12 +27,13 @@ static const actuator_mobile_output_config_t output_config={{5000,1000,200,10000
 uint32_t Timebase_NowUs(void){return origin+elapsed;}
 uint32_t HAL_GetTick(void){return elapsed/1000;}
 bool ControlTick_PeekEpoch(uint32_t *epoch){*epoch=origin+(elapsed/5000)*5000;return clock_valid;}
+bool ControlTick_PeekClock(uint32_t *now,uint32_t *epoch){bool valid=ControlTick_PeekEpoch(epoch);*now=Timebase_NowUs();return valid;}
 static void complete(void){left.gState=HAL_UART_STATE_READY;MobileServoOutput_OnTxComplete(&left);MobileServoFeedback_OnTxComplete(&left);}
 HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *u,const uint8_t *p,uint16_t n){
     CHECK(n<=sizeof(packet));memcpy(packet,p,n);packet_size=n;tx_at=elapsed;
     if(u->fail_tx)return HAL_ERROR;
     u->sent++;u->gState=HAL_UART_STATE_BUSY_TX;
-    if(n==8){reads++;reply_pending=true;}else {writes++;if(n==20)zero_writes++;
+    if(n==8){reads++;if(p[2]==ACTUATOR_LIFT_ID)lift_reads++;reply_pending=true;}else {writes++;if(n==11)lift_writes++;if(n==20)zero_writes++;
         if(check_direction&&n==17)CHECK(p[10]==9&&p[11]==200&&p[12]==0x80);}
     if(u->immediate)complete();
     return HAL_OK;
@@ -57,9 +62,10 @@ bool ServoBus_ReaderQuiet(UART_HandleTypeDef *u,uint32_t token,uint32_t p){
     return rx_healthy&&ServoTransport_Owns(u,token)&&p==producer&&!u->wire_busy;
 }
 static void push_reply(void){
-    uint8_t b[21]={255,255};size_t n=packet[6];b[2]=packet[2];b[3]=(uint8_t)(n+2);
-    if(n==1)b[5]=wrong_mode?0:1;
-    else {b[5]=100;b[11]=120;b[12]=30;b[18]=20;
+    uint8_t b[22]={255,255};size_t n=packet[6];b[2]=packet[2];b[3]=(uint8_t)(n+2);
+    if(n==1||n==16){b[5]=wrong_mode?0:1;if(n==16)b[12]=1;}
+    else {bool hot_sample=(hot||hot_once)&&(!hot_wheel_only||packet[2]==ACTUATOR_MOBILE_FIRST_ID);
+        b[5]=100;b[11]=120;b[12]=hot_sample?hot_temperature:30;if(hot_sample&&hot_once)--hot_once;b[18]=20;
         int32_t v=device_speed[packet[2]-8];
         uint16_t raw=(uint16_t)(v<0?-v:v);if(v<0)raw|=0x8000;
         b[7]=(uint8_t)raw;b[8]=(uint8_t)(raw>>8);
@@ -77,6 +83,7 @@ static void poll(void){
         MobileServoFeedback_SetLiftEvidence(&f);last_lift_ms=HAL_GetTick();
     }
     MobileServoOutput_Poll();MobileServoFeedback_Poll();
+    if(service_stopped)MobileServoFeedback_ServiceStopped(true);
 }
 static void advance(uint32_t until){for(;elapsed<until;elapsed+=50)poll();poll();}
 static void setup(void){
@@ -206,6 +213,87 @@ int main(int argc,char **argv){
         actuator_mobile_lift_evidence_t old={HAL_GetTick(),12000,false,false};
         MobileServoFeedback_SetLiftEvidence(&old);poll();
         CHECK(supervisor.state==ACTUATOR_MOBILE_STOP_LATCHED);break;
+    }
+    case 25: /* Invalid temperature: zero first, recover READ only, keep first body. */
+    {
+        bind_output();hot=true;advance(90000);hot=false;
+        CHECK(MobileServoFeedback_State()->fault==MOBILE_FEEDBACK_DEVICE);
+        MobileServoFeedback_ServiceStopped(false);CHECK(MobileServoFeedback_State()->fault!=MOBILE_FEEDBACK_OK);
+        service_stopped=true;advance(180000);
+        const actuator_mobile_feedback_reader_t *r=MobileServoFeedback_State();
+        CHECK(r->fault==MOBILE_FEEDBACK_OK&&r->supervisor->feedback.hardware_ok);
+        CHECK(supervisor.state==ACTUATOR_MOBILE_STOP_LATCHED&&!MobileServoOutput_CommandAllowed(&supervisor));
+        CHECK(!actuator_mobile_command(&supervisor,1,2,(int32_t[4]){10,0,0,0},HAL_GetTick()));
+        CHECK(r->first_failure.fields==MOBILE_FEEDBACK_FIELD_TEMPERATURE&&r->first_failure.response.body[8]==76);
+        CHECK(r->first_failure.previous.valid&&r->first_failure.previous.temperature==30);
+        uint32_t d[24];MobileServoFeedback_Diagnostics(d);CHECK(d[0]==1&&d[1]==1&&d[7]==8);
+        break;
+    }
+    case 26: /* Persistent violation exhausts bounded READ recovery; never rearms. */
+    case 32:
+    {
+        if(which==32)hot_temperature=92;
+        bind_output();hot=true;service_stopped=true;advance(600000);
+        uint32_t d[24];MobileServoFeedback_Diagnostics(d);CHECK(d[1]==3&&d[0]==4);
+        CHECK(d[2]==MOBILE_FEEDBACK_DEVICE&&supervisor.state==ACTUATOR_MOBILE_STOP_LATCHED);
+        unsigned before=reads;advance(800000);CHECK(reads==before);break;
+    }
+    case 27: /* An owned timeout is cleaned before pending zero can use the UART. */
+        bind_output();answer=false;advance(90000);answer=true;service_stopped=true;advance(200000);
+        CHECK(zero_writes==1&&MobileServoFeedback_State()->fault==MOBILE_FEEDBACK_OK);
+        CHECK(supervisor.state==ACTUATOR_MOBILE_STOP_LATCHED&&!MobileServoOutput_CommandAllowed(&supervisor));break;
+    case 28: /* Failed abort remains owned and exhausts attempts, never a forged stop. */
+        bind_output();answer=false;left.fail_abort=1;service_stopped=true;advance(600000);
+        CHECK(left.aborted==3&&zero_writes==0&&!MobileServoOutput_State()->stop_written);
+        CHECK(!MobileServoOutput_CommandAllowed(&supervisor));break;
+    case 29: /* Isolated jumps: same UART reread, no STOP/age renewal. */
+    case 30:
+    case 31:
+    case 33:
+    case 34:
+        bind_output();hot_temperature=which==30?89:which>=31?92:76;hot_wheel_only=which==34;
+        if(which==33)CHECK(actuator_mobile_command(&supervisor,1,1,(int32_t[4]){20,-20,0,0},HAL_GetTick()));
+        hot_once=1;advance(140000);
+#if HOST_S4_UNIFIED_CANDIDATE
+        CHECK(MobileServoFeedback_State()->temperature_rechecks==1);
+        CHECK(MobileServoFeedback_State()->temperature_recovered==1);
+        CHECK(MobileServoFeedback_State()->fault==MOBILE_FEEDBACK_OK);
+        CHECK(supervisor.state==(which==33?ACTUATOR_MOBILE_ACTIVE:ACTUATOR_MOBILE_READY)&&zero_writes==0);
+        if(which==34){
+            for(unsigned i=0;i<3;i++){
+                hot_once=1;advance(elapsed+140000);
+                CHECK(MobileServoFeedback_State()->temperature_recovered==i+2);
+                CHECK(MobileServoFeedback_State()->fault==MOBILE_FEEDBACK_OK);
+                CHECK(supervisor.state==ACTUATOR_MOBILE_READY&&zero_writes==0);
+            }
+            hot=true;advance(elapsed+90000);
+            CHECK(MobileServoFeedback_State()->fault==MOBILE_FEEDBACK_DEVICE);
+            CHECK(supervisor.state==ACTUATOR_MOBILE_STOP_LATCHED);
+        }
+#else
+        CHECK(MobileServoFeedback_State()->fault==MOBILE_FEEDBACK_DEVICE);
+#endif
+        break;
+    case 35: /* Real UART stops reading lift, wheels remain checked. */
+    case 36: /* Wheel reply timeout still forces STOP. */
+    case 37: /* No commands means watchdog STOP. */
+    {
+        bind_output();
+        while(!MobileServoFeedback_EnterTransport())advance(elapsed+100);
+        unsigned lr=lift_reads,lw=lift_writes;provide_lift=false;
+        int32_t v[4]={100,0,0,0};
+        for(unsigned seq=1;seq<=10;seq++){
+            CHECK(actuator_mobile_command(&supervisor,1,seq,v,HAL_GetTick()));
+            advance(elapsed+100000);CHECK(supervisor.state==ACTUATOR_MOBILE_ACTIVE);
+        }
+        CHECK(lift_reads==lr&&lift_writes==lw);
+        CHECK(!supervisor.feedback.lift_homed&&supervisor.feedback.hardware_ok);
+        CHECK(!actuator_mobile_command(&supervisor,1,11,(int32_t[4]){0,0,0,10},HAL_GetTick()));
+        if(which==35)MobileServoOutput_Stop();
+        if(which==36){answer=false;service_stopped=true;}
+        advance(elapsed+250000);CHECK(supervisor.state==ACTUATOR_MOBILE_STOP_LATCHED);
+        if(which==36){answer=true;advance(elapsed+300000);}
+        CHECK(zero_writes==1);break;
     }
     default:CHECK(false);
     }

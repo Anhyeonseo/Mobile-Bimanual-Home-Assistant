@@ -458,12 +458,15 @@ class StreamValidationTransportV2:
         if (
             not isinstance(packet, bytes)
             or len(packet) != 36
-            or packet[:3] not in (b"AM\x01", b"AL\x01", b"AQ\x01", b"AE\x01")
+            or packet[:3] not in (b"AM\x01", b"AL\x01", b"AQ\x01", b"AE\x01", b"AC\x01")
         ):
             raise StreamTransportV2Error("invalid mobile payload")
         if struct.unpack_from("<I", packet, 32)[0] != crc32c(packet[:32]):
             raise StreamTransportV2Error("invalid mobile payload CRC")
-        if packet[:3] == b"AE\x01":
+        if packet[:3] == b"AC\x01":
+            from .unified_commissioning import validate_request
+            validate_request(packet)
+        elif packet[:3] == b"AE\x01":
             from .robot_evidence import validate_request
             validate_request(packet)
         elif packet[:3] == b"AQ\x01":

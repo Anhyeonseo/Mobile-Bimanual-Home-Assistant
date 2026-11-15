@@ -1,0 +1,431 @@
+{
+  "schema_version": 1,
+  "observed_on": "2026-11-12",
+  "mode": "offline_real_record_review",
+  "hardware_enabled": false,
+  "motion_authorized": false,
+  "source_session": "20261112T090513Z-8d6f6d18",
+  "source_sha256": {
+    "output/s4-full-archive-retest-20261112/drive-session.jsonl": "cf0a355e9161c410fb856d0611d039c597e583a527f281e57a0013152c92a5ee",
+    "output/s4-full-archive-retest-20261112/capture/scans.json": "dac968cca33920c94ed84e1ec2d618440abce0f903526e76ff11f80de1643d37",
+    "output/s4-full-archive-retest-20261112/capture/report.json": "8780cce8f02d556956432018344d8dbc11512cfaf767e6348be4b4505e5942f6",
+    "/home/an-hyeonseo/Documents/GitHub/SO101-Can-Towel-Manipulation/workspaces/home-assistant/config/home_assistant/s4_base.nominal.json": "4fa49114f728311efabeca52cc88b99af376f5c44b05eb156c76f50a6ed81d7d",
+    "/home/an-hyeonseo/Documents/GitHub/SO101-Can-Towel-Manipulation/workspaces/home-assistant/config/home_assistant/lidar_mount.review.json": "3f55f03cf85fdfa5f09f856f32c0c4310e10fa31af9d80c6de34e1e3e6ce1e0e"
+  },
+  "native_archive_verified": 156,
+  "encoder_path_length_m": 0.16031646154848403,
+  "encoder_endpoint_displacement_m": 0.12087275816291246,
+  "floor_scale_qualified": false,
+  "adjacent_icp_accepted": false,
+  "adjacent_icp_reason": "accumulated motion disagrees with encoders and first/last overlap is insufficient",
+  "slam_rotation_option": "check_min_dist_and_heading_precisely",
+  "slam_pose_counts_before_after": [
+    4,
+    43
+  ],
+  "slam_map_shape": [
+    108,
+    111
+  ],
+  "slam_known_area_m2": 12.897500384375455,
+  "checkpoint_map_identical_after_restart": true,
+  "physical_power_restart_tested": false,
+  "quality": {
+    "mode": "offline_recorded_map_quality_preview",
+    "hardware_commands": 0,
+    "live_map_modified": false,
+    "physical_accuracy_verified": false,
+    "depth_motion_qualified": false,
+    "navigation_authorized": false,
+    "slam_pose_count": 43,
+    "slam_pose_time_coverage_s": 35.316771507263184,
+    "maximum_slam_pose_gap_s": 2.608619213104248,
+    "nominal_path_length_m": 0.16031646154848403,
+    "nominal_endpoint_displacement_m": 0.12087275816291246,
+    "compared_encoder_pose": [
+      0.11031973555737228,
+      -0.04940100491090882,
+      -1.6305108895333833
+    ],
+    "compared_slam_pose": [
+      0.06955514121226479,
+      -0.07742116650274038,
+      -1.839818179608914
+    ],
+    "scan_vs_encoder_final_translation_difference_m": 0.04946596413447858,
+    "scan_vs_encoder_final_heading_difference_deg": -11.992424342648366,
+    "heldout_scans": 134,
+    "heldout_endpoint_to_map": {
+      "endpoints": 33324,
+      "median_m": 0.022303372235459543,
+      "p90_m": 0.03779959403658251,
+      "within_10cm_fraction": 0.9945684791741688
+    },
+    "nominal_endpoint_to_map": {
+      "endpoints": 33324,
+      "median_m": 0.02658314869637425,
+      "p90_m": 0.11889925439000286,
+      "within_10cm_fraction": 0.87099387828592
+    },
+    "depth_preview_frames": 70,
+    "preview_voxels": 7189,
+    "above_lidar_voxels": 2653,
+    "lidar_free_cells_with_upper_depth_endpoints": 584,
+    "limitations": [
+      "map fit is internal consistency, not an independent surveyed distance",
+      "map-to-odom corrections interpolated between online SLAM poses; not a final optimized graph trajectory",
+      "8-pixel stride is for preview only; original full-resolution native depth retained",
+      "upper endpoints are review candidates; no free space, obstacle clearing or semantic labels inferred"
+    ]
+  },
+  "root_cause_right_arm_confirmed": false,
+  "local_regression_tests_passed": 66,
+  "evidence": {
+    "movement": "output/s4-recorded-mapping-final-20261112/report.json",
+    "slam": "output/s4-recorded-mapping-20261112/s4-recorded-slam-20261112-03/report.json",
+    "quality": "output/s4-recorded-map-quality-final-20261112/report.json",
+    "figure": "output/s4-recorded-map-quality-final-20261112/map-review.png",
+    "localization": "output/s4-recorded-mapping-20261112/s4-recorded-amcl-20261112-01/report.json"
+  },
+  "next_operator_step": {
+    "purpose": "Prepare live localization startup using a saved pose or an unambiguous initial-scan candidate; then observe before controlled manual travel",
+    "route": "mark start position and heading; translate 0.5–1.0 m where space/cable slack permit, including lateral motion; turn slowly both ways; return near the mark",
+    "record": "same full sensor archive, start/end marks and heading, any jumps, map overlap and observed final offset; actual marked distance if available",
+    "evaluation": "Confirm initial pose/scan-map alignment before motion, then check fresh scan/TF and correction continuity. Independent marked return accuracy remains unmeasured.",
+    "start_requires": "fresh supports/space/cable clearance and explicit operator teleop start",
+    "motor_power_cycle_required": false
+  },
+  "unqualified": [
+    "metric floor distance and yaw calibration",
+    "independent surveyed map accuracy",
+    "full-height live obstacle clearing and furniture semantics",
+    "physical power-reconnect relocalization",
+    "autonomous navigation and fetch"
+  ],
+  "rotation_option_verified_at_runtime": true,
+  "synthetic_slam_depth_checkpoint_regression_passed": true,
+  "synthetic_regression_evidence": "output/s4-recorded-mapping-20261112/s4-rotation-setting-regression-20261112/report.json",
+  "localization_policy": {
+    "global_pose_reference": "lidar/map matching: SLAM during mapping, AMCL against a saved map",
+    "continuous_local_prediction": "nominal wheel encoder odom; lidar corrects map-to-odom",
+    "encoder_agreement_required_for_next_mapping_trial": false,
+    "wheel_geometry_and_braking_validation_still_required": true,
+    "disagreement_4_9cm_12deg_is": "difference between estimates, not surveyed error or an adopted correction",
+    "live_localization_commissioned": false,
+    "live_navigation_authorized": false,
+    "fault_handling": "Keep fresh scan/TF, verified stop and arm/lift hold checks; do not substitute encoder-only autonomous navigation after localization loss."
+  },
+  "recorded_saved_map_localization": {
+    "mode": "real_amcl_recorded_scan_nominal_encoder_tf",
+    "passed": true,
+    "hardware_commands": 0,
+    "scans_published": 181,
+    "pose_messages": 69,
+    "motion_model": "nav2_amcl::OmniMotionModel",
+    "odometry_noise_alphas": [
+      0.2,
+      0.2,
+      0.2,
+      0.2,
+      0.2
+    ],
+    "initial_pose_xy_yaw": [
+      0.15,
+      -0.1,
+      0.1745329252
+    ],
+    "localization_map_sha256": "583c841eaac59e66908a41ca3a779bb8a0f2cd1c2b27b1c56c2865b045654504",
+    "compared_pose_messages": 69,
+    "final_slam_difference_m": 0.02408140497752063,
+    "final_slam_difference_deg": 3.3497696468771117,
+    "last_5s_median_slam_difference_m": 0.027804176944494576,
+    "last_5s_median_slam_difference_deg": 3.316521342199345,
+    "tracking_sanity_passed": true,
+    "encoder_agreement_required": false,
+    "same_capture_map_replay_not_independent_accuracy": true,
+    "physical_localization_qualified": false,
+    "process_exit_codes": [
+      0
+    ],
+    "limitations": [
+      "same recorded session used to build map and replay localization; not independent accuracy",
+      "initial pose hypothesis provided, not global localization from an unknown room",
+      "no live device, controller, motor commands, or automatic navigation authorization"
+    ],
+    "report_sha256": "df87bbe5334afeb5a6ec4e9e1d28b0232ad9fd86eaff3041d15936b78627dbc0"
+  },
+  "latest_independent_trial": {
+    "source_session": "20261112T100243Z-fa0d0fef",
+    "operator_report": "Normal completion without abnormalities; start marker not placed",
+    "source_sha256": {
+      "output/s4-localization-drive-20261112/completed/drive-session.jsonl": "5e6ac388d4a96b0fd1b472c69b2927a7cc6700edf98313d175bef3653e765f71",
+      "output/s4-localization-drive-20261112/completed/capture/report.json": "3ecaf795282e195638285ad5c83eb5705e4700a2110d9214484e286737093219",
+      "output/s4-localization-drive-20261112/completed/capture/scans.json": "854b59f648fc7ec1fff7f5ec963af0503a3fb440e5c88ef9ba7655efc079ca7e"
+    },
+    "drive_completed": true,
+    "all_six_directions_recorded": true,
+    "acks": 2217,
+    "duration_s": 122.774815542,
+    "nominal_encoder_path_m": 1.368400768240202,
+    "measured_return_error_available": false,
+    "native_archive_hashes_verified": 403,
+    "slam": {
+      "passed": true,
+      "scans_published": 610,
+      "slam_pose_messages": 74,
+      "map_shape": [
+        128,
+        97
+      ],
+      "known_area_m2": 12.520000373125079,
+      "graph_restored_from_checkpoint": true,
+      "map_cells_identical_after_restart": true
+    },
+    "new_map_quality": {
+      "mode": "offline_recorded_map_quality_preview",
+      "hardware_commands": 0,
+      "live_map_modified": false,
+      "physical_accuracy_verified": false,
+      "depth_motion_qualified": false,
+      "navigation_authorized": false,
+      "slam_pose_count": 74,
+      "slam_pose_time_coverage_s": 120.01049494743347,
+      "maximum_slam_pose_gap_s": 7.825552940368652,
+      "nominal_path_length_m": 1.368400768240202,
+      "nominal_endpoint_displacement_m": 0.1371681407621796,
+      "compared_encoder_pose": [
+        0.07124292593910987,
+        0.12248546885245891,
+        0.03668027921430875
+      ],
+      "compared_slam_pose": [
+        0.10230687252909704,
+        0.09927612970052141,
+        0.0367597095237473
+      ],
+      "scan_vs_encoder_final_translation_difference_m": 0.03877682557424259,
+      "scan_vs_encoder_final_heading_difference_deg": 0.004551021496247037,
+      "heldout_scans": 525,
+      "heldout_endpoint_to_map": {
+        "endpoints": 131702,
+        "median_m": 0.021761599899496505,
+        "p90_m": 0.03796430652920698,
+        "within_10cm_fraction": 0.9965148593035793
+      },
+      "nominal_endpoint_to_map": {
+        "endpoints": 131702,
+        "median_m": 0.02203357915569841,
+        "p90_m": 0.04143551075456351,
+        "within_10cm_fraction": 0.98721355788067
+      },
+      "depth_preview_frames": 238,
+      "preview_voxels": 6132,
+      "above_lidar_voxels": 2312,
+      "lidar_free_cells_with_upper_depth_endpoints": 572,
+      "limitations": [
+        "map fit is internal consistency, not an independent surveyed distance",
+        "map-to-odom corrections interpolated between online SLAM poses; not a final optimized graph trajectory",
+        "8-pixel stride is for preview only; original full-resolution native depth retained",
+        "upper endpoints are review candidates; no free space, obstacle clearing or semantic labels inferred"
+      ]
+    },
+    "unseeded_localization": {
+      "passed": false,
+      "initialization": "uniform_free_space_global_localization",
+      "independent_capture_from_map": true,
+      "all_scan_to_map": {
+        "endpoints": 150024,
+        "median_m": 0.044805076967462255,
+        "p90_m": 0.20219982546214474,
+        "within_10cm_fraction": 0.7428944702180984
+      },
+      "after_10s_scan_to_map": {
+        "endpoints": 137591,
+        "median_m": 0.04019729705366855,
+        "p90_m": 0.15424665321734884,
+        "within_10cm_fraction": 0.7906040366012311
+      },
+      "maximum_map_correction_step_after_10s_m": 0.23670907607737407,
+      "maximum_map_correction_step_after_10s_deg": 20.73706379927919,
+      "physical_localization_qualified": false,
+      "measured_return_error_available": false
+    },
+    "first_scan_seeded_localization": {
+      "passed": true,
+      "initialization": "first_scan_map_hypothesis",
+      "independent_capture_from_map": true,
+      "all_scan_to_map": {
+        "endpoints": 150024,
+        "median_m": 0.02386943632459269,
+        "p90_m": 0.04826741813278225,
+        "within_10cm_fraction": 0.975510584973071
+      },
+      "after_10s_scan_to_map": {
+        "endpoints": 137591,
+        "median_m": 0.02415059487907379,
+        "p90_m": 0.049372711894192935,
+        "within_10cm_fraction": 0.9740971429817358
+      },
+      "maximum_map_correction_step_after_10s_m": 0.010036173551848625,
+      "maximum_map_correction_step_after_10s_deg": 0.4999761733182728,
+      "physical_localization_qualified": false,
+      "measured_return_error_available": false,
+      "initial_scan_hypothesis": {
+        "best": {
+          "xy_yaw": [
+            0.10305272942415922,
+            0.3848849410752106,
+            -1.0890518947582133
+          ],
+          "clipped_mean_distance_m": 0.029605452866234307,
+          "within_10cm_fraction": 0.9678714859437751,
+          "registration": {
+            "rmse_m": 0.022698480632744416,
+            "overlap_fraction": 0.8473895582329317,
+            "inliers": 211
+          }
+        },
+        "alternative_score_gap_m": 0.0742925281690955,
+        "elapsed_s": 2.715498750010738,
+        "later_scans_used": false
+      }
+    },
+    "local_regression_tests_passed": 77,
+    "live_localization_activated": false,
+    "autonomous_navigation_authorized": false,
+    "semantic_mapping_physically_accepted": false,
+    "evidence_directory": "output/s4-localization-drive-20261112/completed",
+    "figure": "output/s4-localization-drive-20261112/completed/localization-review.png",
+    "artifact_report_sha256": {
+      "s4-recorded-trajectory-20261112-08/report.json": "84c7cf1810ddd1c9bfe631768f80ab0bef2c217ce2156a6ab31d37df9889e778",
+      "s4-recorded-quality-20261112-08/report.json": "0f92cfa6d3aac66e13b9d48cfc46f0f50c6c4c411f4682ae7e184620f590143f",
+      "s4-recorded-slam-20261112-08/report.json": "a75763513feed8723c254681bdb2662c9d0331627704663135cb48167d0dc34d",
+      "s4-recorded-amcl-20261112-08-seeded/report.json": "1293aa792bf1eee359a0c39bb96ef4d1c508d2cb7bc1110ddbcd70df93040bad",
+      "s4-recorded-amcl-20261112-08-global/report.json": "7dde626aee070193a77198e222531115e8ec5fd83dea2557e71852e09c260c84"
+    },
+    "limitations": [
+      "One new capture against an older map; generalization needs further scenes.",
+      "No measured start/end markers; scan-to-map distances and correction steps are not physical pose accuracy.",
+      "Upper RGB-D endpoints are previews and may contain robot geometry; furniture semantics and live obstacle clearing unaccepted.",
+      "First-scan map search is an offline candidate path, not active robot navigation.",
+      "Global initialization failed the diagnostic; preserve its evidence, do not relax the threshold."
+    ]
+  },
+  "latest_live_tracking_trial": {
+    "session": "20261112T105341Z-3b25004f",
+    "operator_report": "Movement and rotation normal; arrow followed motion; Finish pressed.",
+    "manual_teleop_completed": true,
+    "live_tracking_sanity_passed": true,
+    "independent_physical_accuracy_qualified": false,
+    "autonomous_navigation_authorized": false,
+    "acks": 796,
+    "verified_pauses": 0,
+    "hold_read_retries": 0,
+    "duration_s": 42.536115381502896,
+    "all_six_directions_recorded": true,
+    "maximum_command_gap_ms": 63.201294,
+    "final_stop_confirmed": true,
+    "final_hold_confirmed": true,
+    "localization": {
+      "samples": 393,
+      "ready_fraction": 0.9669211195928753,
+      "warning_samples": 13,
+      "minimum_fit": 0.776,
+      "median_fit": 0.8785425101214575,
+      "maximum_scan_age_s": 0.20790811504411977,
+      "maximum_pose_age_s": 0.6747010067192605,
+      "warning_causes": {
+        "pose": 2,
+        "fit": 9,
+        "encoder": 2
+      }
+    },
+    "live_map_fit": {
+      "compared_scans": 211,
+      "pose_time_coverage_s": 42.33104372024536,
+      "all_scan_to_map": {
+        "endpoints": 52714,
+        "median_m": 0.030255519822926406,
+        "p90_m": 0.10993046039644286,
+        "within_10cm_fraction": 0.8818150775884964
+      },
+      "after_10s_scan_to_map": {
+        "endpoints": 40537,
+        "median_m": 0.0323200792922616,
+        "p90_m": 0.10760072131748553,
+        "within_10cm_fraction": 0.8869921306460764
+      },
+      "maximum_pose_message_gap_s": 0.4015829563140869,
+      "maximum_map_correction_step_after_10s_m": 0.0075168081479817395,
+      "maximum_map_correction_step_after_10s_deg": 0.4078176054219872,
+      "final_pose_xy_yaw": [
+        0.32691508016270965,
+        0.24989105796283625,
+        -2.1539014117093256
+      ],
+      "relative_to_pose_at_10s": [
+        -0.07559037866789825,
+        0.038792016481404124,
+        -1.6460232069854424
+      ],
+      "tracking_sanity_passed": true,
+      "physical_localization_qualified": false,
+      "encoder_agreement_required": false,
+      "measured_return_error_available": false
+    },
+    "capture_window": {
+      "source_capture_passed": false,
+      "selected_scans": 211,
+      "drive_window_s": [
+        69135.729092063,
+        69178.2652074445
+      ],
+      "maximum_selected_scan_gap_s": 0.20213334847358055,
+      "excluded_pre_drive_gaps": [
+        [
+          69083.18565425232,
+          69083.78558765442,
+          0.5999334021034883
+        ],
+        [
+          69084.18586018302,
+          69084.7857168437,
+          0.5998566606867826
+        ]
+      ],
+      "whole_capture_qualified": false,
+      "scope": "offline drive-window replay only; no live sensor acceptance"
+    },
+    "whole_sensor_capture_passed": false,
+    "native_archive_verified": 198,
+    "new_map": {
+      "shape": [
+        111,
+        113
+      ],
+      "resolution_m": 0.05,
+      "known_area_m2": 12.732500379458072,
+      "graph_saved": true,
+      "process_restart_cells_identical": true,
+      "actual_power_reconnect_tested": false
+    },
+    "depth_preview": {
+      "frames": 69,
+      "above_lidar_voxels": 2453,
+      "lidar_free_cells_with_upper_depth": 500,
+      "semantic_labels_inferred": false,
+      "self_geometry_removed": false,
+      "live_obstacles_updated": false
+    },
+    "source_release": "s4-local-54e4384d93b3",
+    "replay_release": "s4-local-d04c3ec27633",
+    "local_tests_passed": 82,
+    "evidence": "output/s4-live-localization-20261112/retest",
+    "reports_sha256": {
+      "review.json": "71c0f7bb3e8ce1e3473cdcc5978b0f0eb99c2ab26e8db7e6acb49383ade524be",
+      "live-map-fit.json": "e0d76ae02cbf7e7601c1854233fcd898833e146b9e313aabe026e5d81755405f",
+      "s4-recorded-slam-20261112-09-window/report.json": "03ca4131b7ce535cbb85cbbd0d21757cf88023d607a3cd03baeed1cf6f7db029",
+      "s4-recorded-quality-20261112-09/report.json": "cd7e3cc3e8f87110ecdd2e6c206acad6f9a4a7322b3202492eeee7d3d4fcb6f8"
+    }
+  }
+}

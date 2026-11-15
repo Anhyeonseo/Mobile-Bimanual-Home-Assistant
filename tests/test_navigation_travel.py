@@ -175,6 +175,44 @@ def test_guard_processing_delay_cannot_refresh_command_lifetime():
     assert d.fault and s and not d.client.calls
 
 
+def test_recorded_command_gain_keeps_actual_feedback_and_lift_separate():
+    from home_robot_tasks.base_motion import TeleopCommandModel
+    d,n,s,c=driver()
+    d.command_model=TeleopCommandModel(dict(mode='recorded_teleop_command_candidate',
+        wheel_order=[7,8,9],reference_raw=200,maximum_raw=200,
+        patterns={'F':[-200,200,0],'L':[-100,-100,200],'A':[200,200,200]},
+        axis_speed_at_reference=[.02,.015,.1]))
+    d.client.rates=(10,20,30,0)
+    d.tick()
+    assert d.observation.twist==pytest.approx(d.geometry.body_twist((.1,.2,.3)))
+    raw=d.client.calls[-1][0]
+    assert raw[0]<0 and raw[1]==-raw[0] and raw[2:]==(0,0)
+    assert c[-1][0]==pytest.approx(d.command_model.expected_twist(raw[:3]))
+
+
+def test_nav2_command_gap_sends_zero_without_refreshing_old_motion_or_losing_owner():
+    from dataclasses import replace
+    d,n,s,c=driver();d.p=replace(d.p,wait_on_command_gap=True)
+    d.tick();stamp=d.command[0]
+    for _ in range(6):n[0]+=.05;d.tick()
+    assert d.waiting_for_command and not d.fault and not s and d.owner=='goal'
+    assert d.command[0]==stamp and d.client.calls[-1][0]==(0,0,0,0)
+    n[0]+=.02;d.submit((.1,0,0),observed_s=n[0],owner='goal',source='nav2',epoch='e');d.tick()
+    assert not d.waiting_for_command and any(d.client.calls[-1][0])
+    d.client.boot=99;n[0]+=.02;d.tick()
+    assert d.fault and s  # waiting policy does not hide a device restart
+
+
+def test_recorded_nav2_horizon_resolves_motion_at_real_slow_speed():
+    from pathlib import Path
+    import yaml
+    cfg=yaml.safe_load((Path(__file__).parents[1]/'config/nav2.alohamini.candidate.yaml').read_text())
+    controller=cfg['/offline_nav2/controller_server']['ros__parameters'];dwb=controller['FollowPath']
+    cell=cfg['/offline_nav2/local_costmap/local_costmap']['ros__parameters']['resolution']
+    assert dwb['sim_time']*min(dwb['max_vel_x'],dwb['max_vel_y'])>cell
+    assert dwb['trans_stopped_velocity']<min(dwb['max_vel_x'],dwb['max_vel_y'])/2
+
+
 def test_state_travel_evidence_requires_measured_lift_and_clearance_epoch():
     from home_robot_tasks.navigation_binding import StateTravelEvidence
     keys=('hardware_ready','arm_in_transport_pose','lift_in_transport_position','lift_stopped','lift_homed','lift_hold_verified','localized')
@@ -216,3 +254,33 @@ def test_ros_factory_adapts_common_no_argument_whole_stop_request(monkeypatch):
         request_stop=lambda:stops.append('whole-stop'),io_parameters={},reset_observations=lambda epoch:None)
     io.driver._fault('sensor lost')
     assert stops==['whole-stop'] and io.driver.stop_error is None
+
+
+def test_shifted_grid_requires_both_overlapped_columns_free():
+    v = volume()
+    for z in range(10):
+        v.cells[(0, 0, z)] = (False, 1.)
+    # Cell x=[.03,.13] overlaps voxel columns 0 and 1. Column 1 is unknown.
+    assert projected_grid(v, origin_xy=(.03, 0.), width=1, height=1, now=1.) == [-1]
+    for z in range(10):
+        v.cells[(1, 0, z)] = (False, 1.)
+    assert projected_grid(v, origin_xy=(.03, 0.), width=1, height=1, now=1.) == [0]
+    v.cells[(1, 0, 7)] = (True, 1.)
+    assert projected_grid(v, origin_xy=(.03, 0.), width=1, height=1, now=1.) == [100]
+    assert projected_grid(v, origin_xy=(-.07, 0.), width=1, height=1, now=1.) == [-1]
+    # A voxel touching only the far boundary must not add another padding cell.
+    assert projected_grid(v, origin_xy=(.2, 0.), width=1, height=1, now=1.) == [-1]
+
+
+def test_shifted_projection_matches_independent_rectangle_overlap():
+    v = volume(); v.cells[(1, -1, 5)] = (True, 1.)
+    origin = (-.03392979314933, -.0664437019647)
+    target = .10000000149
+    actual = projected_grid(v, origin_xy=origin, width=5, height=4, now=1., resolution_m=target)
+    expected = []
+    for y in range(4):
+        for x in range(5):
+            left, bottom = origin[0]+x*target, origin[1]+y*target
+            overlap = left < .2 and left+target > .1 and bottom < 0. and bottom+target > -.1
+            expected.append(100 if overlap else -1)
+    assert actual == expected

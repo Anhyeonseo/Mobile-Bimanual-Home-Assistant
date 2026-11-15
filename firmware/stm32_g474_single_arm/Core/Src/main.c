@@ -135,7 +135,7 @@ int main(void)
 #endif
   #if !HOST_LEFT_ONLY_BUILD
   (void)MobileBoard_Boot(&huart1, &huart4);
-#if HOST_S3_STATIONARY_PICK
+#if HOST_S3_STATIONARY_PICK && !HOST_S4_UNIFIED_CANDIDATE
   /* Paused until an explicit AP observe request; motor-OFF boot is quiet. */
   (void)MobileArmObserver_Configure(&huart1,&huart4,5U,150U);
 #endif
@@ -160,6 +160,9 @@ int main(void)
     MobileServoOutput_Poll();
     MobileHoldOutput_Poll();
     MobileServoFeedback_Poll();
+#if HOST_S4_UNIFIED_CANDIDATE
+    MobileServoFeedback_ServiceStopped(MobileBoard_StopActive());
+#endif
     #endif
     F0Metrics_LoopEnd();
     /* USER CODE END 3 */

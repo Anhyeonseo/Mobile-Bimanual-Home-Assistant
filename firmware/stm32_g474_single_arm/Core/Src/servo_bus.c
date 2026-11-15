@@ -740,7 +740,16 @@ HAL_StatusTypeDef Servo_InMotionTelemetryBegin(void)
      * first timed read. Runtime requests then only take a DMA cursor. */
     if (servo_in_motion_telemetry.enabled || servo_feedback_token != 0U)
         return HAL_BUSY;
-    if (ServoTransport_ServiceAllowed())
+    /* The unified mobile reader can already own healthy shared circular RX
+     * before output enables periodic mode. Reuse that receiver; attempting
+     * maintenance setup here races its read lease and may reset its ring. */
+    if (servo_reader_shared && ServoBus_DmaHardwareActive())
+    {
+        if (ServoBus_CurrentUartErrorCode() != HAL_UART_ERROR_NONE ||
+            servo_uart_async_errors || servo_dma_async_error ||
+            servo_uart_handle->hdmarx->ErrorCode != HAL_DMA_ERROR_NONE) return HAL_ERROR;
+    }
+    else if (ServoTransport_ServiceAllowed())
     {
         if (!ServoBus_PrepareReader(servo_uart_handle, true)) return HAL_ERROR;
     }
@@ -1642,6 +1651,16 @@ HAL_StatusTypeDef Servo_ReadData(
     uint8_t *data
 )
 {
+#if HOST_MOBILE_BASE_PRESERVE_HOLD || HOST_S4_UNIFIED_CANDIDATE
+    /* A late RX byte can leave End busy after a completed read. Retain the
+     * owner until it can be released; never strand all later hold queries. */
+    if (servo_service_token != 0U) {
+        if (ServoTransport_End(servo_uart_handle, servo_service_token, true) != HAL_OK)
+            return HAL_BUSY;
+        servo_service_token = 0U;
+    }
+#endif
+
     if (!ServoTransport_BeginService(servo_uart_handle, ACTUATOR_BUS_WORK_FEEDBACK, &servo_service_token))
         return HAL_BUSY;
     HAL_StatusTypeDef status = Servo_ReadDataOwned(servo_id, start_address, data_length, data);

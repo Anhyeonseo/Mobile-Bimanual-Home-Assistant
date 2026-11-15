@@ -1,4 +1,5 @@
 from setuptools import find_packages, setup
+from glob import glob
 
 setup(
     name="home_robot_tasks",
@@ -8,6 +9,8 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/home_robot_tasks"]),
         ("share/home_robot_tasks", ["package.xml"]),
+        ("share/home_robot_tasks/config", glob("config/*.yaml")),
+        ("share/home_robot_tasks/launch", glob("launch/*.launch.py")),
     ],
     install_requires=["setuptools"],
     maintainer="dasom",
@@ -17,6 +20,7 @@ setup(
     entry_points={
         "console_scripts": [
             "plan_fetch = home_robot_tasks.cli:main",
+            "saved_home_maps = home_robot_tasks.saved_map_node:main",
             "replay_fetch = home_robot_tasks.replay_cli:main",
             "simulate_robot = home_robot_tasks.simulate_cli:main",
             "robot_gateway = home_robot_tasks.gateway:main",

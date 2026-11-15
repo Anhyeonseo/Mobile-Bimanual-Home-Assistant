@@ -63,7 +63,7 @@ bool MobileArmObserver_Poll(void)
         /* Legitimate trajectory/STOP ownership requires Suspend first. */
         if(BimanualTrackingFeedback_Active()){observer.fault=true;return false;}
         if(ServoTransport_ReadReady(observer.left)&&ServoTransport_ReadReady(observer.right)){
-            if(BimanualTrackingFeedback_Begin()!=HAL_OK){observer.fault=true;return false;}
+            if(BimanualTrackingFeedback_BeginObservation()!=HAL_OK){observer.fault=true;return false;}
             observer.owned=true;
             now=HAL_GetTick(); /* Receiver preparation precedes the read deadline. */
         }

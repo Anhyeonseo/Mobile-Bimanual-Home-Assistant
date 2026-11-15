@@ -79,12 +79,14 @@ class SyntheticStop:
 
 
 class OfflineStack:
-    def __init__(self, config, world, map_document, *, navigation=None, planner=None, boot_id=42, guarded_navigation=False):
+    def __init__(self, config, world, map_document, *, navigation=None, planner=None, boot_id=42, guarded_navigation=False, joint_placement=False):
         if config.get('mode')!='simulation' or config.get('schema_version')!=1:
             raise ValueError('explicit simulation configuration required')
         self.now=1.;self.seq=0;self.boot=boot_id;self.xy_yaw=(1.5,1.5,0.)
         self.velocity=(0.,0.,0.);self.height=10000;self.lift_speed=0.;self.held=False
         self.hidden=False;self.sensor_loss=False;self.scene_revision='scene-1';self.attached=None
+        self.capture_poses = {}
+        self.placement_history = []
         self.clock=lambda:self.now
         self.state=RobotStateStore(config['state'],self.clock)
         self.evidence=EvidenceProducer(self.clock,boot_id=boot_id,profile_sha256='a'*64,
@@ -105,15 +107,49 @@ class OfflineStack:
             from .offline_navigation import OfflineNavigation
             self.guarded_navigation=OfflineNavigation(self)
             navigation=self.guarded_navigation.port
+        placement = self.joint_placement_policy(map_document) if joint_placement else None
         self.assembly=build_runtime(world=world,navigation_map=NavigationMap(map_document),catalog_document=config['catalog'],
             state=self.state,payload=self.payload,camera=self.camera,source=self.source,detector=self.ports['detector'],
             navigation=navigation or self.ports['navigation'],arm=self.ports['arm'],lift=self.ports['lift'],
             planner=planner or self.ports['planner'],surface_observer=self.surface_observer,stop_client=self.stop,
             clock=self.clock,scene_revision=lambda:self.scene_revision,
             maintenance=(self.guarded_navigation.maintain,) if guarded_navigation else (),
-            manipulation_factory=self.manipulation_factory,
+            manipulation_factory=self.manipulation_factory, placement_policy=placement,
             surface_sampler=SurfaceSampler({'bedroom_drop_zone':(24,16,40,32)}))
         self.runtime=self.assembly.runtime
+
+    def joint_placement_policy(self, map_document):
+        # Exercise the existing planner/catalog boundary, using the same explicit
+        # synthetic geometry oracle as the application preview. This is not IK.
+        import math
+        from .assistant.contracts import Context, Stamp
+        from .assistant.placement import PlacementProfile
+        from .assistant.placement_binding import TaskPlacementPolicy
+        from .assistant.simulation import SyntheticFeasibility
+        nav = NavigationMap(map_document)
+        context = Context(nav.map_id, nav.revision, self.camera.policy.calibration_id,
+                          'offline-clock', nav.frame_id)
+        def target_to_map(target):
+            pose = self.capture_poses[target['capture_id']]
+            x, y, yaw = pose
+            px, py, pz = target['position_m']
+            point = (x+math.cos(yaw)*px-math.sin(yaw)*py,
+                     y+math.sin(yaw)*px+math.cos(yaw)*py, pz)
+            return point, Stamp(target['observed_s'], context, target['capture_id'])
+        def fresh(target, candidate, operation, object_id):
+            self.placement_history.append(dict(operation=operation, candidate=candidate,
+                final_capture_id=target['capture_id'], observed_s=target['observed_s'],
+                current_base=list(self.xy_yaw), current_height_m=self.height/1e6))
+            return dict(operation=operation, object_id=object_id, arm=candidate['arm'],
+                        target=target, position_m=target['position_m'], quaternion_xyzw=[0,0,0,1])
+        return TaskPlacementPolicy(
+            profile=PlacementProfile(0,.6,(.3,.4,.5),(.3,.4),(-math.pi,-math.pi/2,0,math.pi/2)),
+            feasibility_factory=lambda xyz, *_: SyntheticFeasibility(nav,self.xy_yaw[:2],xyz),
+            target_to_map=target_to_map, context=lambda:context,
+            current_configuration=lambda:(self.xy_yaw,self.height/1e6),
+            scene_revision=lambda:self.scene_revision, clock=self.clock,
+            grasp_ids=lambda *_:['synthetic-central'], fresh_grasp_task=fresh,
+            pick_height_for=lambda _: .5, maximum_alignment_s=120)
 
     def manipulation_factory(self, *, motion, arm, monitor, clock, catalog):
         def resolve(stage, parameters, now):
@@ -162,6 +198,9 @@ class OfflineStack:
         frame=RGBDFrame(f'frame-{self.seq}',self.now,self.state.motion().pose_revision,p.camera_frame,p.calibration_id,
             p.width,p.height,CameraIntrinsics(50,50,32,24),p.root_frame,self.now,
             ((1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1)),True)
+        self.capture_poses[frame.capture_id] = tuple(self.xy_yaw)
+        if len(self.capture_poses) > 256:
+            del self.capture_poses[next(iter(self.capture_poses))]
         self.source.publish(ImagePair(frame,np.zeros((p.height,p.width,3),np.uint8),np.ones((p.height,p.width),np.float32),self.now))
 
     def surface_observer(self,skill,parameters,observation):
@@ -175,7 +214,15 @@ class OfflineStack:
 
     def run(self,request,*,cancel_step=None,fault=None):
         self.runtime.submit(request)
-        task=self.runtime.app.tasks[request['request_id']]
+        return self.run_submitted(request['request_id'], cancel_step=cancel_step, fault=fault)
+
+    def run_submitted(self, request_id, *, cancel_step=None, fault=None, on_tick=None):
+        """Finish a job admitted by the normal gateway without submitting it twice.
+
+        The optional observer receives actual executor results. It must not tick
+        the application a second time; sensor/maintenance time belongs to tick().
+        """
+        task=self.runtime.app.tasks[request_id]
         injected=False
         for _ in range(6200):
             if not injected and task.state=='RUNNING':
@@ -189,9 +236,11 @@ class OfflineStack:
             try:self.tick()
             except ValueError as error:
                 self.runtime.fault=str(error);self.runtime.tick()
+            if on_tick is not None:on_tick(self.runtime.app.status(request_id))
             if task.state in task.TERMINAL or task.state=='STOP_UNCONFIRMED':break
         manipulation = self.assembly.manipulation
         stages = [h for goal in manipulation.sequence.entries for h in manipulation.history(goal)]
         return {**task.result(),'runtime_fault':self.runtime.fault,'synthetic_devices':True,
-                'manipulation_stages':stages,
+                'manipulation_stages':stages, 'placement_history':self.placement_history,
+                'placement_mode':'synthetic_reach_shell' if self.assembly.catalog.placement_policy else 'static_catalog',
                 'stop_requests':self.stop.requests,'maximum_tick_gap_s':self.runtime.maximum_observed_gap_s}

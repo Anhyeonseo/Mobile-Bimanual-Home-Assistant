@@ -14,11 +14,14 @@ static actuator_mobile_supervisor_t supervisor;
 static actuator_mobile_endpoint_t endpoint;
 static actuator_bus_router_t router;
 static uint32_t transmitted;
+#ifndef PC_MOBILE_MAX_WHEEL_RAW
+#define PC_MOBILE_MAX_WHEEL_RAW 1000
+#endif
 void pc_mobile_reset(uint32_t boot_id) {
 #if ACTUATOR_PROTOCOL_VERSION == 2
     actuator_stream_parser_init(&host_parser);host_attached=true;
 #endif
-    actuator_mobile_config_t config={{1000,1000,1000,100},2,250,500,0,500000};
+    actuator_mobile_config_t config={{PC_MOBILE_MAX_WHEEL_RAW,PC_MOBILE_MAX_WHEEL_RAW,PC_MOBILE_MAX_WHEEL_RAW,100},2,250,500,0,500000};
     actuator_mobile_init(&supervisor,&config);
     actuator_mobile_endpoint_init(&endpoint,&supervisor,boot_id);
     actuator_bus_router_init(&router);transmitted=0;

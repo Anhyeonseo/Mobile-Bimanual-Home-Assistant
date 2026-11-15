@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "status": "stationary_sensor_tf_and_concurrent_capture_passed",
+  "local_date": "2026-11-12",
+  "hardware_enabled": false,
+  "motion_authorized": false,
+  "precision_extrinsics_qualified": false,
+  "moving_mapping_qualified": false,
+  "source_release_tested": "s4-local-1ff6f796086c",
+  "mount_evidence": "config/home_assistant/lidar_mount.review.json",
+  "report_path": "/home/hyper/robot/shared/diagnostics/s4-sensor-frames/live-final-20s",
+  "files_sha256": {
+    "driver.log": "ede13e619275acff7b42701ffeb3bbdd62de41146506979cf6687cd171ebd85c",
+    "report.json": "d1b8117ead1e7f1fc046fe92d286261a10f34bba34b2975858270a5f5db5844b",
+    "rgbd-frames.json": "773bc9088f0ef6c0221b91942c5c16cf31ae7df88d011d69862735c25605fea7",
+    "rgbd-last.npz": "c4238d08c0afaeaa992b9e795a6e4e70a06ddab189aa8987584042f37440d056",
+    "rgbd-metadata.json": "9e3b72170257ae812590ccb7b95494776f0e6fde669ff2cf819d31b7c2280af6",
+    "scans.json": "bc6892c12f7ab81c2ee40b28d690ed2e40ff8696273f9156a6badadc9c818739"
+  },
+  "robot_motion_commands": 0,
+  "controller_reset_or_flashed": false,
+  "lidar": {
+    "frames": 91,
+    "maximum_gap_s": 0.2033945347111512,
+    "gaps_over_035": 0,
+    "driver_sha256": "95807be4fae6e60319d32ddbc802458572fcc9bf328862abb2258abf163a60aa",
+    "driver_exit_code": 0
+  },
+  "rgbd": {
+    "frames": 597,
+    "native_shape": [
+      720,
+      1280
+    ],
+    "maximum_depth_gap_s": 0.03363847732543945,
+    "minimum_native_valid_fraction": 0.9039333767361111,
+    "calibration_equivalence": {
+      "method": "exact identity/intrinsics/rotation/scale; translation roundoff <= 2e-9 m",
+      "maximum_translation_difference_m": 9.313225746154785e-10,
+      "observed_camera_device": {
+        "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+        "stream_profile_id": "rgbd-v1-52b8cdab670d4770de886ec17c375dcb131a4d7ad72ae0ea92774aa5ea0916da",
+        "factory_calibration_sha256": "12ce5d4f0c292758b16632e484672fcee655436d57741f4e6b0fabc8147f5643"
+      },
+      "reference_camera_device": {
+        "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+        "stream_profile_id": "rgbd-v1-52b8cdab670d4770de886ec17c375dcb131a4d7ad72ae0ea92774aa5ea0916da",
+        "factory_calibration_sha256": "4213fcd9d40419ceb64ea3a403f670bc44bfbcf6223a52aa4c20b3f930ab7591"
+      }
+    },
+    "physical_sync_qualified": false,
+    "full_height_travel_coverage_qualified": false
+  },
+  "tf_lookup_checks": [
+    {
+      "parent": "base_link",
+      "child": "base_footprint",
+      "maximum_matrix_error": 0.0
+    },
+    {
+      "parent": "base_link",
+      "child": "lidar_a",
+      "maximum_matrix_error": 0.0
+    },
+    {
+      "parent": "base_link",
+      "child": "color_camera_optical_frame",
+      "maximum_matrix_error": 4.440892098500626e-16
+    },
+    {
+      "parent": "color_camera_optical_frame",
+      "child": "depth_camera_optical_frame",
+      "maximum_matrix_error": 1.643060887346337e-08
+    }
+  ],
+  "tf_matrix_roundoff_limit": 1e-07,
+  "scan_height_above_floor_m": 0.16140244318550648,
+  "limitations": [
+    "TF connectivity checks the configured nominal geometry, not metric accuracy of the physical mounting.",
+    "No odom/map transform or arm/lift state was synthesized. No navigation enable token was produced.",
+    "LDS publication timestamp and reversed per-ray time order remain unqualified for moving mapping.",
+    "Native depth was retained without RGB cropping. Full-height travel visibility, blind areas and obstacle clearing still need qualification.",
+    "Camera and lidar were collected on one host; simultaneous collection is not proof of physical sensor synchronization."
+  ]
+}

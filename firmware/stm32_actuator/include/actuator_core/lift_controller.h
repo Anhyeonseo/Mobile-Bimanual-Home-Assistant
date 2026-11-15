@@ -19,7 +19,29 @@ typedef struct {
     uint16_t position_raw;
     int32_t velocity_raw, current_ma;
     bool healthy, hold_verified;
+    uint8_t hold_report_remaining_ms; /* Source sample lifetime for position-backed hold; never a motion request. */
+    bool bottom_transport_verified;
+    uint32_t bottom_drive_observed_ms;
 } actuator_lift_feedback_t;
+typedef struct {
+    uint32_t first_ms,last_ms,last_quiet_ms,report_started_ms;
+    uint16_t anchor_raw,quiet_position_raw;
+    uint8_t samples;
+    bool tracking,proven,report_pending;
+} actuator_lift_hold_monitor_t;
+/* Observed stationary position plus fresh torque-ON/zero-goal readback.
+ * Never accepts a desired-command echo as zero_drive_verified. */
+bool actuator_lift_hold_observe(actuator_lift_hold_monitor_t *monitor,
+    const actuator_lift_feedback_t *feedback,bool zero_drive_verified,
+    uint32_t now_ms,uint32_t maximum_age_ms,uint32_t dwell_ms,uint16_t tolerance_raw);
+/* Existing HOLDING only: each fresh unchanged position plus fresh zero-drive
+ * readback retains hold for <100 ms despite bounded speed indication.
+ * Repeated timestamps never renew the source sample lifetime.
+ * Does not establish initial hold, home, moving completion or STOP proof. */
+bool actuator_lift_hold_observe_report(actuator_lift_hold_monitor_t *monitor,
+    actuator_lift_feedback_t *feedback,bool zero_drive_verified,uint8_t moving,
+    bool maintaining_hold,uint32_t now_ms,uint32_t maximum_age_ms,
+    uint32_t dwell_ms,uint16_t tolerance_raw);
 typedef struct {
     actuator_lift_config_t config;
     actuator_lift_state_t state;
@@ -36,9 +58,23 @@ typedef struct {
 /* No defaults or auto-homing. Positive logical command is UP; physical motor
  * sign and speed scale are the adapter's responsibility. Current thresholds,
  * braking margin and verified hold behavior require physical commissioning. */
+/* Base-only evidence: preserve raw lift height. Registered bottom transport
+ * uses the commissioned hold envelope; legacy quiet hold uses <=2 counts. */
+int32_t actuator_lift_base_height(const actuator_lift_t *lift,uint32_t now_ms);
+/* Existing registered-bottom HOLDING only. Use the commissioned position
+ * envelope and independently read zero-drive state, not speed/moving bits.
+ * Does not establish home, initial hold, or completion of a lift movement. */
+bool actuator_lift_bottom_transport_observe(const actuator_lift_t *lift,
+    const actuator_lift_feedback_t *feedback,bool zero_drive_verified,
+    uint32_t drive_observed_ms,uint32_t now_ms);
+bool actuator_lift_bottom_transport_ready(const actuator_lift_t *lift,uint32_t now_ms);
+
 bool actuator_lift_init(actuator_lift_t *lift,const actuator_lift_config_t *config);
 bool actuator_lift_observe(actuator_lift_t *lift,const actuator_lift_feedback_t *feedback,uint32_t now_ms);
 bool actuator_lift_home(actuator_lift_t *lift,uint32_t now_ms);
+/* Explicit operator-confirmed bottom reference. No motion or torque writes;
+ * normal zero completion and independent hold proof are still required. */
+bool actuator_lift_reference_bottom(actuator_lift_t *lift,uint32_t now_ms);
 bool actuator_lift_move(actuator_lift_t *lift,int32_t height_um,uint32_t now_ms);
 /* Actual zero-speed packet completion; not the desired command value. */
 void actuator_lift_zero_sent(actuator_lift_t *lift,uint32_t completed_ms);

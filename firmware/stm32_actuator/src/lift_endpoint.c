@@ -19,15 +19,16 @@ void actuator_lift_endpoint_poll(actuator_lift_endpoint_t *e,uint32_t now){
     if(e==NULL||e->lift==NULL)return;
     actuator_lift_poll(e->lift,now);
     if(e->active){
+        if(e->lift->state==LIFT_HOLDING||e->lift->state==LIFT_FAULT){e->active=false;return;}
         uint32_t remaining=e->valid_until_ms-now;
         if(!remaining||remaining>e->lease_max_ms||!interlocked(e,now)){
             actuator_lift_inhibit(e->lift,LIFT_BAD_FEEDBACK);e->active=false;
-        }else if(e->lift->state==LIFT_HOLDING||e->lift->state==LIFT_FAULT)e->active=false;
+        }
     }
 }
 bool actuator_lift_endpoint_exchange(actuator_lift_endpoint_t *e,const uint8_t *p,size_t n,uint32_t now,uint8_t out[64]){
     if(e==NULL||e->lift==NULL||p==NULL||out==NULL||n!=36||p[0]!='A'||p[1]!='L'||p[2]!=1||
-       p[3]<1||p[3]>6||read32(p+32)!=actuator_crc32c(p,32))return false;
+       p[3]<1||p[3]>7||read32(p+32)!=actuator_crc32c(p,32))return false;
     actuator_lift_endpoint_poll(e,now);
     uint8_t op=p[3];uint32_t session=read32(p+4),seq=read32(p+8),deadline=read32(p+12);
     int32_t target=(int32_t)read32(p+16);uint32_t boot=read32(p+20),remaining=deadline-now;
@@ -36,10 +37,11 @@ bool actuator_lift_endpoint_exchange(actuator_lift_endpoint_t *e,const uint8_t *
     if(op==4){ok=ok&&deadline==0;}
     else {
         ok=ok&&remaining!=0&&remaining<=e->lease_max_ms;
-        if(op==1||op==2){
+        if(op==1||op==2||op==7){
             ok=ok&&!e->active&&interlocked(e,now)&&
                 ((session==e->session&&seq>e->sequence)||session>e->session);
-            if(ok)ok=op==1?actuator_lift_home(e->lift,now):actuator_lift_move(e->lift,target,now);
+            if(ok)ok=op==1?actuator_lift_home(e->lift,now):
+                op==7?actuator_lift_reference_bottom(e->lift,now):actuator_lift_move(e->lift,target,now);
             if(ok){e->active=true;e->session=session;}
         }else {
             ok=ok&&session==e->session&&seq>e->sequence;

@@ -28,15 +28,16 @@ class SystemStopStatus:
     observed_ms: int
     age_ms: int
     max_age_ms: int
+    scope: int = 0  # 0: whole system, 1: base transport only
 
     @classmethod
     def decode(cls, data):
         if (len(data) != 64 or data[:4] != b"AT\x01\x01"
                 or crc32c(data[:60]) != struct.unpack_from("<I", data, 60)[0]
-                or data[24] > 3 or any(data[26:28]) or any(data[40:60])):
+                or data[24] > 3 or data[26] > 1 or data[27] or any(data[40:60])):
             raise ValueError("invalid whole-stop reply")
         reply = cls(*struct.unpack_from("<5I", data, 4), data[24], data[25],
-                    *struct.unpack_from("<3I", data, 28))
+                    *struct.unpack_from("<3I", data, 28), data[26])
         if (not reply.sequence or not reply.boot_id or not 0 < reply.max_age_ms < 0x80000000
                 or reply.age_ms != (reply.tick_ms - reply.observed_ms) & 0xFFFFFFFF):
             raise ValueError("invalid whole-stop clock evidence")
@@ -45,8 +46,15 @@ class SystemStopStatus:
     @property
     def confirmed(self):
         after = (self.observed_ms - self.actions_completed_ms) & 0xFFFFFFFF
-        return (self.state == 2 and self.flags == 255 and self.age_ms < self.max_age_ms
+        return (self.scope == 0 and self.state == 2 and self.flags == 255 and self.age_ms < self.max_age_ms
                 and 0 < after < 0x80000000)
+
+
+    @property
+    def base_confirmed(self):
+        after=(self.observed_ms-self.actions_completed_ms)&0xFFFFFFFF
+        return self.confirmed or (self.scope==1 and self.state==2 and self.flags==31
+            and self.age_ms<self.max_age_ms and 0<after<0x80000000)
 
 
 class SystemStopClient:
@@ -76,6 +84,6 @@ class SystemStopClient:
                 raise RuntimeError("stale stop reply, clock jump or MCU restart")
             # Subtract the full round trip: never make remote measurements newer.
             observed = started - reply.age_ms / 1000.0
-            if reply.confirmed and received - observed >= reply.max_age_ms / 1000.0:
+            if reply.base_confirmed and received - observed >= reply.max_age_ms / 1000.0:
                 raise RuntimeError("stop evidence expired in transit")
             return reply, observed

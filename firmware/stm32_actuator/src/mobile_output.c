@@ -57,12 +57,18 @@ void actuator_mobile_output_poll(actuator_mobile_output_t *o,uint32_t us,uint32_
         }
     }
     uint32_t phase=us-arm_epoch,period=o->config.schedule.arm_period_us;
-    if(phase>=period)actuator_mobile_output_stop(o,MOBILE_OUTPUT_SCHEDULE);
+    /* The sampled ISR epoch can lag a timer edge by interrupt-entry latency.
+     * Reuse the existing guard as a CLOSED window: no new job may be launched
+     * until an actual newer epoch is observed. A missing clock beyond that
+     * guard still faults, as do poll gaps and all queued deadlines below. */
+    bool edge_pending=phase>=period && phase-period<o->config.schedule.guard_us;
+    if(phase>=period && !edge_pending)actuator_mobile_output_stop(o,MOBILE_OUTPUT_SCHEDULE);
     /* Align to the real ISR epoch each call; do not accumulate interrupt jitter
      * against a free-running synthetic phase or consume the arm event. */
     if(phase<period)o->schedule.phase_us=(phase+period-(us-o->schedule.last_poll_us)%period)%period;
     actuator_bus_schedule_window_t window=actuator_bus_schedule_poll(&o->schedule,us);
     if(window.stop_required)actuator_mobile_output_stop(o,MOBILE_OUTPUT_SCHEDULE);
+    if(edge_pending){window.available_us=0;window.due=0;window.arm_reserved=true;}
     if(o->router.bus.faulted || (!o->stop_requested && (o->router.inhibited || o->router.bus.stop_pending)))
         actuator_mobile_output_stop(o,MOBILE_OUTPUT_TRANSPORT);
     if(o->supervisor->state==ACTUATOR_MOBILE_STOP_LATCHED && !o->stop_requested)
@@ -114,7 +120,7 @@ void actuator_mobile_output_poll(actuator_mobile_output_t *o,uint32_t us,uint32_
     const actuator_motor_group_id_t groups[2]={ACTUATOR_GROUP_BASE_WHEELS,ACTUATOR_GROUP_LIFT};
     const actuator_bus_work_t kinds[2]={ACTUATOR_BUS_WORK_WHEELS,ACTUATOR_BUS_WORK_LIFT};
     const uint32_t budget[2]={o->config.wheels_budget_us,o->config.lift_budget_us};
-    for(unsigned i=0;i<2;i++)if(window.due&(1u<<i)) {
+    for(unsigned i=0;i<(o->supervisor->transport_only?1u:2u);i++)if(window.due&(1u<<i)) {
         uint8_t packet[ACTUATOR_STS3215_SYNC_WRITE_POSITION_PACKET_SIZE];size_t length;
         if(lifetime<=budget[i] || actuator_motor_group_velocities(groups[i],
                motor_velocity+(i?3:0),i?1:3,packet,&length)!=ACTUATOR_GROUP_OK ||

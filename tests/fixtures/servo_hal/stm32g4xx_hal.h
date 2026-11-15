@@ -9,6 +9,7 @@ typedef struct { struct {uint32_t BaudRate;} Init; uint32_t gState; unsigned sen
 #define RESET 0U
 #define __HAL_UART_GET_FLAG(uart, flag) ((void)(flag), (uart)->wire_busy)
 uint32_t HAL_GetTick(void);
+void HAL_Delay(uint32_t);
 HAL_StatusTypeDef HAL_UART_Transmit(UART_HandleTypeDef *,const uint8_t *,uint16_t,uint32_t);
 HAL_StatusTypeDef HAL_UART_Transmit_IT(UART_HandleTypeDef *,const uint8_t *,uint16_t);
 HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *,const uint8_t *,uint16_t);

@@ -12,6 +12,18 @@ static uint32_t quiet_us;
 static volatile uint32_t completion_us;
 static volatile uint8_t tx_complete,uart_error,launching;
 static volatile uint32_t active_gate_token;
+static bool unsent_claim;
+static uint32_t first_fault[8];
+static void remember_fault(uint32_t site,uint32_t now,uint32_t epoch,uint32_t previous_poll) {
+    if(first_fault[1] || output.fault==MOBILE_OUTPUT_OK)return;
+    first_fault[0]=output.fault;first_fault[1]=site;first_fault[2]=now;
+    first_fault[3]=epoch;first_fault[4]=previous_poll;
+    first_fault[5]=output.router.expired_jobs;first_fault[6]=output.schedule.faulted;
+    first_fault[7]=output.router.bus.faulted;
+}
+void MobileServoOutput_Diagnostics(uint32_t values[8]) {
+    for(unsigned i=0;i<8;i++)values[i]=first_fault[i];
+}
 
 static bool budget_fits(uint32_t baud,uint32_t length,uint32_t quiet,uint32_t budget) {
     /* Both configured servo UARTs are 8N1. Include every wire bit plus quiet. */
@@ -58,17 +70,27 @@ void MobileServoOutput_OnUartError(UART_HandleTypeDef *uart) {
 }
 void MobileServoOutput_Poll(void) {
     if(!output.configured || launching)return;
-    uint32_t now=Timebase_NowUs(),epoch;
-    if(!ControlTick_PeekEpoch(&epoch)) {
-        actuator_mobile_output_stop(&output,MOBILE_OUTPUT_SCHEDULE);epoch=now;
+    /* A late pre-TX rejection owns no wire transaction. Release only that
+     * unsent reservation so the latched zero packet can use the same UART. */
+    if(unsent_claim) {
+        if(ServoTransport_CancelUnsentQueued(&transaction)!=HAL_OK)return;
+        unsent_claim=false;active_gate_token=0;clear_events();
     }
+    uint32_t now,epoch;
+    if(!ControlTick_PeekClock(&now,&epoch)) {
+        actuator_mobile_output_stop(&output,MOBILE_OUTPUT_SCHEDULE);epoch=now;
+        remember_fault(1,now,epoch,output.schedule.last_poll_us);
+    }
+    uint32_t previous_poll=output.schedule.last_poll_us;
     actuator_mobile_output_poll(&output,now,HAL_GetTick(),epoch);
+    remember_fault(2,now,epoch,previous_poll);
     uint8_t complete,error;uint32_t done;
     uint32_t mask=__get_PRIMASK();__disable_irq();
     complete=tx_complete;error=uart_error;done=completion_us;
     if(mask==0)__enable_irq();
     if(error || output.router.bus.faulted) {
         actuator_mobile_output_stop(&output,MOBILE_OUTPUT_TRANSPORT);
+        remember_fault(3,now,epoch,previous_poll);
         ServoTransport_RequestStop(left_uart);return; /* explicit RX/abort recovery */
     }
     if(transaction.active) {
@@ -87,13 +109,19 @@ void MobileServoOutput_Poll(void) {
     if(kind!=ACTUATOR_BUS_WORK_STOP) {
         /* Recheck after claiming: completion/claim overhead consumes the same
          * arm window. A late claim must never start a packet across that slot. */
-        now=Timebase_NowUs();
         uint32_t phase;
-        if(!ControlTick_PeekEpoch(&epoch) || (phase=now-epoch)>=CONTROL_TICK_PERIOD_US ||
+        bool clock_ok=ControlTick_PeekClock(&now,&epoch);
+        if(!clock_ok || (phase=now-epoch)>=CONTROL_TICK_PERIOD_US ||
            phase<output.config.schedule.arm_reserved_us ||
            phase+output.router.bus.budget_us+output.config.schedule.guard_us>CONTROL_TICK_PERIOD_US) {
+            /* A valid but closing arm slot is scheduling contention, not a
+             * failed motor write. Keep the original packet/deadline and try
+             * a later slot. Never defer STOP, expired work or attempted TX. */
+            if(clock_ok && ServoTransport_DeferUnsentQueued(&transaction))return;
             actuator_mobile_output_stop(&output,MOBILE_OUTPUT_SCHEDULE);
-            (void)ServoTransport_CompleteQueued(&transaction,false);return;
+            remember_fault(4,now,epoch,previous_poll);
+            unsent_claim=true;
+            return;
         }
     }
     clear_events();active_kind=kind;active_gate_token=transaction.gate_token;

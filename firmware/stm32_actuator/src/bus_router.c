@@ -40,6 +40,17 @@ bool actuator_bus_router_next(actuator_bus_router_t *r,uint32_t now,uint32_t ava
     }
     return false;
 }
+bool actuator_bus_router_defer_unstarted(actuator_bus_router_t *r,uint32_t token,uint32_t now) {
+    if(r==NULL)return false;
+    actuator_shared_bus_poll(&r->bus,now);
+    if(!r->bus.active || r->bus.token!=token || r->bus.faulted ||
+       r->bus.stop_pending || r->inhibited || r->bus.owner==ACTUATOR_BUS_WORK_STOP)return false;
+    actuator_bus_job_t *job=&r->jobs[r->bus.owner];
+    uint32_t remaining=job->deadline_us-now;
+    if(job->pending || !remaining || remaining>=UINT32_C(0x80000000) || remaining<=job->budget_us)return false;
+    job->pending=true;r->bus.active=false;
+    return true;
+}
 bool actuator_bus_router_complete(actuator_bus_router_t *r,uint32_t token,uint32_t now,bool ok) {
     if(r==NULL || !actuator_shared_bus_complete(&r->bus,token,now,ok))return false;
     r->completed_token=token;r->completed_us=now;r->completed_kind=r->bus.owner;

@@ -22,6 +22,7 @@ static unsigned sampled_slots,wheel_id;
 static int wheel_torque,wheel_goal,wheel_speed;
 static uint8_t permit_addr,permit_size,permit_data[2];
 static const char *why;
+static int lift_offset_raw=-1,lift_mode_anchor=-1,lift_mode_expected=-1;
 static uint8_t id_for(unsigned s){return s<6?s+1:s<12?s-5:10;}
 static bool right(unsigned s){return s>=6 && s<12;}
 static bool bad(unsigned s,const char *reason){failed_slot=s+1;why=reason;permit=false;return false;}
@@ -67,7 +68,7 @@ static bool lift_stationary(void){
     return true;
 }
 void WheelSetup_Cancel(void){pending=applying=permit=false;token=0;}
-void WheelSetup_Init(void){WheelSetup_Cancel();created=0;failed_slot=0;why="SETUP_NOT_PLANNED";}
+void WheelSetup_Init(void){WheelSetup_Cancel();created=0;failed_slot=0;why="SETUP_NOT_PLANNED";lift_offset_raw=lift_mode_anchor=lift_mode_expected=-1;}
 static bool wheels_quiet(void){
     int first[3]={0},low[3]={0},high[3]={0};
     /* Powered-on servos can report 0/50 with a stationary encoder. Prove
@@ -95,6 +96,7 @@ static bool wheels_quiet(void){
 }
 bool WheelSetup_Plan(uint32_t nonce){
     WheelSetup_Cancel();failed_slot=0;sampled_slots=0;
+    lift_offset_raw=lift_mode_anchor=lift_mode_expected=-1;
     if(!nonce)return bad(AXES,"SETUP_INVALID_TOKEN");
     if(!wheels_quiet())return false;
     for(unsigned s=0;s<AXES;s++){
@@ -129,19 +131,34 @@ static bool lift_write_checked(uint8_t addr,unsigned value,uint8_t n){
         (!memcmp(data,back,n) || bad(12,"SETUP_LIFT_READBACK_FAILED"));
 }
 /* Supported-load setup only. Zero speed is NOT a height setpoint. Stage the
- * measured encoder angle while still in speed mode, then disable torque before
+ * measured angle in destination coordinates while still in speed mode, then disable torque before
  * changing mode. Thus neither the mode switch nor a goal-write side effect can
  * activate a stale position target. No homing or multi-turn height inference. */
 static bool anchor_lift(Sample *now){
     uint8_t limits[4],lock;
+    lift_offset_raw=lift_mode_anchor=lift_mode_expected=-1;
     if(!read_data(12,9,4,limits)||!read_data(12,55,1,&lock))return false;
     unsigned low=limits[0]|limits[1]<<8,high=limits[2]|limits[3]<<8;
-    if(lock!=1 || low>=high || high>4095 || now->position<low || now->position>high)
+    if(lock!=1 || low>=high || high>4095 ||
+       (now->mode==0 && (now->position<low || now->position>high)))
         return bad(12,"SETUP_LIFT_POSITION_LIMITS_INVALID");
     if(now->mode==1){
-        unsigned anchor=now->position;
+        uint8_t correction[3];
+        if(!read_data(12,31,3,correction))return false;
+        unsigned raw=correction[0]|correction[1]<<8;
+        /* This installation uses the 12-bit sign-magnitude offset format.
+         * Refuse extended encodings and turn-wrap rather than guessing. */
+        if(raw>4095 || correction[2]!=1 || now->position>4095)
+            return bad(12,"SETUP_LIFT_COORDINATE_UNSUPPORTED");
+        int offset=(raw&2048)?-(int)(raw&2047):(int)raw;
+        int anchor=now->position,expected=anchor-offset;
+        lift_offset_raw=(int)raw;lift_mode_anchor=anchor;lift_mode_expected=expected;
+        if(expected<(int)low || expected>(int)high)
+            return bad(12,"SETUP_LIFT_POSITION_LIMITS_INVALID");
         if(!lift_write_checked(40,0,1))return false;
-        if(!lift_write_checked(42,now->position,2))return false;
+        /* Stage the target in the destination position-mode coordinates.
+         * Velocity mode keeps its already verified zero-speed command. */
+        if(!lift_write_checked(42,(unsigned)expected,2))return false;
         if(!lift_write_checked(40,0,1))return false;
         /* A support slip during staging must not become a commanded move. */
         Sample staged;if(!sample(12,&staged))return false;
@@ -154,8 +171,12 @@ static bool anchor_lift(Sample *now){
         if(!changed||!locked)return false;
         if(!sample(12,now)||now->mode!=0||now->runtime[0]!=0)
             return bad(12,"SETUP_LIFT_MODE_SWITCH_FAILED");
+        uint8_t verified[3];
+        if(!read_data(12,31,3,verified))return false;
+        if(verified[0]!=correction[0] || verified[1]!=correction[1] || verified[2]!=0)
+            return bad(12,"SETUP_LIFT_CORRECTION_CHANGED");
         if(now->position<low || now->position>high ||
-           abs((int)now->position-(int)anchor)>MAX_SHIFT)
+           abs((int)now->position-expected)>MAX_SHIFT)
             return bad(12,"SETUP_LIFT_MODE_POSITION_CHANGED");
     }
     /* The lift has no contact-pressure target to preserve. Explicit setup
@@ -216,7 +237,10 @@ void WheelSetup_Describe(char *out,size_t size,bool ok){
     int n=snprintf(out,size,"{\"type\":\"setup\",\"ok\":%s,\"pending\":%s,\"token\":%lu,\"reason\":\"%s\",\"failed_slot\":%u,\"wheel\":{\"id\":%u,\"torque\":%d,\"goal\":%d,\"speed\":%d},\"axes\":[",
         ok?"true":"false",pending?"true":"false",(unsigned long)token,why,failed_slot,wheel_id,wheel_torque,wheel_goal,wheel_speed);
     for(unsigned s=0;s<sampled_slots;s++)n+=snprintf(out+n,size-(unsigned)n,"%s{\"slot\":%u,\"position\":%u,\"torque\":%u,\"mode\":%u}",s?",":"",s+1,planned[s].position,planned[s].runtime[0],planned[s].mode);
+    n+=snprintf(out+n,size-(unsigned)n,
+        "],\"lift_mode_coordinates\":{\"offset_raw\":%d,\"before_raw\":%d,\"expected_after_raw\":%d}",
+        lift_offset_raw,lift_mode_anchor,lift_mode_expected);
     (void)snprintf(out+n,size-(unsigned)n,
-        "],\"observation\":{\"valid\":%s,\"slot\":%u,\"position\":%u,\"speed_magnitude\":%u,\"torque\":%u,\"mode\":%u}}\r\n",
+        ",\"observation\":{\"valid\":%s,\"slot\":%u,\"position\":%u,\"speed_magnitude\":%u,\"torque\":%u,\"mode\":%u}}\r\n",
         observation_valid?"true":"false",observed_slot,last_observation.position,last_observation.speed,last_observation.runtime[0],last_observation.mode);
 }

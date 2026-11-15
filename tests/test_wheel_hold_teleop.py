@@ -179,3 +179,56 @@ def test_lost_setup_reply_never_retries_activation_or_releases_torque(host,monke
     port=Port([])
     with pytest.raises(RuntimeError,match='timeout'):host.prepare_hold(port,True)
     assert [w.split()[0] for w in port.writes]==[b'STOP',b'PREP',b'HSET']
+
+
+@pytest.mark.parametrize('scenario', [28,29,30,31])
+def test_live_wheel_feedback_and_fail_closed_reads(binaries, scenario):
+    result=subprocess.run([str(binaries/'app'),str(scenario)],capture_output=True,text=True,check=True)
+    messages=[json.loads(x) for x in result.stdout.splitlines() if x]
+    assert messages[0]['wheel_feedback'] is True
+    acks=[x for x in messages if x.get('type')=='ack']
+    assert len(acks)==(2 if scenario==28 else 1)
+    for ack in acks:
+        assert [x['id'] for x in ack['wheel_feedback']]==[7,8,9]
+        assert all(x['tick_end_ms']-x['tick_begin_ms']==2 for x in ack['wheel_feedback'])
+        assert 'wheels' not in ack  # stopped-position evidence is not live feedback
+    if scenario==28:
+        assert [b['position_raw']-a['position_raw'] for a,b in zip(acks[0]['wheel_feedback'],acks[1]['wheel_feedback'])]==[10]*3
+        assert [x['speed_signed'] for x in acks[1]['wheel_feedback']]==[200,-200,0]
+    else:
+        reason={29:'WHEEL_POSITION_READ',30:'WHEEL_SPEED_READ',31:'HOST_TIMEOUT'}[scenario]
+        assert any(x.get('reason' if scenario==31 else 'first_failure')==reason and x.get('stop_confirmed') for x in messages)
+
+
+@pytest.mark.parametrize('scenario', range(39,50))
+def test_lift_mode_coordinate_correction_keeps_eight_count_guard(binaries, scenario):
+    result=subprocess.run([str(binaries/'setup'),str(scenario)],capture_output=True,text=True,check=True)
+    report=json.loads(result.stdout.splitlines()[0])
+    assert report['ok'] == (scenario in (39,40,47,48))
+    if scenario==39:
+        assert report['lift_mode_coordinates']==dict(offset_raw=85,before_raw=3778,expected_after_raw=3693)
+    if scenario==40: assert report['lift_mode_coordinates']['expected_after_raw']==3863
+    if scenario in (43,45): assert report['reason']=='SETUP_LIFT_MODE_POSITION_CHANGED'
+    if scenario==44: assert report['reason']=='SETUP_LIFT_CORRECTION_CHANGED'
+    if scenario==46: assert report['reason']=='SETUP_READ_FAILED'
+
+
+def test_controller_communication_pause_can_resume_without_reset(binaries):
+    result=subprocess.run([str(binaries/'app'),'32'],capture_output=True,text=True,check=True)
+    messages=[json.loads(line) for line in result.stdout.splitlines() if line]
+    pause=next(m for m in messages if m.get('type')=='paused')
+    assert pause['stop_confirmed'] and pause['hold_confirmed'] and not pause['fault']
+    assert [m['session'] for m in messages if m.get('type')=='armed']==[0x1234abcd,0x9876abcd]
+    assert messages[-1]['stop_confirmed'] and not messages[-1]['armed']
+
+
+@pytest.mark.parametrize('scenario',[33,34,35,36])
+def test_one_fresh_hold_read_recovers_transport_only_never_changed_goal(binaries,scenario):
+    result=subprocess.run([str(binaries/'app'),str(scenario)],capture_output=True,text=True,check=True)
+    rows=[json.loads(s) for s in result.stdout.splitlines() if s]
+    assert any(r.get('hold_read_recoveries')==1 for r in rows)
+    if scenario==36:
+        assert any(r.get('hold_reason')=='HOLD_COMMAND_CHANGED' and r.get('fault') for r in rows)
+    else:
+        assert not any(r.get('fault') for r in rows)
+        assert rows[-1]['stop_confirmed'] and rows[-1]['hold_confirmed']

@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "local_date": "2026-11-12",
+  "status": "prepared_until_authentication_and_operator_physical_work",
+  "hardware_enabled": false,
+  "physical_s4_completed": false,
+  "motor_commands_sent": 0,
+  "controller_reset_or_flashed": false,
+  "inspection_firmware_release": "s4-inspection-4e8a1c9c6e02",
+  "inspection_firmware_installed": false,
+  "controller_observed": {
+    "firmware": "0x00024911",
+    "stop_latched": true,
+    "mobile_endpoint_available": false
+  },
+  "operator_latest_power_report": "Jetson, lidar and arm motor power ON; no power change requested",
+  "pending_install_reason": "Jetson ST-Link USB write access requires sudo; sudo -n reports password required. No password requested during preparation.",
+  "lidar_runtime": "/home/hyper/robot/shared/runtime/s4-lidar-timing/install",
+  "live_sensor_source_release": "s4-local-5aa1fc586740",
+  "live_sensor_report": {
+    "frames": 291,
+    "maximum_gap_s": 0.2014318152796477,
+    "gaps_over_035": 0,
+    "receipt_timing": {
+      "passed": true,
+      "basis": "host serial receipt minus packet serialization; negative offsets in increasing-angle array",
+      "hardware_exposure_latency_calibrated": false,
+      "maximum_first_ray_age_s": 0.0360567569732666
+    },
+    "rgbd": {
+      "frames": 1787,
+      "native_shape": [
+        720,
+        1280
+      ],
+      "maximum_depth_gap_s": 0.033663272857666016,
+      "minimum_native_valid_fraction": 0.9021755642361111,
+      "calibration_equivalence": {
+        "method": "exact identity/intrinsics/rotation/scale; translation roundoff <= 2e-9 m",
+        "maximum_translation_difference_m": 9.313225746154785e-10,
+        "observed_camera_device": {
+          "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+          "stream_profile_id": "rgbd-v1-52b8cdab670d4770de886ec17c375dcb131a4d7ad72ae0ea92774aa5ea0916da",
+          "factory_calibration_sha256": "12ce5d4f0c292758b16632e484672fcee655436d57741f4e6b0fabc8147f5643"
+        },
+        "reference_camera_device": {
+          "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+          "stream_profile_id": "rgbd-v1-52b8cdab670d4770de886ec17c375dcb131a4d7ad72ae0ea92774aa5ea0916da",
+          "factory_calibration_sha256": "4213fcd9d40419ceb64ea3a403f670bc44bfbcf6223a52aa4c20b3f930ab7591"
+        }
+      },
+      "physical_sync_qualified": false,
+      "full_height_travel_coverage_qualified": false
+    },
+    "driver_sha256": "53148198a6779963d5d64b35f776ead07092f467ae9dec012b5a724f961608b4",
+    "driver_exit_code": 0
+  },
+  "actual_slam_synthetic_inputs": {
+    "mode": "real_slam_synthetic_scan_tf",
+    "hardware_commands": 0,
+    "reverse_ray_timing": true,
+    "physical_deskew_verified": false,
+    "physical_map_verified": false,
+    "passed": true,
+    "pose_graph_loaded_from_atomic_checkpoint": true,
+    "process_exit_codes": [
+      0,
+      0,
+      0
+    ],
+    "scan_frames": 166,
+    "saved_map_shape": [
+      77,
+      77
+    ],
+    "reloaded_map_shape": [
+      77,
+      77
+    ],
+    "reloaded_known_cells": 5464,
+    "reloaded_occupied_cells": 320,
+    "graph_reloaded_after_restart": true,
+    "graph_sha256": {
+      "posegraph.data": "b3721f6b7449422d97ae28c43bbaf0936e3eb0b899a9ca57bf7c9ef2e00deb1c",
+      "posegraph.posegraph": "58270e75f73c18ad7d7899d6abe22ba4cf3636809245a8b439e6cc48cbf49944"
+    },
+    "localization_required_for_navigation": true,
+    "full_height_map_ready": true,
+    "full_mapping_checkpoint_verified": true,
+    "native_depth_frames": 9,
+    "persisted_depth_voxels": 32046,
+    "lidar_free_cells_blocked_by_height": 132,
+    "depth_restored_as_historical": true,
+    "whole_home_coverage_verified": false,
+    "saved_body_map_published": true
+  },
+  "regression": {
+    "full_python_passed": 3369,
+    "full_python_skipped": 5,
+    "additional_jetson_sdk_tests_passed": 20,
+    "remaining_optional_skips": "3 Open3D-dependent cases; the 2 locally skipped SDK modules were tested on Jetson",
+    "native_c_tests_passed": 17,
+    "subsequent_targeted_checks": "wheel capture, reset/gap rejection, packaging, native depth integration, nominal/navigation TF"
+  },
+  "prepared": {
+    "wheel_capture": "probe_mobile_bus.py --sample-wheels-seconds",
+    "wheel_scale_review": "analyze_wheel_capture.py",
+    "nominal_geometry": "config/home_assistant/s4_base.nominal.json",
+    "navigation_tf": "s4_sensor_frames navigation_root=True",
+    "depth_projection": "review_s4_sensor_capture.py; endpoint observation only",
+    "application_scope": "existing automatic mapping, furniture update and save/resume components remain simulation-bound until physical inputs are commissioned"
+  },
+  "evidence_sha256": {
+    "jetson-results/timing-rgbd-60s/report.json": "ddc86b8e1659a20101b3dcf936a8eba451e20bcaa7f0d2bc51838c75ec7836b4",
+    "jetson-results/slam-signed-time/report.json": "de5b52f517de3faedc58a71342f351bcde52067bd678d03ce9ef926368c3c863",
+    "jetson-results/sdk-tests.log": "874fcc5aaf85b51a1dc25862a6f2d16708f8e0edf561135c1d380f485634ac17",
+    "native-depth-latest/report.json": "1febe66850b7afd85a8c36db0487f526aa054c68fbad0a88fb60ad29501df6a9",
+    "python-tests-selected.xml": "cf6530ce969f64d0e5c3e3c2b07ce8e2bd513d3965f642d25c39dbc9af357ff8",
+    "core-tests.log": "f16aa634bcbfd8f890cde87563181508a6286aff9522944ca39f187ffb0bf79c"
+  },
+  "remaining": [
+    "administrator authentication to install read-only inspection firmware",
+    "fresh wheel identity/mode/position/speed and bus timing under inspection firmware",
+    "operator-supervised wheel direction/speed/odometry, floor braking and arm/lift hold",
+    "moving lidar/depth timing and visibility; bind verified inputs to common controller and app",
+    "physical room mapping, furniture-change recovery, save/shutdown/power-reconnect/relocalization/resume",
+    "unloaded then payload navigation, post-arrival pick/place and repeated failure recovery"
+  ]
+}

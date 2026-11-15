@@ -154,6 +154,13 @@ class MissionCatalog:
         return deepcopy(target)
 
     def resolve(self, skill, parameters, now):
+        if self.placement_policy is not None and hasattr(self.placement_policy, 'before_capture'):
+            if skill in {'reobserve_target', 'reobserve_destination'}:
+                self.placement_policy.before_capture(skill, parameters, self, now)
+            if skill == 'prepare_navigation' and self.placement_policy.reset_transport is not None:
+                self.placement_policy.reset_transport()
+            if skill == 'prepare_transport':
+                return self.placement_policy.resolve(skill, parameters, self, now)
         if self.placement_policy is not None and (skill.startswith('align_') or skill.startswith('adjust_lift_') or skill in {'pick', 'place'}):
             return self.placement_policy.resolve(skill, parameters, self, now)
         if skill.startswith('prepare_'): return deepcopy(self.doc['transport'])

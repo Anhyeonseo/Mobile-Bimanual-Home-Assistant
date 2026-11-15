@@ -25,6 +25,7 @@ from so101_arm_bridge.serial_port import open_exclusive_serial
 KEYS = {"w": "F", "s": "B", "a": "L", "d": "R", "q": "A", "e": "D"}
 INPUT_LEASE = .3
 PERIOD = .05
+WRITE_TIMEOUT_S = .1
 PRESERVE_HOLD = False
 
 
@@ -69,6 +70,8 @@ def inspect(port):
     if PRESERVE_HOLD:
         expected.update(firmware='mobile-base-hold-teleop-v7',hold_monitor=True,held_axes=13,
                         arm_lift_writes='explicit_setup_only',hold_setup=True)
+    if PRESERVE_HOLD and info.get("wheel_feedback") is True:
+        expected["wheel_feedback"] = True
     if info != expected: raise RuntimeError("unexpected firmware; wheels not enabled")
     return info
 
@@ -82,6 +85,20 @@ def validate(reply, kind, nonce, seq):
         raise RuntimeError('arm/gripper/lift hold not confirmed: ' + json.dumps(reply))
 
 
+class StopError(RuntimeError):
+    """Preserve the actual stop result even when payload hold is unconfirmed."""
+    def __init__(self, message, reply):
+        self.reply = reply
+        super().__init__(message + ': ' + json.dumps(reply))
+
+
+def stop_failure_message(error, stopped):
+    suffix = ('Keep the arm/lift supports in place.' if stopped and
+              stopped.get('armed') is False and stopped.get('stop_confirmed') is True
+              else 'Cut motor 12 V power if wheels do not stop.')
+    return f'{error}; {suffix}'
+
+
 def stop(port):
     send(port, b"STOP\n")
     deadline = time.monotonic() + 6
@@ -89,9 +106,9 @@ def stop(port):
         reply = receive(port, max(.01, deadline - time.monotonic()))
         if reply.get("type") == "stopped":
             if reply.get("armed") is not False or reply.get("stop_confirmed") is not True:
-                raise RuntimeError("stop unconfirmed: " + json.dumps(reply))
+                raise StopError("stop unconfirmed", reply)
             if PRESERVE_HOLD and reply.get('hold_confirmed') is not True:
-                raise RuntimeError('wheels stopped, but arm/gripper/lift hold unconfirmed: ' + json.dumps(reply))
+                raise StopError('wheels stopped, but arm/gripper/lift hold unconfirmed', reply)
             return reply
     raise RuntimeError("stop unconfirmed")
 
@@ -194,7 +211,8 @@ def run(port, input_fd):
         try:
             if arm_sent: stopped = stop(port)
         except Exception as error:
-            original_error = RuntimeError(f"{original_error or 'exit'}; STOP failed: {error}. Cut motor 12 V power.")
+            stopped = getattr(error, 'reply', None)
+            original_error = RuntimeError(stop_failure_message(f"{original_error or 'exit'}; stop verification: {error}", stopped))
         finally:
             termios.tcsetattr(input_fd, termios.TCSADRAIN, old)
     if stopped: print(json.dumps(stopped, indent=2))
@@ -227,17 +245,22 @@ def main():
     global PRESERVE_HOLD
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", required=True)
-    parser.add_argument("--web", action="store_true", help="Browser key-down/key-up control; enables wheels")
+    parser.add_argument("--web", action="store_true", help="Open browser controls; wheels require an explicit Start action")
     parser.add_argument("--bind", default="127.0.0.1", help="Browser listener IP, e.g. Pi LAN address")
     parser.add_argument("--web-port", type=int, default=8765)
+    parser.add_argument("--record-dir", default="teleop-sessions", help="Browser session JSONL directory")
+    parser.add_argument('--localization-status', help='Optional live observer status, bound to the new browser recording')
+    parser.add_argument('--localization-map', help='Frozen occupancy.json shown by the browser')
     parser.add_argument("--run", action="store_true", help="Enable wheels and start keyboard teleop")
     parser.add_argument('--preserve-hold', action='store_true',
-        help='Require hold-monitor firmware; never write arm/gripper/lift targets or torque')
+        help='Require hold-monitor firmware; web Hold action explicitly prepares current-pose holding')
     parser.add_argument('--check-hold', action='store_true', help='Read hold registers only; never enable wheels')
     parser.add_argument('--prepare-hold',action='store_true',help='Read-only current-pose hold plan; --execute activates OFF axes')
     parser.add_argument('--execute',action='store_true',help='With --prepare-hold, explicitly enable current-pose holding; no wheel motion')
     parser.add_argument('--stop-wheels',action='store_true',help='Explicit wheel zero/OFF before hold setup; does not change arm/lift torque')
     args = parser.parse_args()
+    if bool(args.localization_status)!=bool(args.localization_map) or args.localization_status and not args.web:
+        parser.error('localization status and map must be supplied together with --web')
     PRESERVE_HOLD = args.preserve_hold or args.check_hold or args.prepare_hold or args.stop_wheels
     if args.web and args.run: parser.error("choose --web or --run")
     if args.check_hold and (args.web or args.run): parser.error('--check-hold cannot enable wheels')
@@ -248,13 +271,17 @@ def main():
         import serial
         with stopping_signals(), acquire_backend_lease("stm32", 0):
             with open_exclusive_serial(serial, args.port, 921600, .01) as port:
+                # Reading polls quickly; a USB write needs a separate bounded
+                # scheduling budget. Never retry a motion command after failure.
+                port.write_timeout = WRITE_TIMEOUT_S
                 if args.stop_wheels:
                     inspect(port);print(json.dumps(settle_wheels(port),indent=2))
                 elif args.prepare_hold:print(json.dumps(prepare_hold(port,args.execute),indent=2))
                 elif args.check_hold: print(json.dumps(check_hold(port), indent=2))
                 elif args.web:
                     from base_teleop_web import run_web
-                    run_web(port, args.bind, args.web_port)
+                    run_web(port, args.bind, args.web_port, args.record_dir,
+                            localization_path=args.localization_status,map_path=args.localization_map)
                 elif args.run: run(port, sys.stdin.fileno())
                 else: print(json.dumps(inspect(port), indent=2))
         return 0

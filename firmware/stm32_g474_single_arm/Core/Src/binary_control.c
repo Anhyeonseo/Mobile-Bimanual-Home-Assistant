@@ -106,9 +106,19 @@ static uint32_t host_binary_heartbeat_count = 0U;
 static uint32_t host_binary_rejected_frame_count = 0U;
 static uint32_t host_binary_last_heartbeat_ms = 0U;
 static uint8_t host_binary_mode = 0U;
+#if HOST_S4_UNIFIED_CANDIDATE
+static bool Host_InventoryPermitted(void);
+#endif
 bool BinaryControl_AttachMobileEndpoint(actuator_mobile_endpoint_t *endpoint)
 {
-    if (host_binary_mode || host_mobile_endpoint != NULL || endpoint == NULL ||
+#if HOST_S4_UNIFIED_CANDIDATE
+    /* Explicit AC preparation runs after entering binary mode. Preserve the
+     * idle/torque-unconfigured admission gate instead of requiring boot time. */
+    if (host_stop_latched || !Host_InventoryPermitted()) return false;
+#else
+    if (host_binary_mode) return false;
+#endif
+    if (host_mobile_endpoint != NULL || endpoint == NULL ||
         endpoint->supervisor == NULL || !endpoint->supervisor->configured ||
         endpoint->supervisor->state != ACTUATOR_MOBILE_DISABLED || endpoint->boot_id == 0U)
     {
@@ -2583,7 +2593,7 @@ static bool Host_PrepareArmMotionReference(void)
 {
     #if HOST_S3_STATIONARY_PICK
     if(!MobileArmObserver_Suspend())return false;
-    S3Platform_Enable(true);
+    if(!MobileBoard_IsConfigured())S3Platform_Enable(true);
 #endif
     if (!MobileBoard_PrepareArmMotion(host_v2_shadow_executor_anchor_urad)) return false;
     if (!MobileArmObserver_HasStarted()) return true;
@@ -2860,6 +2870,9 @@ static uint8_t Host_PerformV2CoordinatedStop(uint8_t dispatch_fault)
 
 static uint8_t Host_ConfigureBimanualForTrajectory(void)
 {
+#if HOST_S4_UNIFIED_CANDIDATE
+    if(!MobileBoard_PowerReady())return 0U;
+#endif
     /* Never configure/enable motors if the trajectory engine failed to initialize. */
     if (host_v2_executor_ready == 0U) return 0U;
     /* Configuration reads may recover the UART. They must not interrupt an
@@ -3116,7 +3129,11 @@ static void Host_ServiceV2TrackingFeedback(bool allow_start)
             if (s3_read_window_deferrals != UINT32_MAX) s3_read_window_deferrals++;
             return;
         }
+#if HOST_S4_UNIFIED_CANDIDATE
+        if(!MobileBoard_IsConfigured())joint=S3Platform_Select(joint);
+#else
         joint=S3Platform_Select(joint);
+#endif
 #endif
         HAL_StatusTypeDef started = BimanualTrackingFeedback_Start(
                 joint,
@@ -3936,7 +3953,7 @@ static bool Host_InventoryPermitted(void)
          || host_stop_latched != 0U
 #endif
         ) &&
-        !MobileBoard_IsConfigured() && !MobileBoard_StopActive();
+        (!MobileBoard_IsConfigured() || MobileBoard_MaintenanceAllowed()) && !MobileBoard_StopActive();
 }
 #endif
 
@@ -4045,11 +4062,17 @@ static void Host_HandleBinaryFrame(
                 response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();
                 response.payload_length=1;response.payload[0]=2;
                 if(valid){
-                    uint32_t values[9]={1U,Host_S3RuntimeFlags(),HAL_GetTick(),s3_first_stop_line,
+                    uint32_t values[65]={1U,Host_S3RuntimeFlags(),HAL_GetTick(),s3_first_stop_line,
                         s3_first_stop_tick,s3_first_stop_flags,s3_stop_dispatch_count,
                         s3_stop_tracking_count,s3_read_window_deferrals};
                     response.payload[0]=0;response.payload_length=37;
-                    for(unsigned j=0;j<9;j++)for(unsigned b=0;b<4;b++)
+#if HOST_S4_UNIFIED_CANDIDATE
+                    values[0]=4U;response.payload_length=261;
+                    MobileServoOutput_Diagnostics(values+9);
+                    MobileBoard_Diagnostics(values+17);
+                    MobileServoFeedback_Diagnostics(values+41);
+#endif
+                    for(unsigned j=0;j<(response.payload_length-1U)/4U;j++)for(unsigned b=0;b<4;b++)
                         response.payload[1+j*4+b]=(uint8_t)(values[j]>>(8*b));
                 }
                 (void)Host_SendBinaryFrame(&response);break;
@@ -4062,9 +4085,10 @@ static void Host_HandleBinaryFrame(
                 for(unsigned i=3;i<36;i++)if(request->payload[i])valid=false;
                 if(valid){
                     uint8_t op=request->payload[2];bool ok=true;
+                    if(MobileBoard_IsConfigured())ok=false;
                     if(op && (host_v2_executor_clock_active || host_v2_terminal_settle_active))ok=false;
                     if(ok && op==1){
-                        if(host_stop_latched)ok=false;
+                        if(host_stop_latched||MobileBoard_TransportOnly())ok=false;
                         else { S3Platform_Enable(true);MobileArmObserver_Resume(); }
                     }
                     if(ok && op==2){ok=MobileArmObserver_Suspend();S3Platform_Enable(false);}
@@ -4073,6 +4097,18 @@ static void Host_HandleBinaryFrame(
                 (void)Host_SendBinaryFrame(&response);break;
             }
 #endif
+            if(request->payload_length==36 && request->payload[0]=='A' && request->payload[1]=='C') {
+                memset(&response,0,sizeof(response));response.message_type=ACTUATOR_V2_MSG_MOBILE_RESPONSE;
+                response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();response.payload_length=1;
+                response.payload[0]=2;
+#if HOST_S4_UNIFIED_CANDIDATE
+                if(request->flags==0 && MobileBoard_Commission(request->payload,response.payload+1,
+                        Host_InventoryPermitted()&&!host_stop_latched)){
+                    response.payload[0]=0;response.payload_length=65;
+                }
+#endif
+                (void)Host_SendBinaryFrame(&response);break;
+            }
             if(request->payload_length==36 && request->payload[0]=='A' && request->payload[1]=='E') {
                 memset(&response,0,sizeof(response));response.message_type=ACTUATOR_V2_MSG_MOBILE_RESPONSE;
                 response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();response.payload_length=1;
@@ -4096,7 +4132,10 @@ static void Host_HandleBinaryFrame(
                 response.sequence=request->sequence;response.sender_time_ms=HAL_GetTick();response.payload_length=1;
                 actuator_lift_endpoint_t *lift=MobileBoard_LiftEndpoint();
                 response.payload[0]=lift==NULL?1:2;
-                if(host_stop_latched && (request->payload[3]==1 || request->payload[3]==2))response.payload[0]=3;
+                if(host_stop_latched && (request->payload[3]==1 || request->payload[3]==2 || request->payload[3]==7))response.payload[0]=3;
+#if HOST_S4_UNIFIED_CANDIDATE
+                else if(request->payload[3]==1)response.payload[0]=3; /* No contact homing on Mini 1. */
+#endif
                 else if(request->flags==0 && lift!=NULL && actuator_lift_endpoint_exchange(lift,request->payload,36,
                         HAL_GetTick(),response.payload+1)){response.payload[0]=0;response.payload_length=65;}
                 (void)Host_SendBinaryFrame(&response);break;
@@ -4868,7 +4907,7 @@ void BinaryControl_Service(void)
 #if HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD
     Host_ServiceV2TrackingFeedback(true);
 #if HOST_S3_STATIONARY_PICK
-    if(!host_stop_latched && !MobileArmObserver_Poll())Host_RequestV2CoordinatedStop();
+    if(!MobileBoard_IsConfigured() && !host_stop_latched && !MobileArmObserver_Poll())Host_RequestV2CoordinatedStop();
 #endif
 #endif
     Host_ServiceV2Executor();

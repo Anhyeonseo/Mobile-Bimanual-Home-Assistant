@@ -90,6 +90,8 @@ jobs:
         run: python -m pip install -r requirements/offline.lock.txt -r requirements/s2-observation.txt
       - name: Test arm communication and household task plans
         run: python -m pytest -c config/pytest.ini --rootdir=. -q
+      - name: Exercise joint base/lift placement with guarded travel
+        run: python tools/run/run_fetch_stack.py --joint-placement --guarded-navigation --output output/s4-fetch.json
       - name: Validate firmware protocol sources
         run: |
           python tools/run/validate_protocol_manifest.py
@@ -142,7 +144,7 @@ jobs:
       - name: Install model and action message dependencies
         run: |
           apt-get update
-          apt-get install --no-install-recommends -y ros-jazzy-nav2-msgs ros-jazzy-xacro ros-jazzy-urdfdom-py ros-jazzy-moveit-msgs python3-numpy python3-serial python3-colcon-common-extensions
+          apt-get install --no-install-recommends -y libboost-system-dev ros-jazzy-nav2-msgs ros-jazzy-xacro ros-jazzy-urdfdom-py ros-jazzy-moveit-msgs python3-numpy python3-serial python3-colcon-common-extensions
       - name: Check assembly FK and synthetic ROS action transport
         shell: bash
         env:
@@ -153,9 +155,11 @@ jobs:
           export PYTHONPATH="$PWD/ros2_ws/src/home_robot_tasks:$PYTHONPATH"
           python3 tools/run/check_mobile_model.py
           python3 tools/run/check_nav2_action_port.py
-          colcon build --base-paths ros2_ws/src --packages-select so101_interfaces so101_arm_bridge home_robot_tasks
+          colcon build --base-paths ros2_ws/src --packages-select so101_interfaces so101_arm_bridge home_robot_tasks hls_lfcd_lds_driver
           source install/setup.bash
           python3 tools/run/check_fetch_ros_ports.py
+          python3 tools/run/check_lds01_driver.py --output output/lds-missing-sector --require-receipt-timing --sensor-frames
+          python3 tools/run/check_lds01_driver.py --fault sensor_loss --output output/lds-sensor-loss --require-receipt-timing
 
   ros-integration:
     runs-on: ubuntu-24.04
@@ -168,7 +172,7 @@ jobs:
           apt-get update
           apt-get install --no-install-recommends -y build-essential cmake python3-serial python3-yaml python3-numpy python3-scipy \
             ros-jazzy-nav2-amcl ros-jazzy-nav2-planner ros-jazzy-nav2-navfn-planner \
-            ros-jazzy-nav2-controller ros-jazzy-nav2-dwb-controller ros-jazzy-nav2-bt-navigator \
+            ros-jazzy-nav2-controller ros-jazzy-nav2-dwb-controller ros-jazzy-nav2-bt-navigator ros-jazzy-slam-toolbox \
             ros-jazzy-moveit-ros-move-group ros-jazzy-moveit-kinematics ros-jazzy-moveit-planners-ompl \
             ros-jazzy-moveit-simple-controller-manager ros-jazzy-robot-state-publisher ros-jazzy-xacro
       - name: Verify actual ROS planning with synthetic sensors and C motor feedback
@@ -183,7 +187,9 @@ jobs:
           cmake --build build/offline-core --parallel 2
           python3 tools/run/check_moveit_planning.py --retain-moveit-plugin
           python3 tools/setup/fetch_carry_meshes.py --output output/carry-model-meshes
-          python3 tools/diagnostics/check_carry_moveit.py --mobile-mesh-dir output/carry-model-meshes --output output/carry-moveit
+          python3 tools/diagnostics/check_carry_moveit.py --mobile-mesh-dir output/carry-model-meshes --output output/carry-moveit --include-place
+          python3 tools/run/check_slam_replay.py --output output/s4-slam-depth --reverse-ray-timing
+          python3 tools/run/check_navigation_bridge.py | tee output/s4-navigation-bridge.json
           for fault in none scan_loss tf_loss; do
             python3 tools/run/check_nav2_closed_loop.py --fault "$fault" --output "output/nav2-$fault"
           done
@@ -194,4 +200,6 @@ jobs:
           path: |
             output/moveit-planning
             output/carry-moveit
+            output/s4-slam-depth
+            output/s4-navigation-bridge.json
             output/nav2-*

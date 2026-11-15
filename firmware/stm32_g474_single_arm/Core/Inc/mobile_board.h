@@ -30,7 +30,14 @@ bool MobileBoard_ArmsPrepared(void);
 /* Transfer background reads to the trajectory; refresh a previously armed anchor. */
 bool MobileBoard_PrepareArmMotion(int32_t anchor_urad[12]);
 bool MobileBoard_IsConfigured(void);
+bool MobileBoard_TransportOnly(void);
+bool MobileBoard_PowerReady(void);
+bool MobileBoard_MaintenanceAllowed(void);
+/* AC/CS v1: query or explicit supported, torque-off mode preparation. */
+bool MobileBoard_Commission(const uint8_t request[36],uint8_t response[64],bool host_idle);
 bool MobileBoard_StopActive(void);
+/* Cached first-stop evidence only; never reads/writes motor registers. */
+void MobileBoard_Diagnostics(uint32_t out[24]);
 /* Idempotent. Preserves torque; no automatic rearm/reboot recovery. */
 void MobileBoard_RequestStop(void);
 const actuator_system_stop_t *MobileBoard_StopState(void);

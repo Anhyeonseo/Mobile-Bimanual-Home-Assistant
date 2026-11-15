@@ -17,7 +17,7 @@ static void status(actuator_mobile_endpoint_t *e,uint8_t kind,uint32_t seq,uint3
     w32(out+20,s->session);w32(out+24,s->sequence);out[28]=(uint8_t)s->state;out[29]=(uint8_t)s->reason;
     out[30]=(s->have_feedback?1u:0u)|(s->feedback.velocity_modes_verified?2u:0u)|
         (s->feedback.lift_homed?4u:0u)|(actuator_mobile_measured_stopped(s,now)?8u:0u)|
-        (s->feedback.hardware_ok?16u:0u);
+        (s->feedback.hardware_ok?16u:0u)|(s->transport_only?32u:0u);
     w32(out+32,s->feedback.observed_ms);
     for(i=0;i<4;i++)w32(out+36+4*i,(uint32_t)s->feedback.velocity_raw[i]);
     w32(out+52,(uint32_t)s->feedback.lift_position_um);w32(out+56,e->rejected_frames);

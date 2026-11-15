@@ -14,6 +14,42 @@ from .fetch import InvalidTask
 from .navigation import number
 
 
+def native_endpoints(depth, valid, intrinsics, transform):
+    """Project already validated rectified native pixels, without occupancy claims.
+
+    The live caller separately enforces identity, freshness and motion quality.
+    Offline inspection can reuse the geometry without manufacturing those gates.
+    """
+    fx,fy,cx,cy=intrinsics
+    vv,uu=np.nonzero(valid)
+    z=depth[vv,uu]
+    xyz=np.column_stack(((uu-cx)*z/fx,(vv-cy)*z/fy,z))
+    return xyz@transform[:3,:3].T+transform[:3,3]
+
+
+def measured_floor_heights(points, ground_z):
+    """Remove small observed floor tilt, with nominal-height fallback.
+
+    Reuses the grasp support-plane fitter on a bounded sample. This affects
+    navigation classification only, not sensor extrinsics or grasp calibration.
+    """
+    from home_perception.geometry.plane import fit_plane
+    p=np.asarray(points,dtype=float).reshape(-1,3)
+    nominal=p[:,2]-ground_z
+    near=p[(np.abs(nominal)<.08)&(p[:,0]>.2)&(p[:,0]<1.5)&(np.abs(p[:,1])<1.)]
+    if len(near)<300:return nominal,None
+    near=near[::max(1,math.ceil(len(near)/4000))]
+    if np.linalg.eigvalsh(np.cov(near[:,:2].T))[0]<.2**2:return nominal,None
+    try:plane=fit_plane(near,threshold_m=.012,iterations=60,sample_size=4000)
+    except (ValueError,np.linalg.LinAlgError):return nominal,None
+    normal=plane.normal if plane.normal[2]>0 else -plane.normal
+    # A table, narrow patch or large mounting change is not a floor reference.
+    if (plane.inlier_fraction<.8 or plane.rms_m>.008 or normal[2]<math.cos(math.radians(5))
+            or abs(plane.point[2]-ground_z)>.04):return nominal,None
+    return (p-plane.point)@normal,dict(normal=normal.tolist(),point_m=plane.point.tolist(),
+        rms_m=plane.rms_m,inlier_fraction=plane.inlier_fraction)
+
+
 @dataclass(frozen=True)
 class DepthProfile:
     frame: str
@@ -50,6 +86,7 @@ class DepthProfile:
 class DepthVolume:
     def __init__(self, profile):
         self.p = profile
+        self.historical = False
         self.cells = {}  # cell -> (occupied, original observation time)
         self.last_stamp = None
         self.epoch = None
@@ -59,6 +96,7 @@ class DepthVolume:
         if not isinstance(epoch, str) or not epoch or epoch==self.epoch:
             raise InvalidTask('navigation epoch required')
         self.epoch = epoch
+        self.historical = False
         self.cells.clear()
         self.last_stamp = None
         self.error = 'awaiting new travel observation'
@@ -66,9 +104,11 @@ class DepthVolume:
     def key(self, point):
         return tuple(math.floor(float(v) / self.p.resolution_m) for v in point)
 
-    def _ray(self, start, end):
+    def _ray(self, start, end, *, resolution_m=None):
         """Voxel traversal, excluding endpoint. Ties advance all crossed axes."""
-        r = self.p.resolution_m
+        r = self.p.resolution_m if resolution_m is None else number(resolution_m, 'ray resolution')
+        if r <= 0:
+            raise InvalidTask('positive ray resolution required')
         a,b=tuple(start),tuple(end)
         cell=[math.floor(v/r) for v in a]
         target=tuple(math.floor(v/r) for v in b)
@@ -92,6 +132,8 @@ class DepthVolume:
     def integrate(self, depth_m, intrinsics, camera_to_world, *, observed_s,
                   now_s, frame, calibration, epoch, motion_qualified):
         try:
+            if self.historical:
+                raise InvalidTask('archived depth requires a new live epoch')
             p = self.p
             stamp, now = number(observed_s, 'depth time'), number(now_s, 'clock')
             if (frame != p.frame or calibration != p.calibration or epoch != self.epoch
@@ -115,10 +157,7 @@ class DepthVolume:
                 raise InvalidTask('insufficient valid depth')
             # All accepted pixels are used. Decimation, if needed, must preserve
             # nearest obstacles and match the supplied intrinsics upstream.
-            vv, uu = np.nonzero(valid)
-            z = depth[vv,uu]
-            xyz = np.column_stack(((uu-cx)*z/fx, (vv-cy)*z/fy, z))
-            points = xyz@transform[:3,:3].T + transform[:3,3]
+            points = native_endpoints(depth,valid,(fx,fy,cx,cy),transform)
             origin = transform[:3,3]
             hits, cleared = set(), set()
             low = math.floor(p.minimum_height_m/p.resolution_m)
@@ -159,7 +198,7 @@ class DepthVolume:
             raise
 
     def fresh(self, now):
-        return (self.error is None and self.last_stamp is not None
+        return (not self.historical and self.error is None and self.last_stamp is not None
                 and 0 <= now-self.last_stamp <= self.p.maximum_age_s)
 
     def projected_obstacles(self):
@@ -167,7 +206,7 @@ class DepthVolume:
 
     def free(self, cell, now):
         value = self.cells.get(cell)
-        return (value is not None and not value[0]
+        return (not self.historical and value is not None and not value[0]
                 and 0 <= now-value[1] <= self.p.maximum_age_s)
 
 

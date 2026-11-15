@@ -31,6 +31,8 @@ typedef struct {
     actuator_mobile_state_t state;
     actuator_mobile_reason_t reason;
     bool configured, have_feedback, have_sequence;
+    /* Explicit one-way transport session: wheels only; fourth-axis commands forbidden. */
+    bool transport_only;
     uint32_t session, sequence, command_ms, command_valid_for_ms;
     int32_t target_raw[ACTUATOR_MOBILE_AXES];
 } actuator_mobile_supervisor_t;
