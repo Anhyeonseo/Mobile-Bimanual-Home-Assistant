@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "mode": "recorded_teleop_command_candidate",
+  "hardware_enabled": false,
+  "motion_authorized": false,
+  "physical_validation_pending": true,
+  "wheel_order": [
+    7,
+    8,
+    9
+  ],
+  "reference_raw": 200,
+  "maximum_raw": 200,
+  "patterns": {
+    "F": [
+      -200,
+      200,
+      0
+    ],
+    "L": [
+      -100,
+      -100,
+      200
+    ],
+    "A": [
+      200,
+      200,
+      200
+    ]
+  },
+  "axis_speed_at_reference": [
+    0.016746657746925096,
+    0.013960357947110003,
+    0.09164356528978349
+  ],
+  "directions": {
+    "F": {
+      "windows": 247,
+      "median_twist": [
+        0.0165532271448216,
+        -0.0016985391033061915,
+        -1.6235945827706526e-05
+      ],
+      "signed_axis_speed": 0.0165532271448216,
+      "axis_speed_q10_q90": [
+        0.012057800042473268,
+        0.020148609615400832
+      ],
+      "relative_median_deviation": 0.10851726060680164
+    },
+    "B": {
+      "windows": 8,
+      "median_twist": [
+        -0.016940088349028597,
+        0.0016314771266290478,
+        -0.0022852653985807603
+      ],
+      "signed_axis_speed": 0.016940088349028597,
+      "axis_speed_q10_q90": [
+        0.014605551120274143,
+        0.020617869566224772
+      ],
+      "relative_median_deviation": 0.07734923907825203
+    },
+    "L": {
+      "windows": 4,
+      "median_twist": [
+        0.0004912619470006523,
+        0.013471115726440528,
+        0.0011400213408161441
+      ],
+      "signed_axis_speed": 0.013471115726440528,
+      "axis_speed_q10_q90": [
+        0.012027713627141251,
+        0.014456340341951118
+      ],
+      "relative_median_deviation": 0.056044867227323096
+    },
+    "R": {
+      "windows": 94,
+      "median_twist": [
+        -0.0017118304820532958,
+        -0.014449600167779478,
+        -0.0009672681355036664
+      ],
+      "signed_axis_speed": 0.014449600167779478,
+      "axis_speed_q10_q90": [
+        0.011588444447923885,
+        0.017731934037949447
+      ],
+      "relative_median_deviation": 0.11571177711953813
+    },
+    "A": {
+      "windows": 58,
+      "median_twist": [
+        0.0011520812376011654,
+        0.0014510797657820455,
+        0.09119362704115459
+      ],
+      "signed_axis_speed": 0.09119362704115459,
+      "axis_speed_q10_q90": [
+        0.05027197136152492,
+        0.10003389644627847
+      ],
+      "relative_median_deviation": 0.08169746456534825
+    },
+    "D": {
+      "windows": 49,
+      "median_twist": [
+        -0.0016742992992182621,
+        -0.0015270469011624398,
+        -0.09209350353841238
+      ],
+      "signed_axis_speed": 0.09209350353841238,
+      "axis_speed_q10_q90": [
+        0.054050612372002774,
+        0.09848629875748169
+      ],
+      "relative_median_deviation": 0.058953272597042354
+    }
+  },
+  "feedback_scale_changed": false,
+  "limitations": [
+    "Independent masked LiDAR estimate; not surveyed ground truth.",
+    "Single output amplitude; low-output deadband and combined motions require live validation.",
+    "Command model only; never replace measured feedback with command prediction."
+  ],
+  "trajectory_basis": "lidar_local_surface_submap_only",
+  "visibility": "unknown: no endpoint and no free-space ray",
+  "hardware_commands": 0,
+  "evidence": {
+    "path": "output/s4-nav2-command-20261114/command-candidate.json",
+    "sha256": "aec0be77cecb4e661b28ed4dc87348f02fe60d60283512f90a73a9f8763373a0"
+  }
+}

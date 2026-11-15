@@ -6,16 +6,19 @@
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"line %d: %s\n",__LINE__,#x);exit(1);}}while(0)
 static uint32_t elapsed,origin,tx_at;
 static uint8_t packet[32];static uint16_t packet_size;
-static bool automatic=true,clock_valid=true;
+static bool automatic=true,clock_valid=true,interrupt_on_peek;
+static bool late_claim;
+static bool lose_clock_at_claim;
 static UART_HandleTypeDef left={.gState=HAL_UART_STATE_READY},right={.gState=HAL_UART_STATE_READY};
 static actuator_mobile_supervisor_t supervisor;
 /* This fixture supplies external feedback; integrated reader is tested separately. */
 bool MobileServoFeedback_AcceptsOutput(const actuator_mobile_supervisor_t *s,const actuator_mobile_output_config_t *c){(void)s;(void)c;return true;}
 static const actuator_mobile_config_t limits={{1000,1000,1000,100},2,200,50,0,500000};
-static const actuator_mobile_output_config_t config={{5000,1000,200,10000,20000,5000,500},500,400,600,4000,{1,1,1,1}};
+static actuator_mobile_output_config_t config={{5000,1000,200,10000,20000,5000,500},500,400,600,4000,{1,1,1,1}};
 uint32_t Timebase_NowUs(void){return origin+elapsed;}
 uint32_t HAL_GetTick(void){return elapsed/1000;}
-bool ControlTick_PeekEpoch(uint32_t *epoch){*epoch=origin+(elapsed/5000)*5000;return clock_valid;}
+bool ControlTick_PeekEpoch(uint32_t *epoch){if(interrupt_on_peek){elapsed++;interrupt_on_peek=false;}*epoch=origin+(elapsed/5000)*5000;return clock_valid;}
+bool ControlTick_PeekClock(uint32_t *now,uint32_t *epoch){if(late_claim && MobileServoOutput_State()->router.bus.active){elapsed+=150;late_claim=false;if(lose_clock_at_claim)clock_valid=false;}bool valid=ControlTick_PeekEpoch(epoch);*now=Timebase_NowUs();return valid;}
 HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *u,const uint8_t *p,uint16_t n){
     CHECK(n<=sizeof(packet));memcpy(packet,p,n);packet_size=n;tx_at=elapsed;
     if(u->fail_tx)return HAL_ERROR;
@@ -60,12 +63,29 @@ static void check_zero(void){
     for(unsigned i=0;i<4;i++){CHECK(packet[7+3*i]==8+i);CHECK(packet[8+3*i]==0 && packet[9+3*i]==0);}
 }
 int main(int argc,char **argv){
-    CHECK(argc==2);unsigned which=(unsigned)atoi(argv[1]);uint32_t token;
+    CHECK(argc==2);unsigned which=(unsigned)atoi(argv[1]);uint32_t token,deadline;
     if(which==0){MobileServoOutput_Poll();MobileServoOutput_Stop();MobileServoOutput_OnTxComplete(&left);
         CHECK(!MobileServoOutput_State()->configured && left.sent==0);return 0;}
     if(which==11)origin=UINT32_MAX-10000u;
+    if(which==15 || which==16){config.job_lifetime_us=10000;}
     setup();
     switch(which){
+    case 15: /* Closing slot: defer unsent work with unchanged deadline; next slot sends it. */
+    case 16: /* Clock failure after claim: release unsent owner and transmit STOP. */
+        CHECK(ServoTransport_Begin(&left,ACTUATOR_BUS_WORK_ARM,&token));
+        advance(4200);CHECK(left.sent==0);
+        CHECK(ServoTransport_End(&left,token,false)==HAL_OK);
+        deadline=MobileServoOutput_State()->router.jobs[ACTUATOR_BUS_WORK_WHEELS].deadline_us;
+        late_claim=true;lose_clock_at_claim=which==16;poll();
+        CHECK(left.sent==0);
+        if(which==15){
+            CHECK(MobileServoOutput_State()->fault==MOBILE_OUTPUT_OK);
+            CHECK(MobileServoOutput_State()->router.jobs[ACTUATOR_BUS_WORK_WHEELS].deadline_us==deadline);
+            advance(6800);CHECK(left.sent>0 && !MobileServoOutput_State()->stop_requested);
+            MobileServoOutput_Stop();advance(7800);check_zero();
+        }else{advance(6800);check_zero();CHECK(MobileServoOutput_State()->stop_written);}
+        CHECK(!MobileServoOutput_CommandAllowed(&supervisor));
+        CHECK(supervisor.state==ACTUATOR_MOBILE_STOP_LATCHED);break;
     case 1: /* UART is retained through TX callback and quiet time. */
         advance(1000);CHECK(left.sent==1 && packet[7]==8 && packet[5]==46);
         CHECK(!ServoTransport_Begin(&left,ACTUATOR_BUS_WORK_ARM,&token));
@@ -122,6 +142,11 @@ int main(int argc,char **argv){
         advance(4700);CHECK(left.sent==0 && MobileServoOutput_State()->fault==MOBILE_OUTPUT_QUEUE);
         CHECK(ServoTransport_End(&left,token,false)==HAL_OK);
         advance(5700);check_zero();CHECK(MobileServoOutput_State()->stop_written);break;
+    case 14: /* An ISR between old now/epoch reads must not fake a missed slot. */
+        advance(4900);elapsed=4999;interrupt_on_peek=true;poll();
+        CHECK(MobileServoOutput_State()->fault==MOBILE_OUTPUT_OK);
+        CHECK(!MobileServoOutput_State()->stop_requested);
+        advance(5500);CHECK(MobileServoOutput_State()->fault==MOBILE_OUTPUT_OK);break;
     case 13:
         clock_valid=false;poll();CHECK(MobileServoOutput_State()->fault==MOBILE_OUTPUT_SCHEDULE);
         advance(1000);check_zero();CHECK(MobileServoOutput_State()->stop_written);break;

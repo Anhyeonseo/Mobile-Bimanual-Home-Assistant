@@ -40,3 +40,38 @@ def test_exact_body_arc_integration_and_gap_does_not_invent_motion():
     assert odom.pose==pose and odom.discontinuities==1
     assert odom.observe((0,0,0),5)==pose
     assert odom.observe((0,0,0),6)==pose
+
+
+def command_profile():
+    return dict(mode='recorded_teleop_command_candidate',wheel_order=[7,8,9],reference_raw=200,
+        maximum_raw=200,patterns={'F':[-200,200,0],'L':[-100,-100,200],'A':[200,200,200]},
+        axis_speed_at_reference=[.02,.015,.1])
+
+
+@pytest.mark.parametrize('twist,expected',[
+    ((.02,0,0),(-200,200,0)),((-.02,0,0),(200,-200,0)),
+    ((0,.015,0),(-100,-100,200)),((0,-.015,0),(100,100,-200)),
+    ((0,0,.1),(200,200,200)),((0,0,-.1),(-200,-200,-200))])
+def test_recorded_command_preserves_verified_teleop_directions(twist,expected):
+    from home_robot_tasks.base_motion import TeleopCommandModel
+    model=TeleopCommandModel(command_profile())
+    assert model.raw_command(twist)==pytest.approx(expected)
+    assert model.expected_twist(expected)==pytest.approx(twist)
+
+
+def test_command_saturation_preserves_combined_direction_and_zero():
+    from home_robot_tasks.base_motion import TeleopCommandModel
+    model=TeleopCommandModel(command_profile())
+    requested=(.02,.015,.1);raw=model.raw_command(requested)
+    assert max(map(abs,raw))==200
+    assert model.expected_twist(raw)==pytest.approx(tuple(v/2 for v in requested))
+    assert model.raw_command((0,0,0))==(0,0,0)
+    for invalid in ((float('nan'),0,0),(True,0,0),(1,2)):
+        with pytest.raises(InvalidTask):model.raw_command(invalid)
+
+
+@pytest.mark.parametrize('key,value',[('wheel_order',[7,8,10]),('maximum_raw',201),('axis_speed_at_reference',[0,.1,.1])])
+def test_command_profile_does_not_admit_lift_or_unmeasured_output(key,value):
+    from home_robot_tasks.base_motion import TeleopCommandModel
+    profile=command_profile();profile[key]=value
+    with pytest.raises(InvalidTask):TeleopCommandModel(profile)

@@ -70,3 +70,42 @@ def test_low_base_width_is_not_applied_to_high_obstacle():
     low,_,_=height_matched_candidates(occupied,np.empty((0,3),int),surfaces,
         resolution=.1,origin=np.zeros(2),voxel_size=.1,lidar_top=.21,height=1.,yaw=0,clearance=0)
     assert low[10,8]
+
+
+def test_offset_depth_grid_does_not_pad_obstacles_twice():
+    from tools.diagnostics.review_s4_sensor_capture import voxel_body_centres
+    body=np.array([[-.06,-.06],[-.06,.06],[.06,.06],[.06,-.06]])
+    result=voxel_body_centres(np.array([[1,1]]),[body],voxel_size=.1,
+        grid_shape=(5,5),origin=np.array([.05,.05]),resolution=.1,yaw=0,clearance=0)
+    # Original obstacle is [.1,.2]^2; centres .1 and .2 collide, .3 does not.
+    assert result[0,0] and result[1,1]
+    assert not result[2,1] and not result[1,2]
+    padded=voxel_body_centres(np.array([[1,1]]),[body],voxel_size=.1,
+        grid_shape=(5,5),origin=np.array([.05,.05]),resolution=.1,yaw=0,clearance=.05)
+    assert padded[2,1]
+
+
+def test_outside_grid_depth_obstacle_can_block_an_inside_robot_centre():
+    from tools.diagnostics.review_s4_sensor_capture import voxel_body_centres
+    body=np.array([[-.2,-.05],[-.2,.05],[.2,.05],[.2,-.05]])
+    result=voxel_body_centres(np.array([[-1,1]]),[body],voxel_size=.1,
+        grid_shape=(5,5),origin=np.zeros(2),resolution=.1,yaw=0,clearance=0)
+    assert result[1,0] and result[1,1] and not result[1,3]
+
+
+def test_complete_fixed_projection_includes_upper_lift_for_lidar_at_both_headings():
+    from scipy.spatial import ConvexHull
+    from tools.diagnostics.review_s4_sensor_capture import height_matched_candidates
+    def box(x,y,z0,z1):
+        v=np.array([[a,b,c] for a in [-x,x] for b in [-y,y] for c in [z0,z1]])
+        return v[ConvexHull(v).simplices]
+    surfaces=[box(.1,.1,0,.15),box(.1,.3,.2,.5)]
+    fixed=np.array([[-.1,-.3],[.1,-.3],[.1,.3],[-.1,.3]])
+    occupied=np.zeros((25,25),bool);occupied[12,12]=True
+    for yaw,index in ((0,(10,12)),(np.pi/2,(12,10))):
+        options=dict(resolution=.05,origin=np.zeros(2),voxel_size=.05,lidar_top=.15,height=.5,yaw=yaw,clearance=0)
+        # At least 20 cm from the obstacle only the wider upper structure overlaps.
+        index=(8,12) if yaw==0 else (12,8)
+        old,_,_=height_matched_candidates(occupied,np.empty((0,3),int),surfaces,**options)
+        full,_,_=height_matched_candidates(occupied,np.empty((0,3),int),surfaces,navigation_footprint=fixed,**options)
+        assert not old[index] and full[index]

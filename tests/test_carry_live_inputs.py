@@ -347,3 +347,45 @@ def test_cached_joint_packet_cannot_renew_measurement_time():
     assert len(inputs.joints)==1 and inputs.joints[-1]==original
     with pytest.raises(ValueError,match='changed positions'):
         inputs.add_joints(packet(positions_urad=(1,)*12),10.01,10.014)
+
+
+def test_runtime_v2_retains_first_output_fault_timing():
+    import struct
+    import pytest
+    from so101_arm_bridge.stationary_telemetry import decode_runtime
+    p=b'\x00'+struct.pack('<17I',2,36,90000,0,8480,36,59,2,0,1,2,8480001,8475000,8479998,0,0,0)
+    status=decode_runtime(p)
+    assert status['mobile_output']['now_us']-status['mobile_output']['epoch_us']==5001
+    assert status['mobile_output']['site']==2
+    assert status['dispatches_at_first_stop']==59
+    for bad in (p[:-1],p[:37],p[:37]+struct.pack('<8I',5,2,0,0,0,0,0,0)):
+        with pytest.raises(ValueError):decode_runtime(bad)
+
+
+def test_runtime_keeps_first_board_fault_and_signed_feedback():
+    import struct
+    from so101_arm_bridge.stationary_telemetry import decode_runtime
+    values=[3,8,1000,0,900,36,1,2,0]+[0]*8
+    board=[2,900,0,6,1,895,850,3832,(-50)&0xffffffff,0,1,7,1,0,1,0,0,0,0,0,890,1,3832,0]
+    p=b'\0'+struct.pack('<41I',*(values+board))
+    d=decode_runtime(p)['mobile_board'];assert d['source']==2 and d['velocity_raw']==-50 and d['hold_verified']==0
+    board[0]=6
+    with pytest.raises(ValueError):decode_runtime(b'\0'+struct.pack('<41I',*(values+board)))
+
+
+def test_runtime_device_failure_preserves_raw_temperature_jump_without_overheat_claim():
+    import struct
+    from so101_arm_bridge.stationary_telemetry import decode_runtime,describe_runtime_fault
+    old=[4,8,197000,0,196791,36,1,2,0]+[0]*8
+    board=[6,196791,6,4,0]+[0]*19
+    body=bytes.fromhex('00'+'2509640046047a4700000100000200')+bytes(4)
+    f=[1,1,0,15,6,2,9,8,196791,196751,32,1,0,15,1,0,0]+list(struct.unpack('<5I',body))+[196700,1]
+    raw=b'\0'+struct.pack('<65I',*(old+board+f))
+    d=decode_runtime(raw);v=d['mobile_feedback']
+    assert v['reported_temperature']==71 and v['previous_temperature']==32 and v['sample_gap_ms']==40
+    assert v['raw_body_hex']==body[:18].hex() and v['motor_id']==9
+    message=describe_runtime_fault(d)
+    assert '9번' in message and '71°C' in message and '32°C' in message and '자동 재출발 없음' in message
+    assert '과열' not in message
+    f[1]=4
+    with pytest.raises(ValueError):decode_runtime(b'\0'+struct.pack('<65I',*(old+board+f)))

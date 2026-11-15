@@ -4,7 +4,18 @@ Port contract: exchange(bytes) returns one 64-byte response within the caller's
 budget. This module has no serial discovery, auto-arm or automatic reconnect.
 """
 
+from dataclasses import asdict
 from .mobile_wire import MobileCommand, MobileStatus, MobileClock, mobile_query
+
+
+class MobileReplyError(RuntimeError):
+    def __init__(self, packet, sequence, kind, result):
+        self.diagnostics=dict(expected_kind=kind,expected_sequence=sequence,response=asdict(result))
+        if kind in (1,2,3):self.diagnostics['command']=asdict(MobileCommand.decode(packet))
+        rejected=result.request_sequence==sequence and result.kind==(kind|0x80)
+        label='controller rejected request' if rejected else 'response mismatch'
+        super().__init__(f'{label}: kind={kind}, sequence={sequence}, reply_kind={result.kind}, '
+                         f'reply_sequence={result.request_sequence}, state={result.state}, reason={result.reason}')
 
 
 class MobileClient:
@@ -14,6 +25,7 @@ class MobileClient:
         self.sequence = 0
         self.session = None
         self.boot_id = None
+        self.clock_refresh_deferred = 0
 
     def _sequence(self):
         if self.sequence == 0xFFFFFFFF:
@@ -25,7 +37,7 @@ class MobileClient:
         try:
             result = MobileStatus.decode(self.port.exchange(packet))
             if result.request_sequence != sequence or result.kind != kind:
-                raise RuntimeError("request rejected or response mismatch")
+                raise MobileReplyError(packet,sequence,kind,result)
             if self.boot_id is not None and result.boot_id != self.boot_id:
                 self.session = None
                 self.clock.sample = None
@@ -56,7 +68,17 @@ class MobileClient:
         seq = self._sequence()
         sent = self.now()
         result = self._exchange(mobile_query(6, seq, seq), seq, 6)
-        self.clock.update(result, seq, sent, self.now())
+        received = self.now()
+        # The response is already sequence/kind/boot correlated. A single late
+        # refresh need not discard a still-valid earlier clock bound. Do not
+        # update its timestamp/uncertainty or extend its original 1s lifetime.
+        previous = self.clock.sample
+        if (received-sent>self.clock.max_rtt_ms and previous is not None
+                and sent>=previous[1] and 0<=received-previous[1]<self.clock.max_age_ms
+                and previous[2].boot_id==self.boot_id):
+            self.clock_refresh_deferred += 1
+            return previous[2]
+        self.clock.update(result, seq, sent, received)
         return result
 
     def _deadline(self, lifetime_ms):

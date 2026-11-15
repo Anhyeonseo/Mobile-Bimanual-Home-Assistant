@@ -38,6 +38,10 @@ void HAL_Delay(uint32_t);
 HAL_StatusTypeDef HAL_UART_AbortReceive(UART_HandleTypeDef*);
 #endif''')
     (d/'stm32g4xx_hal.h').write_text(hal)
+    completion=(BOARD/'Inc/servo_feedback_completion.h').read_text()
+    completion=completion.replace('if (parsed != HAL_TIMEOUT) s->activity_us = now;',
+        '#ifdef REPRO_TIMEOUT_QUIET_RESET\n        s->activity_us = now;\n#else\n        if (parsed != HAL_TIMEOUT) s->activity_us = now;\n#endif')
+    (d/'servo_feedback_completion.h').write_text(completion)
     l=(BOARD/'Src/servo_bus.c').read_text();r=(BOARD/'Src/right_servo_bus.c').read_text()
     code=(FAKE/'feedback_recovery_harness.c').read_text()
     types=l[l.index('typedef enum\n'):l.index('static ServoInMotionTelemetry servo_in_motion')]
@@ -88,6 +92,7 @@ HAL_StatusTypeDef HAL_UART_AbortReceive(UART_HandleTypeDef*);
     subprocess.run(compile_args,check=True)
     old=exe.with_name('old-contract')
     subprocess.run(compile_args[:-2]+['-DREPRO_OLD_END_ON_TIMEOUT','-o',str(old)],check=True)
+    subprocess.run(compile_args[:-2]+['-DREPRO_TIMEOUT_QUIET_RESET','-o',str(exe.with_name('old-quiet'))],check=True)
     return exe
 
 
@@ -135,3 +140,26 @@ def test_preparation_partial_start_stop_and_periodic_output(harness,bus,scenario
 @pytest.mark.parametrize('step_us',[50,125,250])
 def test_periodic_output_with_slow_main_loop_and_late_read_deferral(harness,bus,step_us):
     subprocess.run([str(harness),str(bus),str(step_us),'25'],check=True)
+
+
+def test_arm_setup_reuses_mobile_owned_shared_receiver_before_periodic_output(harness):
+    subprocess.run([str(harness),'0','0','26'],check=True)
+
+
+@pytest.mark.parametrize('bus',[0,1])
+def test_observer_retries_clean_timeouts_but_not_transport_faults(harness,bus):
+    subprocess.run([str(harness),str(bus),'2','27'],check=True)
+
+
+@pytest.mark.parametrize('bus',[0,1])
+@pytest.mark.parametrize('scenario',[28,29])
+@pytest.mark.parametrize('clock_phase',range(8))
+def test_late_timeout_poll_uses_wire_quiet_not_parser_completion(harness,bus,scenario,clock_phase):
+    subprocess.run([str(harness),str(bus),str(clock_phase),str(scenario)],check=True)
+
+
+@pytest.mark.parametrize('bus',[0,1])
+def test_previous_timeout_quiet_reset_reproduces_failed_retirement(harness,bus):
+    result=subprocess.run([str(harness.with_name('old-quiet')),str(bus),'0','28'],capture_output=True,text=True)
+    assert result.returncode != 0
+    assert 'BIMANUAL_TRACKING_TRANSIENT_FAILURE' in result.stderr

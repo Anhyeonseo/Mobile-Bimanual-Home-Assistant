@@ -7,8 +7,8 @@ ROOT=Path(__file__).resolve().parents[1]
 BOARD=ROOT/'firmware/stm32_g474_single_arm/Core'
 CORE=ROOT/'firmware/stm32_actuator'
 
-@pytest.fixture(scope='module')
-def binary(tmp_path_factory):
+@pytest.fixture(scope='module',params=['teleop','unified'])
+def binary(tmp_path_factory,request):
     out=tmp_path_factory.mktemp('hold-read-lease')
     # The left file also declares a prototype; extract the final definition.
     text=(BOARD/'Src/servo_bus.c').read_text();at=text.rindex('HAL_StatusTypeDef Servo_ReadData(')
@@ -57,7 +57,8 @@ int main(int argc,char **argv){
     obj=out/'gate.o'
     subprocess.run([*common,'-c',str(BOARD/'Src/servo_transport.c'),'-o',str(obj)],check=True)
     binary=out/'check'
-    subprocess.run([*common,'-DHOST_MOBILE_BASE_TELEOP_ONLY=1','-DHOST_MOBILE_BASE_PRESERVE_HOLD=1',str(source),str(obj),str(CORE/'src/bus_router.c'),str(CORE/'src/shared_bus.c'),'-o',str(binary)],check=True)
+    defines=(['-DHOST_MOBILE_BASE_TELEOP_ONLY=1','-DHOST_MOBILE_BASE_PRESERVE_HOLD=1'] if request.param=='teleop' else ['-DHOST_S4_UNIFIED_CANDIDATE=1'])
+    subprocess.run([*common,*defines,str(source),str(obj),str(CORE/'src/bus_router.c'),str(CORE/'src/shared_bus.c'),'-o',str(binary)],check=True)
     return binary
 
 @pytest.mark.parametrize('right',[0,1])

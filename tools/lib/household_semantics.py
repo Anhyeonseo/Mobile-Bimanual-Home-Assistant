@@ -54,15 +54,16 @@ def review_scores(original_label,logits,labels):
 
 
 class HouseholdCropReviewer:
-    def __init__(self,cache_dir,device='cuda'):
+    def __init__(self,cache_dir,device='cuda', *, labels=None):
         import torch
         from transformers import AutoProcessor,AutoModel
         self.torch,self.device=torch,device
         options=dict(revision=MODEL_REVISION,cache_dir=str(cache_dir),local_files_only=True,trust_remote_code=False)
         self.processor=AutoProcessor.from_pretrained(MODEL_ID,**options)
         self.model=AutoModel.from_pretrained(MODEL_ID,**options).to(device).eval()
-        self.labels=list(LABELS)
-        self.text=[f'This is a photo of {phrase} in a home.' for phrase in LABELS.values()]
+        vocabulary = LABELS if labels is None else labels
+        self.labels=list(vocabulary)
+        self.text=[f'This is a photo of {phrase} in a home.' for phrase in vocabulary.values()]
 
     def refine(self,bgr,detections):
         from PIL import Image
@@ -76,4 +77,32 @@ class HouseholdCropReviewer:
             review=review_scores(detection['label'],logits,self.labels)
             result.append(dict(detection,label=review['label'],original_label=detection['label'],
                 household_review=dict(review,model_id=MODEL_ID,model_revision=MODEL_REVISION,crop_boxes=boxes)))
+        return result
+
+
+OBJECT_LABELS = {
+    'marker':'a marker pen', 'cup':'a cup or mug', 'remote_control':'a remote control',
+    'bottle':'a bottle', 'scissors':'a pair of scissors', 'screwdriver':'a screwdriver',
+    'table':'an empty table top', 'floor':'an empty floor', 'wall':'a wall',
+    'tripod':'a camera tripod', 'cable':'an electric cable', 'tape':'a roll of adhesive tape',
+    'phone':'a mobile phone', 'paper':'a sheet of paper', 'unknown':'an unrecognizable object'}
+
+
+class ObjectCropReviewer(HouseholdCropReviewer):
+    """Reuse the existing two-context crop review, with background alternatives."""
+    def __init__(self, cache_dir, device='cuda'):
+        super().__init__(cache_dir, device, labels=OBJECT_LABELS)
+
+    def verify(self, bgr, detections):
+        from home_robot_tasks.assistant.language import NOUNS, _matches
+        result=[]
+        for refined in self.refine(bgr,detections):
+            review=refined.pop('household_review')
+            original=refined.pop('original_label')
+            categories=[key for key,names in NOUNS.items() if _matches(original,names)]
+            accepted=(len(categories)==1 and review['resolved'] and review['proposed_label']==categories[0])
+            result.append(dict(refined,label=original,verification=dict(
+                accepted=bool(accepted),category=categories[0] if len(categories)==1 else None,
+                reason=None if accepted else 'object_appearance_unconfirmed',
+                review=review)))
         return result

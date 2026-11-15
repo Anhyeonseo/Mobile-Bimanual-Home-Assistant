@@ -14,7 +14,7 @@ from ..navigation_fusion import TravelEnvelope
 from ..stationary_lift import preset_step
 from .contracts import Context, Stamp, document, finite
 from .language import parse_request, ground_intent
-from .meaning import intent_from_meaning
+from .meaning import intent_from_meaning, apply_interaction_policy, INTERACTION_POLICY
 from .furniture import FurnitureMemory
 from .placement import PlacementPlanner, PlacementProfile
 from .scanning import ScanManager
@@ -27,6 +27,7 @@ class AssistantService:
         if travel_envelope is not None and not isinstance(travel_envelope, TravelEnvelope):
             raise InvalidTask('typed travel envelope required')
         self.app, self.store, self.context, self.clock = app, store, context, clock
+        self.household = None
         self.travel_envelope = travel_envelope
         self.furniture = FurnitureMemory(store, context)
         self.store.add_map(app.map._document)
@@ -42,21 +43,127 @@ class AssistantService:
 
     def status(self):
         values = self.store.entities(self.context)
-        return dict(mode='simulation', hardware_enabled=False, context=self.context.to_dict(),
+        return dict(mode='recorded_home_review' if self.household else 'simulation', hardware_enabled=False, context=self.context.to_dict(),
+                    household=self.household.status() if self.household else None,
+                    interaction_policy=deepcopy(INTERACTION_POLICY),
                     active_request=self.app.lease.owner, entities=values, scans=self.scan.sessions(),
                     requests=self.store.records('intent'), furniture=[
                         {k: v for k, v in item.items() if k != 'observed_voxels'}
                         for item in self.furniture.instances()], capabilities={
-                        'text_input': True, 'voice_input': False, 'scan_replay': True,
+                        'text_input': True, 'voice_input': False, 'scan_replay': self.household is None,
+                        'recorded_home_review': self.household is not None, 'object_capture_input':True,
                         'external_meaning_input': True, 'semantic_api_connected': False,
                         'furniture_replay_mapping': True, 'live_furniture_mapping': False,
                         'autonomous_survey_simulation': True, 'autonomous_survey_hardware': False,
                         'mapping_save_exit': True, 'mapping_restart_resume': True,
                         'physical_poweroff': False,
                         'live_slam': False, 'camera_extrinsics_verified': False,
-                        'physical_manipulation': False, 'synthetic_workflow': True},
-                    pending=['실제 설치·센서 사양 확인', '공통 펌웨어 실물 검증',
-                             '카메라·관절·리프트 보정', '하중·파지 결과 센서 확인'])
+                        'physical_manipulation': False, 'synthetic_workflow': self.household is None},
+                    pending=(['실제 새 촬영과 로봇 위치 연결', 'S4 정차·집기·운반 통합 검증'] if self.household else
+                             ['실제 설치·센서 사양 확인', '공통 펌웨어 실물 검증', '카메라·관절·리프트 보정', '하중·파지 결과 센서 확인']))
+
+    def attach_household(self, profile):
+        from .context_labels import HouseholdMemory
+        if self.app.lease.owner or self.scan.active():
+            raise InvalidTask('robot_or_scan_busy')
+        self.household = HouseholdMemory(self.store, profile, clock_id=self.context.clock_id)
+        self.context = self.household.context
+        self.app.admission = lambda: False
+
+    def _ground(self, intent, capture_key=None):
+        result = ground_intent(intent, self.store, self.context, self.clock())
+        if not capture_key or intent['issues']:
+            return result
+        capture = self.store.record('object_capture', capture_key)
+        if not capture or capture['request_id'] != intent['request_id']:
+            raise InvalidTask('capture_request_mismatch')
+        candidates = [c for c in self.store.candidates(context=self.context,
+            category=intent['category'],attributes=intent['attributes'],now_s=self.clock())
+            if c['entity']['entity_id'] in capture['entity_ids']]
+        result['capture'] = capture
+        result['issues'] = [x for x in result['issues'] if x != 'ambiguous_object']
+        sources = result['source_candidates']
+        if len(sources)==1:
+            src = sources[0]
+            support_hint = self.store.get(capture['candidate_support_id']) if capture['candidate_support_id'] else None
+            candidates = [c for c in candidates if
+                (c['entity']['support_id']==src['entity_id'] if src['kind']=='surface' else c['entity']['room_id']==src['entity_id'])
+                or (support_hint and (support_hint['entity_id']==src['entity_id'] or support_hint['room_id']==src['entity_id']))]
+        result['object_candidates'] = candidates
+        if len(candidates)>1:
+            result['issues'].append('ambiguous_object')
+        if candidates and intent['operation']=='fetch_object' and any(not c['entity']['support_id'] for c in candidates):
+            result['issues'].append('object_support_unconfirmed')
+        result['status'] = ('NEEDS_CLARIFICATION' if result['issues'] else 'SEARCH_REQUIRED' if not candidates
+            else 'REOBSERVE_REQUIRED' if not candidates[0]['fresh'] else 'READY_TO_PLAN')
+        return result
+
+    def refresh_request(self, request_id, *, capture_key=None):
+        value = self.get(request_id)
+        if value.get('task_request_id') or value['status'] in {'CANCELLED','INTERRUPTED','SUCCEEDED','FAILED'}:
+            raise InvalidTask('request_already_finalized')
+        if capture_key:
+            value['capture_key'] = capture_key
+            value['selection'].pop('object_id', None)
+        result = self._ground(value['intent'], value.get('capture_key'))
+        selected = value['selection'].get('object_id')
+        if selected:
+            matches = [c for c in result['object_candidates'] if c['entity']['entity_id']==selected]
+            if len(matches)==1:
+                result['object_candidates']=matches
+                result['issues']=[x for x in result['issues'] if x!='ambiguous_object']
+                result['status']='NEEDS_CLARIFICATION' if result['issues'] else 'READY_TO_PLAN' if matches[0]['fresh'] else 'REOBSERVE_REQUIRED'
+            else:
+                value['selection'].pop('object_id',None)
+        value.update(grounding=result,status=result['status'],revision=value['revision']+1)
+        self.store.save_record('intent',request_id,value)
+        return value
+
+    def answer(self, request_id, utterance):
+        """Resolve a short place/object reply only within this pending question."""
+        import re
+        from .language import resolve_place, parse_request
+        from .contracts import text
+        value = self.get(request_id)
+        answer = text(utterance, 'answer', 160)
+        if parse_request(answer,'answer-check')['operation']=='cancel':
+            raise InvalidTask('use_cancel_endpoint')
+        if value['status'] != 'NEEDS_CLARIFICATION':
+            raise InvalidTask('no_pending_question')
+        issues = set(value['grounding']['issues'])
+        if 'ambiguous_object' in issues:
+            matches = [c['entity'] for c in value['grounding']['object_candidates']
+                if answer in [c['entity']['label'],*c['entity']['aliases'],c['entity']['entity_id']]]
+            if len(matches)==1:
+                return self.clarify(request_id,{'object_id':matches[0]['entity_id']})
+        slot = None
+        if issues & {'destination_required','concrete_destination_required','unknown_destination','ambiguous_destination','placement_surface_required'}:
+            slot='destination_id'
+        elif issues & {'unknown_source','ambiguous_source'}:
+            slot='source_id'
+        if not slot:
+            raise InvalidTask('answer_requires_explicit_selection')
+        phrase = re.sub(r'(?:에\s*놓아줘|으로\s*옮겨줘|로\s*옮겨줘|으로|로|에)$','',answer).strip()
+        matches = resolve_place(phrase,self.store.entities(self.context))
+        if len(matches)!=1:
+            raise InvalidTask('answer_place_ambiguous' if matches else 'answer_place_unknown')
+        return self.clarify(request_id,{slot:matches[0]['entity_id']})
+
+    def household_review(self, request_id):
+        value = self.refresh_request(request_id)
+        ground = value['grounding']
+        places = ground['destination_candidates']
+        sources = ground['source_candidates']
+        from .language import NOUNS
+        target = NOUNS.get(value['intent']['category'], ('물체',))[0]
+        summary = f"{value['utterance']} — 현재 기록과 관측을 확인합니다."
+        if len(places)==1:
+            summary = f"{self._place_label(sources[0])+'에서 ' if len(sources)==1 else ''}{target}을 {self._place_label(places[0])}에 옮기는 요청입니다."
+        return dict(request_id=request_id,mode='recorded_home_review',preview_id=None,
+            confirmation={'required':True,'summary':summary,'scope':'one_complete_object_transfer'},
+            placement={'status':'PHYSICAL_VALIDATION_PENDING','candidates':[],'evaluated':0},
+            grounding=ground, executable=False, hardware_commands=0,physical_task_completed=False,
+            note='실제 집의 저장 지도와 관측 후보를 연결한 검토입니다. 정차·집기 경로와 실물 실행 승인은 아직 만들지 않았습니다.')
 
     def refresh_demo(self):
         if self.app.lease.owner or self.scan.active():
@@ -68,21 +175,23 @@ class AssistantService:
             raise InvalidTask('robot_busy')
         return self.furniture.observe(observation, now_s=self.clock())
 
-    def prepare(self, utterance, request_id, *, meaning=None):
+    def prepare(self, utterance, request_id, *, meaning=None, parser='external_semantic_api_v1'):
         identifier(request_id, 'request_id')
         # External inference happens outside the gateway. Both paths converge
         # on the same grounding, preview, lease and execution validation.
         intent = (parse_request(utterance, request_id) if meaning is None else
-                  intent_from_meaning(utterance, request_id, meaning))
+                  intent_from_meaning(utterance, request_id, meaning, parser=parser))
+        intent = apply_interaction_policy(intent)
         previous = self.store.record('intent', request_id)
         if previous:
             if (previous['utterance'] != utterance or
-                    previous.get('input_meaning') != meaning):
+                    previous.get('input_meaning') != meaning or
+                    (meaning is not None and previous['intent']['parser'] != parser)):
                 raise InvalidTask('request_id_conflict')
             return previous
-        if len(self.store.records('intent')) >= 128:
+        if len(self.store.records('intent')) >= 128 and intent['operation'] != 'cancel':
             raise InvalidTask('intent_history_full')
-        result = ground_intent(intent, self.store, self.context, self.clock())
+        result = self._ground(intent)
         value = dict(request_id=request_id, utterance=utterance, intent=intent, grounding=result,
                      input_meaning=deepcopy(meaning),
                      status=result['status'], selection={}, revision=1, executable=False,
@@ -111,9 +220,9 @@ class AssistantService:
                 if not selected or selected['kind'] not in {'room', 'surface'} or selected not in self.store.entities(self.context):
                     raise InvalidTask('selected_place_not_in_current_map')
                 intent[phrase] = selected['entity_id']
-        if intent['destination_phrase']:
-            intent['issues'] = [i for i in intent['issues'] if i != 'destination_required']
-        grounding = ground_intent(intent, self.store, self.context, self.clock())
+        if 'destination_id' in merged:
+            intent['issues'] = [i for i in intent['issues'] if i not in {'destination_required','concrete_destination_required'}]
+        grounding = self._ground(intent, value.get('capture_key'))
         if 'object_id' in merged:
             chosen = [c for c in grounding['object_candidates'] if c['entity']['entity_id'] == merged['object_id']]
             if len(chosen) != 1:
@@ -131,7 +240,7 @@ class AssistantService:
         value = self.get(request_id)
         if value['task_request_id'] is not None or value['status'] in {'INTERRUPTED', 'CANCELLED'}:
             raise InvalidTask('request_already_finalized')
-        grounding = ground_intent(value['intent'], self.store, self.context, self.clock())
+        grounding = self._ground(value['intent'], value.get('capture_key'))
         selected = value['selection'].get('object_id')
         if selected:
             matches = [c for c in grounding['object_candidates'] if c['entity']['entity_id'] == selected]
@@ -166,6 +275,8 @@ class AssistantService:
                     objects={v['entity_id']: {'label': v['label']} for v in values if v['kind'] == 'object'})
 
     def preview(self, request_id):
+        if self.household:
+            return self.household_review(request_id)
         value, target, destination = self._resolved(request_id)
         if not self.app.pose_known:
             raise InvalidTask('localization_required')
@@ -188,15 +299,25 @@ class AssistantService:
         task = plan_fetch(request, self._world())
         fingerprint = hashlib.sha256(document({'request': value['intent'], 'selection': value['selection'],
             'target': target, 'support': support, 'pick_lift_m': fixed_height, 'destination': destination,
-            'context': self.context.to_dict(), 'start_xy': list(self.app.xy)}).encode()).hexdigest()
+            'context': self.context.to_dict(), 'start_xy': list(self.app.xy),
+            'interaction_policy': INTERACTION_POLICY}).encode()).hexdigest()
         preview = dict(request_id=request_id, preview_id=fingerprint, task=task, placement=candidates,
+                       confirmation=dict(required=True, policy_id=INTERACTION_POLICY['policy_id'],
+                           summary=f"{self._place_label(support)}에 있는 {target['label']}을 {self._place_label(destination)}에 옮깁니다.",
+                           scope='one_complete_object_transfer'),
                        target=target, destination=destination, mode='simulation', executable=False,
                        physical_task_completed=False, hardware_commands=0,
                        note='합성 기능 결과로 기존 작업 실행기의 흐름을 검사합니다. 실물 IK·접촉 성공 검증이 아닙니다.')
         self.store.save_record('preview', request_id, preview)
         return preview
 
+    def _place_label(self, entity):
+        room = self.store.get(entity['room_id']) if entity.get('room_id') else None
+        return (room['label']+' ' if room else '') + entity['label']
+
     def envelope(self, request_id, preview_id):
+        if self.household:
+            raise InvalidTask('physical_execution_not_commissioned')
         value = self.get(request_id)
         if value['status'] in {'INTERRUPTED', 'CANCELLED'}:
             raise InvalidTask('request_finalized_new_request_required')

@@ -105,7 +105,7 @@ class MobileStatus:
             and self.session == owned_session
             and self.state in (1, 2)
             and self.reason == 0
-            and self.flags & 23 == 23
+            and self.flags & (19 if self.flags & 32 else 23) == (19 if self.flags & 32 else 23)
             and self.feedback_is_fresh(max_age_ms)
         )
 
@@ -132,7 +132,7 @@ class MobileStatus:
             stamp,
             *tail,
         ) = values
-        if not boot or state > 3 or reason > 4 or flags & ~31:
+        if not boot or state > 3 or reason > 4 or flags & ~63:
             raise ValueError("unsupported status fields")
         if kind not in tuple(range(1, 7)) + tuple(v | 0x80 for v in range(1, 7)):
             raise ValueError("unsupported reply kind")

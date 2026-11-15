@@ -52,6 +52,6 @@ def writer(tmp_path_factory):
     return binary
 
 
-@pytest.mark.parametrize("scenario", range(14))
+@pytest.mark.parametrize("scenario", range(17))
 def test_mobile_board_writer(writer, scenario):
     subprocess.run([str(writer), str(scenario)], check=True)

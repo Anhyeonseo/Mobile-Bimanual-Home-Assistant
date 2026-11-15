@@ -54,6 +54,36 @@ def test_map_pose_uses_encoder_motion_between_corrections_and_refuses_sparse_or_
         with pytest.raises(ValueError):p.at(stamp)
 
 
+def test_final_graph_keyframes_use_dense_lidar_during_stationary_recovery():
+    odom=np.array([[t,0.,0.,0.] for t in np.arange(1.,21.,.2)])
+    saved=[dict(stamp=11.,xy_yaw=[2.,3.,0.]),dict(stamp=29.,xy_yaw=[2.01,3.,0.])]
+    final=RecordedMapPoses(odom,saved,10.,final_graph=True)
+    matrix,gap=final.at(10.)
+    assert gap==18 and 2.<matrix[0,2]<2.01
+    with pytest.raises(ValueError):RecordedMapPoses(odom,saved,10.).at(10.)
+    sparse=odom[(odom[:,0]<5)|(odom[:,0]>15)]
+    with pytest.raises(ValueError):RecordedMapPoses(sparse,saved,10.,final_graph=True).at(10.)
+
+
+def test_final_graph_rotation_is_checked_at_robot_not_arbitrary_odom_origin():
+    odom=np.array([[t,10.,0.,0.] for t in np.arange(1.,21.,.2)])
+    saved=[dict(stamp=11.,xy_yaw=[10.,0.,0.]),dict(stamp=29.,xy_yaw=[10.,0.,.08])]
+    matrix,gap=RecordedMapPoses(odom,saved,10.,final_graph=True).at(10.)
+    assert gap==18 and np.linalg.norm(matrix[:2,2]-[10.,0.])<.02
+    saved[-1]['xy_yaw']=[10.7,0.,0.]
+    with pytest.raises(ValueError):RecordedMapPoses(odom,saved,10.,final_graph=True).at(10.)
+
+
+def test_view_selection_covers_each_recording_before_extra_viewpoints():
+    from home_robot_tasks.recorded_semantics import choose_recorded_views
+    class Poses:
+        def at(self,t):
+            p=np.eye(3);p[0,2]=t;return p,0.
+    rows=[dict(source_epoch=k,color_time_s=float(i)) for i,k in enumerate(['a']*30+['b']*2+['c']*30)]
+    chosen=choose_recorded_views(rows,Poses(),6)
+    assert len(chosen)==6 and {r['source_epoch'] for r in chosen}=={'a','b','c'}
+
+
 def test_coarse_household_names_keep_unrelated_composites_unresolved():
     from home_robot_tasks.semantic_mapping import furniture_category
     from home_robot_tasks.assistant.furniture import FURNITURE_PROMPT

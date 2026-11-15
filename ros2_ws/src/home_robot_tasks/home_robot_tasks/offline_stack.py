@@ -214,7 +214,15 @@ class OfflineStack:
 
     def run(self,request,*,cancel_step=None,fault=None):
         self.runtime.submit(request)
-        task=self.runtime.app.tasks[request['request_id']]
+        return self.run_submitted(request['request_id'], cancel_step=cancel_step, fault=fault)
+
+    def run_submitted(self, request_id, *, cancel_step=None, fault=None, on_tick=None):
+        """Finish a job admitted by the normal gateway without submitting it twice.
+
+        The optional observer receives actual executor results. It must not tick
+        the application a second time; sensor/maintenance time belongs to tick().
+        """
+        task=self.runtime.app.tasks[request_id]
         injected=False
         for _ in range(6200):
             if not injected and task.state=='RUNNING':
@@ -228,6 +236,7 @@ class OfflineStack:
             try:self.tick()
             except ValueError as error:
                 self.runtime.fault=str(error);self.runtime.tick()
+            if on_tick is not None:on_tick(self.runtime.app.status(request_id))
             if task.state in task.TERMINAL or task.state=='STOP_UNCONFIRMED':break
         manipulation = self.assembly.manipulation
         stages = [h for goal in manipulation.sequence.entries for h in manipulation.history(goal)]

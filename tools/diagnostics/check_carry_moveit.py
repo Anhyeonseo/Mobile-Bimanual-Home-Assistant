@@ -36,6 +36,7 @@ def main():
     parser.add_argument('--mobile-mesh-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, default=ROOT/'output/home-assistant/s3/carry-moveit')
     parser.add_argument('--include-place', action='store_true', help='also plan payload lowering, release sweep and retreat')
+    parser.add_argument('--compile-task-programs', action='store_true', help='compile and verify the new shared-runtime pick/place stage programs')
     args = parser.parse_args()
     from moveit_msgs.msg import RobotState, CollisionObject
     from moveit_msgs.srv import GetPositionFK, GetStateValidity, ApplyPlanningScene
@@ -137,6 +138,66 @@ def main():
                 if place.status != 'OFFLINE_ROUTE_FOUND':
                     raise RuntimeError('place route failed: '+str(place.failures))
                 report['checks'].append('place_lower_release_retreat_full_mesh_checked')
+                if args.compile_task_programs:
+                    from home_robot_tasks.assistant.alignment_contracts import TaskScene
+                    from home_robot_tasks.assistant.contracts import Context, Stamp
+                    from home_robot_tasks.task_route_program import compile_task_route
+                    from home_robot_tasks.carry_program import _control
+                    from home_robot_tasks.carry_trajectory import MotionBounds
+                    ranges=read('arm_ranges.development.json')
+                    minimum=[];maximum=[]
+                    for side in ('left','right'):
+                        for name in geo.JOINTS:
+                            minimum.append(ranges['arms'][side][name]['minimum_urad']/1e6)
+                            maximum.append(ranges['arms'][side][name]['maximum_urad']/1e6)
+                    bounds=MotionBounds(tuple(minimum),tuple(maximum),(.3,)*12,(.6,)*12,(3.,)*12)
+                    anchor=np.array([_control(profile,side,name,profile['arms'][side]['reference_model_rad'][name])
+                                     for side in ('left','right') for name in geo.JOINTS])
+                    context=Context('fixture-map','v1',profile['calibration_id'],'fixture-clock')
+                    observed=TaskScene('fixture-object','fixture-table',Stamp(1.,context,'fixture-capture'),
+                        'fixture-scene','fixture-model','fixture-pose',(0.,0.,0.),0.,
+                        np.tile(world-[0,0,profile['ground_z_m']],(3,1)),top-profile['ground_z_m'],{'fixture':'a'*64})
+                    open_control=_control(profile,'left','gripper',held.open_jaw_model_rad)
+                    close_control=_control(profile,'left','gripper',held.held_jaw_model_rad)
+                    pick_program=compile_task_route('pick',successful,scene=observed,arm=arm,anchor_control_rad=anchor,
+                        bounds=bounds,open_control=open_control,close_control=close_control,
+                        contact_control_interval=(close_control,close_control))
+                    place_program=compile_task_route('place',place,scene=observed,arm=arm,
+                        anchor_control_rad=pick_program.stages[-1].points[-1].positions_rad,bounds=bounds,
+                        open_control=open_control,close_control=close_control,contact_control_interval=(close_control,close_control))
+                    report['task_programs']=[]
+                    # Remove the support while validating the pick; it was added
+                    # after the synthetic pick so would otherwise be a new obstacle.
+                    support.operation=CollisionObject.REMOVE
+                    scene.scene.world.collision_objects=[support]
+                    if not call('apply_planning_scene',scene).success:raise RuntimeError('task-program support cleanup failed')
+                    from home_robot_tasks.assistant.alignment_contracts import HeldObject
+                    from home_robot_tasks.mobile_route_planning import CaptureRouteInput
+                    from home_robot_tasks.loaded_carry_planning import LoadedSnapshot, plan_measured_carry
+                    measured_attachment=successful.resolved_grasp.tcp_from_object.copy()
+                    measured_attachment[0,3]+=.008  # measured shift must trigger a newly checked tail
+                    measured=HeldObject('fixture-object',successful.resolved_grasp.candidate_id,context,'fixture-model',1.,
+                        measured_attachment,held.object_size_m,.001)
+                    data=CaptureRouteInput(arm,backend,bounds,pick_program.stages[4].points[-1].positions_rad,None,
+                        {},{},held=measured,held_candidate=successful.resolved_grasp,open_control=open_control,
+                        hold_control=close_control,contact_control_interval=(close_control,close_control))
+                    loaded_program=plan_measured_carry(LoadedSnapshot(data,observed,measured,'fixture-epoch',1.))
+                    for program in (pick_program,loaded_program,place_program):
+                        if program.operation=='place':
+                            support.operation=CollisionObject.ADD;scene.scene.world.collision_objects=[support]
+                            if not call('apply_planning_scene',scene).success:raise RuntimeError('task-program support restore failed')
+                        candidate_for_check=program.resolved_grasp
+                        total=0
+                        for stage in program.stages:
+                            backend.prepare(candidate_for_check,stage.attached)
+                            for point in stage.points:
+                                q=np.array([geo.model_from_control(float(point.positions_rad[i]),profile['arms']['left']['alignment'][n])
+                                            for i,n in enumerate(geo.JOINTS)])
+                                backend.valid(q[:5],candidate_for_check,stage.attached,jaw=q[5]);total+=1
+                        report['task_programs'].append(dict(operation=program.operation,stages=[s.name for s in program.stages],
+                            checked_wire_points=total,physical_task_completed=False))
+                    report['checks'].append('new_pick_and_place_programs_retimed_and_full_mesh_rechecked')
+
                 support.operation=CollisionObject.REMOVE
                 scene.scene.world.collision_objects=[support]
                 if not call('apply_planning_scene',scene).success: raise RuntimeError('support cleanup failed')
@@ -176,6 +237,8 @@ def main():
             report['passed']=all(p['status']=='OFFLINE_ROUTE_FOUND' for p in report['routes'])
     except Exception as exc:
         report['passed']=False; report['error']=str(exc)
+        import traceback
+        report['error_traceback']=traceback.format_exc()
     (args.output/'report.json').write_text(json.dumps(report,default=serial,indent=2)+'\n')
     print(json.dumps({k:v for k,v in report.items() if k not in ('routes','place_route')},default=serial))
     for route in report['routes']:

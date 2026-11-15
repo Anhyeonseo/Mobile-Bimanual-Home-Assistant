@@ -81,6 +81,12 @@ def review_moving(capture, slam, trajectory_review, output):
     if output.exists():raise ValueError('new output directory required')
     sr=json.loads((slam/'report.json').read_text())
     if sr.get('passed') is not True:raise ValueError('completed SLAM checkpoint replay required')
+    capture_report=json.loads((capture/'report.json').read_text())
+    if capture_report.get('mode')=='offline_lidar_rgbd_attachment':
+        from home_robot_tasks.recorded_campaign import verify_rgbd_attachment
+        verify_rgbd_attachment(capture,sr,trajectory_review)
+    prior_basis=sr.get('trajectory_prior',sr.get('encoder',{}).get('source','nominal_wheel_encoder'))
+    prior_label='Lidar prior' if prior_basis.startswith('lidar_') else 'Wheel prior'
     saved=json.loads((slam/'occupancy.json').read_text());poses=json.loads((slam/'slam-poses.json').read_text())
     clock=sr['replay_clock_offset_s']
     rows=np.array([[p['stamp']-clock,*p['xy_yaw']] for p in poses]);rows[:,3]=np.unwrap(rows[:,3])
@@ -119,6 +125,7 @@ def review_moving(capture, slam, trajectory_review, output):
     voxels=[];covered=0
     for line in (capture/'rgbd/frames.jsonl').read_text().splitlines():
         frame=json.loads(line);t=frame['depth_time_s']
+        if frame.get('pose_covered') is False:continue
         if not rows[0,0]<=t<=rows[-1,0]:continue
         path=(capture/'rgbd'/frame['file']).resolve()
         if not path.is_relative_to((capture/'rgbd').resolve()):raise ValueError('invalid archive path')
@@ -145,9 +152,18 @@ def review_moving(capture, slam, trajectory_review, output):
         depth_preview_frames=covered,preview_voxels=len(cells),above_lidar_voxels=len(above),
         lidar_free_cells_with_upper_depth_endpoints=len(free_cells),
         limitations=['map fit is internal consistency, not an independent surveyed distance',
-          'map-to-odom corrections interpolated between online SLAM poses; not a final optimized graph trajectory',
+          ('final optimized graph corrections interpolated with recorded motion' if sr.get('final_graph_poses') else
+           'map-to-odom corrections interpolated between online SLAM poses; not a final optimized graph trajectory'),
           '8-pixel stride is for preview only; original full-resolution native depth retained',
           'upper endpoints are review candidates; no free space, obstacle clearing or semantic labels inferred'])
+    result['trajectory_prior_basis']=prior_basis
+    if prior_basis.startswith('lidar_'):
+        for old,new in [('nominal_path_length_m','lidar_prior_path_length_m'),
+                ('nominal_endpoint_displacement_m','lidar_prior_endpoint_displacement_m'),
+                ('compared_encoder_pose','compared_lidar_prior_pose'),
+                ('scan_vs_encoder_final_translation_difference_m','slam_vs_lidar_prior_final_translation_difference_m'),
+                ('scan_vs_encoder_final_heading_difference_deg','slam_vs_lidar_prior_final_heading_difference_deg'),
+                ('nominal_endpoint_to_map','lidar_prior_endpoint_to_map')]:result[new]=result.pop(old)
     output.mkdir(parents=True);(output/'report.json').write_text(json.dumps(result,indent=2)+'\n');np.savez_compressed(output/'preview.npz',depth_voxels=cells,slam_poses=rows,wheel_poses=wheel)
     import matplotlib
     matplotlib.use('Agg')
@@ -158,12 +174,197 @@ def review_moving(capture, slam, trajectory_review, output):
     for ax in axes[:2]:ax.imshow(display,origin='lower',extent=extent,cmap=ListedColormap(['#aeb8c2','#fafafa','#17222c']),vmin=0,vmax=2);ax.set(xlabel='X (m)',ylabel='Y (m)',aspect='equal')
     axes[0].plot(rows[:,1],rows[:,2],c='#008a76',label='SLAM pose');axes[0].set_title('Recorded lidar map / 5 cm cells');axes[0].legend()
     axes[1].scatter(above[:,0],above[:,1],s=.6,c='#cf711f',alpha=.35);axes[1].set_title('Upper depth endpoints / preview only')
-    t=rows[:,0]-rows[0,0];axes[2].plot(t,np.rad2deg(wheel[:,2]),label='Wheel yaw');axes[2].plot(t,np.rad2deg(rows[:,3]),label='SLAM yaw');axes[2].set(xlabel='Time (s)',ylabel='Yaw (degrees)',title='Rotation consistency');axes[2].grid(alpha=.2);axes[2].legend()
+    t=rows[:,0]-rows[0,0];axes[2].plot(t,np.rad2deg(wheel[:,2]),label=prior_label+' yaw');axes[2].plot(t,np.rad2deg(rows[:,3]),label='SLAM yaw');axes[2].set(xlabel='Time (s)',ylabel='Yaw (degrees)',title='Rotation consistency');axes[2].grid(alpha=.2);axes[2].legend()
     fig.suptitle('Recorded-data review — no autonomous navigation approval');fig.tight_layout();fig.savefig(output/'map-review.png',dpi=160);plt.close(fig)
     return result
 
 
-def travel_geometry(root, hold_plan, *, lift_m, mobile_mesh_dir, d415_mesh, lds_mesh, include_surfaces=False):
+def review_lidar(capture, slam, output):
+    """Lidar-only map rendering and source accounting, without opening RGB-D."""
+    from home_robot_tasks.recorded_campaign import load_prepared, digest, mask_body_shadow
+    from home_robot_tasks.s4_recorded_mapping import localization_map_review, transform, interpolate, pose, scan_points
+    capture, slam, output = map(Path,(capture,slam,output))
+    odom, scans, prepared = load_prepared(capture)
+    sr = json.loads((slam/'report.json').read_text())
+    if not (prepared.get('lidar_only') and sr.get('lidar_only') and sr.get('passed') and sr.get('final_graph_poses')):
+        raise ValueError('verified lidar-only map with final graph poses required')
+    if output.exists():raise ValueError('new review directory required')
+    for path, expected in prepared['source_sha256'].items():
+        if digest(path) != expected:raise ValueError('raw source or calibration changed: '+path)
+    grid = json.loads((slam/'occupancy.json').read_text())
+    poses = json.loads((slam/'slam-poses.json').read_text())
+    md = json.loads((ROOT/'config/home_assistant/lidar_mount.review.json').read_text())
+    mount = transform([*md['base_from_lidar_translation_m'][:2],md['yaw_rad']])
+    coverage = []
+    for source in prepared['sources']:
+        segment = source['segment']
+        source_path = next(Path(p) for p in prepared['source_sha256'] if p.endswith(segment+'/capture/scans.json'))
+        raw = json.loads(source_path.read_text())
+        used = [s for s in scans if s['source_segment']==segment]
+        identical = len(raw)==len(used) and all(
+            s['source_observed_s']==r['observed_s'] and s['ranges']==mask_body_shadow(r,prepared['visibility'])[0]['ranges']
+            for r,s in zip(raw,used))
+        if not identical:raise ValueError('unaccounted scan or unmasked range modification: '+segment)
+        coverage.append(dict(segment=segment,raw_scans=len(raw),used_scans=len(used),
+            visible_ranges_identical=True,source_sha256=digest(source_path)))
+    metrics = localization_map_review(poses,sr['replay_clock_offset_s'],scans,odom,mount,grid)
+    result = dict(mode='offline_lidar_only_map_review',lidar_only=True,semantic_used=False,rgbd_used=False,
+        wheel_feedback_used=False,source_coverage=coverage,all_recorded_scans_retained=True,
+        input_scans=len(scans),graph_keyframes=len(poses),visibility=prepared['visibility'],
+        graph_reload_identical=sr['map_cells_identical_after_restart'],
+        map_directory=str(slam.resolve()),prepared_directory=str(capture.resolve()),
+        quality=metrics,physical_accuracy_verified=False,navigation_authorized=False,
+        limitations=['Map fit uses the same observations, not surveyed ground truth.',
+            'All scans are retained as inputs; SLAM spatial keyframes are a smaller set.',
+            'Unknown cells are not free space. Body-occluded rays contribute neither hits nor free rays.'])
+    output.mkdir(parents=True)
+    (output/'report.json').write_text(json.dumps(result,indent=2)+'\n')
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    cells=np.asarray(grid['data']).reshape(grid['height'],grid['width'])
+    origin=np.asarray(grid['origin']);res=grid['resolution']
+    extent=[origin[0],origin[0]+grid['width']*res,origin[1],origin[1]+grid['height']*res]
+    display=np.where(cells<0,0,np.where(cells>=65,2,1))
+    cmap=ListedColormap(['#c6ccd2','#ffffff','#17212b'])
+    def background(ax):
+        ax.imshow(display,origin='lower',extent=extent,cmap=cmap,vmin=0,vmax=2,interpolation='nearest')
+        ax.set(xlabel='X (m)',ylabel='Y (m)',aspect='equal')
+    fig,ax=plt.subplots(figsize=(10,9));background(ax)
+    ax.set_title('Lidar-only 2D map | all 9 recording chunks | 5 cm cells',pad=14)
+    fig.text(.5,.025,'Black: observed obstacle   White: observed free   Gray: unknown',ha='center')
+    fig.tight_layout(rect=[0,.04,1,1]);fig.savefig(output/'lidar-map.png',dpi=180);plt.close(fig)
+    rows=np.array([[p['stamp']-sr['replay_clock_offset_s'],*p['xy_yaw']]for p in poses]);rows[:,3]=np.unwrap(rows[:,3])
+    prior=interpolate(odom,rows[:,0])
+    corrections=np.array([[r[0],*pose(transform(r[1:])@np.linalg.inv(transform(p)))]for r,p in zip(rows,prior)])
+    corrections[:,3]=np.unwrap(corrections[:,3])
+    fig,axes=plt.subplots(3,3,figsize=(15,14))
+    for ax,source in zip(axes.flat,prepared['sources']):
+        background(ax)
+        selected=[s for s in scans if s['source_segment']==source['segment'] and rows[0,0]<=s['observed_s']<=rows[-1,0]]
+        points=[]
+        for s in selected[::max(1,len(selected)//100)]:
+            t=s['observed_s'];T=transform(interpolate(corrections,[t])[0])@transform(interpolate(odom,[t])[0])
+            p=scan_points(s,mount,odom);points.append(p@T[:2,:2].T+T[:2,2])
+        if points:
+            p=np.concatenate(points);ax.scatter(p[:,0],p[:,1],s=.2,c='#d45e16',alpha=.35)
+        ax.set_title(source['segment'].rsplit('-',1)[-1]+f" | {source['scans']} scans")
+    fig.tight_layout();fig.savefig(output/'chunk-alignment.png',dpi=150);plt.close(fig)
+    return {k:result[k] for k in ('input_scans','graph_keyframes','all_recorded_scans_retained','graph_reload_identical')} | dict(scan_to_map=metrics['all_scan_to_map'])
+
+
+def review_fused_layers(slam, depth, body, semantic, output):
+    """Export inspectable layers on one immutable map lattice, not a live costmap."""
+    from scipy.ndimage import binary_dilation, label
+    slam,depth,body,semantic,output=map(Path,(slam,depth,body,semantic,output))
+    if output.exists():raise ValueError('new fused review required')
+    sm=json.loads((slam/'report.json').read_text());dr=json.loads((depth/'report.json').read_text())
+    br=json.loads((body/'report.json').read_text());sr=json.loads((semantic/'report.json').read_text())
+    occupancy=json.loads((slam/'occupancy.json').read_text())
+    if not sm.get('passed') or not sm.get('final_graph_poses'):raise ValueError('verified final map required')
+    if sr['map_sha256']!=hashlib.sha256((slam/'occupancy.json').read_bytes()).hexdigest():raise ValueError('semantic map mismatch')
+    for p in (slam/'occupancy.json',slam/'report.json',slam/'slam-poses.json',depth/'preview.npz',depth/'report.json'):
+        if br['source_sha256'].get(str(p))!=hashlib.sha256(p.read_bytes()).hexdigest():raise ValueError('body/depth map mismatch')
+    grid=np.asarray(occupancy['data']).reshape(occupancy['height'],occupancy['width'])
+    resolution=occupancy['resolution'];origin=np.asarray(occupancy['origin'])
+    with np.load(body/'candidate-layers.npz',allow_pickle=False) as data:
+        upper=data['upper_hits'].copy();forbidden=data['body_forbidden'].copy()
+    with np.load(depth/'preview.npz',allow_pickle=False) as data:voxels=data['depth_voxels'].copy()
+    if upper.shape!=grid.shape or forbidden.shape!=grid.shape:raise ValueError('fusion lattice mismatch')
+    # Coarse display families avoid presenting dozens of partial-view fragments
+    # as independent named objects. Raw instances and exact model labels remain.
+    families={'bed':'bed','sofa':'sofa','table':'table','nightstand':'table','chair':'chair',
+        'refrigerator':'storage_review','cabinet':'storage_review','wardrobe':'storage_review',
+        'bookshelf':'storage_review','unclassified_furniture':'storage_review'}
+    masks={name:np.zeros(grid.shape,dtype=bool) for name in sorted(set(families.values()))}
+    member_cells=[]
+    for item in sr['landmarks']:
+        family=families.get(item['category'])
+        if family is None:continue
+        xyz=(np.asarray(item['observed_voxels'])+.5)*item['voxel_size_m']
+        xy=np.floor((xyz[:,:2]-origin)/resolution).astype(int)
+        xy=xy[(xy[:,0]>=0)&(xy[:,0]<grid.shape[1])&(xy[:,1]>=0)&(xy[:,1]<grid.shape[0])]
+        masks[family][xy[:,1],xy[:,0]]=True
+        member_cells.append((item,family,xy))
+    regions=[]
+    for family,mask in masks.items():
+        # Dilation groups annotations only; never changes geometry or free cells.
+        expanded=binary_dilation(mask,iterations=2)
+        labels,n=label(expanded,structure=np.ones((3,3),dtype=int))
+        for component in range(1,n+1):
+            cells=mask&(labels==component);yy,xx=np.nonzero(cells)
+            if not len(xx):continue
+            members=[item for item,f,xy in member_cells if f==family and len(xy) and np.any(labels[xy[:,1],xy[:,0]]==component)]
+            center=origin+(np.array([np.median(xx),np.median(yy)])+.5)*resolution
+            regions.append(dict(id=f'{family}-{component}',family=family,center_xy_m=center.tolist(),
+                observed_xy_cells=int(len(xx)),observed_area_m2=float(len(xx)*resolution**2),
+                member_landmark_ids=[m['landmark_id']for m in members],
+                model_labels=sorted({m['category']for m in members}),
+                maximum_member_viewpoint_groups=max(m['viewpoint_groups']for m in members),
+                object_count_claimed=False,identity_confirmed=False))
+    output.mkdir(parents=True)
+    np.savez_compressed(output/'layers.npz',lidar_occupancy=grid,rgbd_upper_surfaces=upper,
+        body_clearance_candidate=forbidden,depth_voxels=voxels,origin_xy_m=origin,resolution_m=resolution,
+        **{'semantic_'+k:v for k,v in masks.items()})
+    (output/'furniture-regions.json').write_text(json.dumps(regions,ensure_ascii=False,indent=2)+'\n')
+    result=dict(mode='offline_lidar_rgbd_semantic_fusion',source_map_changed=False,
+        source_map_sha256=sr['map_sha256'],depth_frames=dr['depth_preview_frames'],
+        semantic_views=len(sr['frames']),semantic_raw_instances=len(sr['instances']),
+        semantic_viewpoint_supported_instances=sum(x['viewpoint_groups']>=2 for x in sr['view_support']),
+        recording_chunks=len({f['capture']['source_epoch'] for f in sr['frames']}),
+        height_interval_m=br['vertical_interval_m'],rgbd_added_on_planar_free_cells=int((upper&(grid==0)).sum()),
+        robot_height_m=br['geometry']['height_above_floor_m'],robot_width_depth_m=br['geometry']['dimensions_xyz_m'][:2],
+        region_policy='Connected coarse display families only; dilated annotations are not obstacle geometry or object count.',
+        semantics_clears_obstacles=False,full_height_free_space_certified=False,self_geometry_removed=False,
+        navigation_authorized=False,deployed_to_jetson=False,
+        limitations=['White is lidar-plane free space, not verified full-height passage.',
+            'Depth endpoints add observed shapes; they do not certify unseen space as free.',
+            'Furniture labels are model estimates; refrigerator/storage distinctions remain under review.',
+            'Body clearance uses original STL at the recorded final yaw, not a rotation sweep.'],
+        source_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest()for p in
+            (slam/'occupancy.json',slam/'report.json',depth/'preview.npz',depth/'report.json',body/'candidate-layers.npz',body/'report.json',semantic/'report.json')})
+    (output/'report.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    from matplotlib.patches import Patch
+    from matplotlib import font_manager
+    font=next((f.name for f in font_manager.fontManager.ttflist if f.name.startswith('Noto Sans CJK')),None)
+    if font:plt.rcParams['font.family']=font
+    plt.rcParams['axes.unicode_minus']=False
+    names={'bed':'침대','sofa':'소파','table':'탁자·책상','chair':'의자','storage_review':'수납·기타 가구*'}
+    colors={'bed':'#8468c2','sofa':'#368cbe','table':'#219b7b','chair':'#c66a75','storage_review':'#bd933e'}
+    extent=[origin[0],origin[0]+grid.shape[1]*resolution,origin[1],origin[1]+grid.shape[0]*resolution]
+    display=np.where(grid<0,0,np.where(grid>=65,2,1))
+    fig,axes=plt.subplots(1,2,figsize=(13,10))
+    for ax in axes:
+        ax.imshow(display,origin='lower',extent=extent,cmap=ListedColormap(['#c5cbd0','#fff','#26323a']),vmin=0,vmax=2,interpolation='nearest')
+        ax.set(xlabel='X (m)',ylabel='Y (m)',aspect='equal')
+    axes[0].imshow(np.ma.masked_where(~upper,upper),origin='lower',extent=extent,cmap=ListedColormap(['#e79b50']),interpolation='nearest',alpha=.9)
+    axes[0].set_title('라이다 + RGB-D 형상',fontsize=15,pad=12)
+    axes[1].imshow(np.ma.masked_where(~upper,upper),origin='lower',extent=extent,cmap=ListedColormap(['#e6d7bf']),interpolation='nearest',alpha=.6)
+    for family,mask in masks.items():
+        axes[1].imshow(np.ma.masked_where(~mask,mask),origin='lower',extent=extent,cmap=ListedColormap([colors[family]]),interpolation='nearest',alpha=.85)
+    shown=[]
+    for region in sorted(regions,key=lambda r:(r['maximum_member_viewpoint_groups'],r['observed_xy_cells']),reverse=True):
+        if region['observed_xy_cells']<24:continue
+        center=np.array(region['center_xy_m'])
+        if any(np.linalg.norm(center-p)<.5 for p in shown):continue
+        shown.append(center)
+        axes[1].annotate(names[region['family']],center,ha='center',fontsize=8.5,
+            bbox=dict(boxstyle='round,pad=.25',facecolor='white',edgecolor=colors[region['family']],alpha=.94))
+        if len(shown)>=16:break
+    axes[1].set_title('주요 가구 시멘틱 관측',fontsize=15,pad=12)
+    fig.legend(handles=[Patch(color='#e79b50',label='RGB-D 상부 형상')]+[Patch(color=colors[k],label=names[k])for k in names],loc='lower center',ncol=3,bbox_to_anchor=(.5,.045))
+    fig.suptitle(f"새 라이다 지도 기준 · RGB-D {result['depth_frames']:,}장 합성 · 주요 가구 {result['semantic_views']}개 시점 인식",fontsize=14)
+    fig.text(.5,.012,'회색: 미관측  |  흰색: 라이다 기준 빈 공간  |  * 냉장고·수납장 등 이름 불일치 포함 · 실물 주행 판정 전',ha='center',fontsize=9)
+    fig.tight_layout(rect=[0,.13,1,.94]);fig.savefig(output/'fused-map.png',dpi=170);plt.close(fig)
+    return result
+
+
+def travel_geometry(root, hold_plan, *, lift_m, mobile_mesh_dir, d415_mesh, lds_mesh, include_surfaces=False, exclude_arms=False):
     """Original STL bounds at an observed posture; not an installed-body certificate."""
     from home_robot_tasks import s2_geometry as geom, s2_development as dev
     from home_robot_tasks.d415_geometry import nominal_model
@@ -208,9 +409,12 @@ def travel_geometry(root, hold_plan, *, lift_m, mobile_mesh_dir, d415_mesh, lds_
         raw_arms[side]={joint:positions[offset+i] for i,joint in enumerate(geom.JOINTS)}
         root_from_arm=np.array(profile['arms'][side]['base_from_arm_at_lift_zero'])
         root_from_arm[:3,3]+=displacement
-        frames=geom.arm_transforms(geometry,geom.model_angles(raw_arms[side],profile['arms'][side]['alignment']))
         name=side+'_base.STL'
         add(side+' mounting base',mobile_mesh_dir/name,platform@geom.origin(joints[side+'_base']),mounts['source_mesh_sha256'][name])
+        # Explicit offline scenario: operator intends to stow the arms. Fixed
+        # mounting structure stays; no claim is made about a measured stow pose.
+        if exclude_arms:continue
+        frames=geom.arm_transforms(geometry,geom.model_angles(raw_arms[side],profile['arms'][side]['alignment']))
         for visual in manifest['arm_visuals']:
             name=visual['mesh'];matrix=root_from_arm@frames[visual['link']]@np.array(visual['origin'])
             add(side+'/'+visual['link']+'/'+name,root/'ros2_ws/src/so101_description/meshes'/name,matrix,manifest['meshes'][name]['source_sha256'])
@@ -232,6 +436,13 @@ def travel_geometry(root, hold_plan, *, lift_m, mobile_mesh_dir, d415_mesh, lds_
         source_profile_sha256=geom.digest(profile),original_meshes_used=True,
         physical_body_verified=False,runtime_authorized=False,
         unmodelled=['external power cable','any support or accessory absent from official CAD','payload (empty grippers last confirmed)'])
+    result['arm_geometry_included']=not exclude_arms
+    if exclude_arms:
+        result.update(mode='original_STL_body_only_assumed_stowed_arms_review',
+            geometry_id='mini1-'+geom.digest(dict(profile=profile,lift=lift_m,exclude_arms=True))[:24],
+            arm_policy='operator-requested exclusion of articulated arms; fixed mounts retained',
+            folded_arm_envelope_verified=False)
+        result['unmodelled'].append('folded arm envelope intentionally excluded by operator request')
     # Display sample only: all dimensions above were calculated from full surfaces.
     sample=points[::max(1,len(points)//18000)]
     return (result,sample,surfaces) if include_surfaces else (result,sample)
@@ -287,7 +498,7 @@ def slab_footprints(surfaces, bottom, top):
     return polygons
 
 
-def footprint_kernel(polygons, resolution, yaw, clearance):
+def footprint_kernel(polygons, resolution, yaw, clearance, *, obstacle_size_m=None, lattice_offset_xy_m=(0.,0.)):
     """Obstacle cell -> robot centre offsets for one yaw (reflected footprint).
 
     Expand by the obstacle cell square and metric clearance, without rounding
@@ -296,7 +507,11 @@ def footprint_kernel(polygons, resolution, yaw, clearance):
     from scipy.spatial import ConvexHull
     if not np.isfinite([resolution,yaw,clearance]).all() or resolution<=0 or clearance<0:raise ValueError('invalid footprint parameters')
     rotation=np.array([[np.cos(yaw),-np.sin(yaw)],[np.sin(yaw),np.cos(yaw)]])
-    square=resolution/2*np.array([[-1,-1],[-1,1],[1,1],[1,-1]])
+    obstacle_size_m=resolution if obstacle_size_m is None else obstacle_size_m
+    offset=np.asarray(lattice_offset_xy_m,float)
+    if offset.shape!=(2,) or not np.isfinite(offset).all() or not np.isfinite(obstacle_size_m) or obstacle_size_m<=0:
+        raise ValueError('invalid obstacle size or lattice offset')
+    square=obstacle_size_m/2*np.array([[-1,-1],[-1,1],[1,1],[1,-1]])
     expanded=[]
     for poly in polygons:
         poly=np.asarray(poly,float)
@@ -305,10 +520,10 @@ def footprint_kernel(polygons, resolution, yaw, clearance):
         points=points.reshape(-1,2);hull=ConvexHull(points)
         expanded.append(points[hull.vertices])
     if not expanded:return np.zeros((1,1),bool)
-    extent=max(abs(np.vstack(expanded)).max()+clearance,resolution)
+    extent=max(abs(np.vstack(expanded)).max()+clearance+abs(offset).max(),resolution)
     steps=int(np.ceil(extent/resolution))
     if steps>200:raise ValueError('bounded footprint kernel required')
-    yy,xx=np.mgrid[-steps:steps+1,-steps:steps+1];points=np.column_stack((xx.ravel(),yy.ravel()))*resolution
+    yy,xx=np.mgrid[-steps:steps+1,-steps:steps+1];points=np.column_stack((xx.ravel(),yy.ravel()))*resolution+offset
     selected=np.zeros(len(points),bool)
     for poly in expanded:
         hull=ConvexHull(poly)
@@ -321,10 +536,41 @@ def footprint_kernel(polygons, resolution, yaw, clearance):
     return selected.reshape(xx.shape)
 
 
+def voxel_body_centres(voxels_xy, polygons, *, voxel_size, grid_shape, origin,
+                       resolution, yaw, clearance):
+    """Project voxel/body overlap directly onto robot-centre samples.
+
+    Rasterizing a voxel to intersecting map cells and then expanding those
+    cells pads the same evidence twice when the two grid origins differ.
+    Instead, retain its original square and account for the lattice phase.
+    """
+    cells=np.asarray(voxels_xy)
+    if cells.ndim!=2 or cells.shape[1]!=2 or not np.issubdtype(cells.dtype,np.integer):
+        raise ValueError('integer XY voxel cells required')
+    if not np.isclose(voxel_size,resolution,rtol=0,atol=1e-8):
+        raise ValueError('matching voxel and map resolution required')
+    result=np.zeros(grid_shape,bool)
+    if not len(cells) or not polygons:return result
+    centers=(cells+.5)*voxel_size
+    anchors=np.floor((centers-np.asarray(origin))/resolution).astype(int)
+    offsets=np.asarray(origin)+(anchors+.5)*resolution-centers
+    if np.max(abs(offsets-offsets[0]))>1e-6:
+        raise ValueError('nonuniform voxel lattice phase')
+    kernel=footprint_kernel(polygons,resolution,yaw,clearance,
+        obstacle_size_m=voxel_size,lattice_offset_xy_m=offsets[0])
+    yy,xx=np.nonzero(kernel);cy,cx=np.array(kernel.shape)//2
+    for dx,dy in zip(xx-cx,yy-cy):
+        target=anchors+[dx,dy]
+        valid=(target[:,0]>=0)&(target[:,0]<grid_shape[1])&(target[:,1]>=0)&(target[:,1]<grid_shape[0])
+        target=target[valid];result[target[:,1],target[:,0]]=True
+    return result
+
+
 def height_matched_candidates(occupied, voxels, surfaces, *, resolution, origin,
-                              voxel_size, lidar_top, height, yaw, clearance):
+                              voxel_size, lidar_top, height, yaw, clearance, navigation_footprint=None):
     from scipy.ndimage import binary_dilation
-    base_polys=slab_footprints(surfaces,0,lidar_top)
+    base_polys=([np.asarray(navigation_footprint,float)] if navigation_footprint is not None
+                else slab_footprints(surfaces,0,lidar_top))
     base_kernel=footprint_kernel(base_polys,resolution,yaw,clearance)
     result=binary_dilation(occupied,structure=base_kernel)
     bands=[]
@@ -333,18 +579,135 @@ def height_matched_candidates(occupied, voxels, surfaces, *, resolution, origin,
         if high<=lidar_top or low>=height+clearance:continue
         polygons=slab_footprints(surfaces,max(0,low-clearance),min(height,high+clearance))
         if not polygons:continue
-        observed,_=endpoint_obstacles(voxels[voxels[:,2]==z],voxel_size,occupied.shape,origin,resolution,bottom=max(lidar_top,low),top=high)
-        kernel=footprint_kernel(polygons,resolution,yaw,clearance)
-        result|=binary_dilation(observed,structure=kernel)
-        bands.append(dict(height_interval_m=[low,high],body_polygons=len(polygons),kernel_cells=int(kernel.sum())))
+        result|=voxel_body_centres(voxels[voxels[:,2]==z,:2],polygons,voxel_size=voxel_size,
+            grid_shape=occupied.shape,origin=origin,resolution=resolution,yaw=yaw,clearance=clearance)
+        bands.append(dict(height_interval_m=[low,high],body_polygons=len(polygons),
+                          rasterization='direct_original_voxel_to_body_centre'))
     return result,base_polys,bands
+
+
+def movement_area_review(output, depth_review, grid, origin, resolution, geometry, surfaces, poses,
+                         *, lidar_top, clearance, context_review=None, navigation_footprint=None):
+    """Orientation-aware robot-centre candidates from native ray evidence.
+
+    No route is carved from teleop history. It is evaluated afterwards as an
+    independent consistency check, and unresolved depth remains separate.
+    """
+    from scipy.ndimage import binary_dilation
+    report=json.loads((depth_review/'report.json').read_text())
+    if report.get('mode')!='offline_recorded_ray_evidence_review':
+        raise ValueError('movement area requires ray evidence, not endpoint union')
+    with np.load(depth_review/'ray-evidence.npz',allow_pickle=False) as a:
+        confirmed=a['voxels'][a['occupied']].copy()
+        uncertain=a['voxels'][a['uncertain']&(a['hit_frames']>0)].copy()
+    base_polys=([np.asarray(navigation_footprint,float)] if navigation_footprint is not None
+                else slab_footprints(surfaces,0,lidar_top))
+    height=geometry['height_above_floor_m']
+    bands=[]
+    for z in np.unique(np.r_[confirmed[:,2],uncertain[:,2]]):
+        low,high=z*.05,(z+1)*.05
+        if low>=height+clearance:continue
+        polygons=slab_footprints(surfaces,max(0,low-clearance),min(height,high+clearance))
+        if polygons:bands.append((polygons,confirmed[confirmed[:,2]==z,:2],uncertain[uncertain[:,2]==z,:2]))
+    feasible=[];review_free=[];lidar_feasible=[]
+    for degrees in range(0,360,5):
+        yaw=np.deg2rad(degrees)
+        kernel=footprint_kernel(base_polys,resolution,yaw,clearance)
+        base_blocked=binary_dilation(grid>=65,structure=kernel)
+        unknown=binary_dilation(grid<0,structure=kernel,border_value=1)
+        blocked=base_blocked.copy();disputed=np.zeros(grid.shape,bool)
+        for polygons,hits,maybe in bands:
+            blocked|=voxel_body_centres(hits,polygons,voxel_size=.05,grid_shape=grid.shape,
+                origin=origin,resolution=resolution,yaw=yaw,clearance=clearance)
+            disputed|=voxel_body_centres(maybe,polygons,voxel_size=.05,grid_shape=grid.shape,
+                origin=origin,resolution=resolution,yaw=yaw,clearance=clearance)
+        valid=(grid==0)&~blocked&~unknown
+        lidar_feasible.append((grid==0)&~base_blocked&~unknown)
+        feasible.append(valid);review_free.append(valid&~disputed)
+    feasible=np.array(feasible);review_free=np.array(review_free);lidar_feasible=np.array(lidar_feasible)
+    any_valid=feasible.any(0);candidate=review_free.any(0)
+    needs_review=any_valid&~candidate
+    xy=np.floor((poses[:,1:3]-origin)/resolution).astype(int)
+    bins=np.rint(np.rad2deg(poses[:,3])/5).astype(int)%72
+    path_pass=feasible[bins,xy[:,1],xy[:,0]]
+    path_clear=review_free[bins,xy[:,1],xy[:,0]]
+    ray_map,_=endpoint_obstacles(confirmed,.05,grid.shape,origin,resolution,bottom=.10,top=height+clearance)
+    stats=dict(mode='orientation_aware_lidar_rgbd_movement_candidates',
+        source_map_sha256=report['map_sha256'],ray_evidence_sha256=hashlib.sha256((depth_review/'ray-evidence.npz').read_bytes()).hexdigest(),
+        selected_depth_frames=report['selected_frames'],source_epochs=len(report['source_epochs']),
+        lidar_footprint_policy='complete_fixed_projection' if navigation_footprint is not None else 'lidar_height_slice',
+        navigation_footprint_xy_m=None if navigation_footprint is None else np.asarray(navigation_footprint).tolist(),
+        yaw_step_deg=5,clearance_m=clearance,articulated_arms_excluded=not geometry['arm_geometry_included'],
+        robot_height_m=height,fixed_body_dimensions_xyz_m=geometry['dimensions_xyz_m'],
+        rasterization='direct original voxel squares; no intermediate map-cell enlargement',
+        candidate_center_cells=int(candidate.sum()),uncertain_center_cells=int(needs_review.sum()),
+        candidate_center_area_m2=float(candidate.sum()*resolution**2),
+        free_some_orientation_cells=int(any_valid.sum()),free_all_sampled_orientations_cells=int(feasible.all(0).sum()),
+        recorded_pose_count=len(poses),recorded_pose_lidar_body_conflicts=int((~lidar_feasible[bins,xy[:,1],xy[:,0]]).sum()),
+        recorded_pose_rgbd_body_conflicts=int((~path_pass).sum()),recorded_pose_depth_uncertain=int((path_pass&~path_clear).sum()),
+        trajectory_used_to_clear_obstacles=False,source_geometry_modified=False,
+        connected_route_verified=False,continuous_rotation_sweep_verified=False,full_height_free_space_certified=False,
+        navigation_authorized=False,robot_commands=0,
+        limitations=['Green is a candidate at one or more sampled headings, not a certified connected route.',
+                    'Yellow has unresolved hit/clear depth evidence; it is not declared free.',
+                    'Historical sampled ray evidence retains calibration, registration and sampling uncertainty.'])
+    np.savez_compressed(output/'movement-area.npz',feasible_by_yaw=feasible,review_free_by_yaw=review_free,
+        candidate_centers=candidate,uncertain_centers=needs_review,rgbd_obstacles=ray_map,
+        origin_xy_m=origin,resolution_m=resolution,poses=poses,path_pass=path_pass,path_clear=path_clear,
+        source_map_sha256=report['map_sha256'],
+        **({} if navigation_footprint is None else dict(navigation_footprint_xy_m=np.asarray(navigation_footprint),clearance_m=clearance)))
+    (output/'movement-area-report.json').write_text(json.dumps(stats,ensure_ascii=False,indent=2)+'\n')
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    from matplotlib.patches import Patch
+    from matplotlib import font_manager
+    from matplotlib.lines import Line2D
+    font=next((f.name for f in font_manager.fontManager.ttflist if f.name.startswith('Noto Sans CJK')),None)
+    if font:plt.rcParams['font.family']=font
+    plt.rcParams['axes.unicode_minus']=False
+    fig,axes=plt.subplots(1,2,figsize=(13,10))
+    extent=[origin[0],origin[0]+grid.shape[1]*resolution,origin[1],origin[1]+grid.shape[0]*resolution]
+    display=np.where(grid<0,0,np.where(grid>=65,2,1))
+    axes[0].imshow(display,origin='lower',extent=extent,cmap=ListedColormap(['#dce2e7','#fff','#34434d']),vmin=0,vmax=2,interpolation='nearest')
+    axes[0].imshow(np.ma.masked_where(~ray_map,ray_map),origin='lower',extent=extent,cmap=ListedColormap(['#d88938']),alpha=.9,interpolation='nearest')
+    view=np.zeros(grid.shape,np.uint8);view[grid==0]=2;view[needs_review]=3;view[candidate]=4;view[grid>=65]=1
+    axes[1].imshow(view,origin='lower',extent=extent,cmap=ListedColormap(['#dce2e7','#34434d','#e8b8af','#efd17e','#53ad8b']),vmin=0,vmax=4,interpolation='nearest')
+    # Highlight contradictions, never erase an obstacle merely because a
+    # historical robot centre passed near it.
+    conflicting_xy=np.unique(xy[~path_pass],axis=0)
+    conflicting_centres=origin+(conflicting_xy+.5)*resolution
+    axes[1].scatter(conflicting_centres[:,0],conflicting_centres[:,1],s=12,
+                    facecolors='none',edgecolors='#235ab4',linewidths=.8,alpha=.85)
+    for ax in axes:ax.set(xlabel='X (m)',ylabel='Y (m)',aspect='equal')
+    axes[0].set_title('① 2D 지도 + RGB-D 장애물',fontsize=14)
+    axes[1].set_title('② 베이스·고정 구조 크기 반영',fontsize=14)
+    if context_review:
+        names=json.loads((context_review/'household-labels.json').read_text())
+        if names['source_map_sha256']!=report['map_sha256']:raise ValueError('names belong to a different map')
+        wanted={'home-coffee-table-01','home-bed-01','home-sofa-01','home-fridge-01','home-work-desk-01','home-vanity-01'}
+        for item in names['entities']:
+            if item['id'] not in wanted:continue
+            for ax in axes:ax.text(*item['observed_anchor_xyz_m'][:2],item['label'],fontsize=8,ha='center',
+                bbox=dict(boxstyle='round,pad=.2',fc='white',ec='#7b8992',alpha=.92))
+    fig.suptitle('RGB-D 상부 장애물과 차폭을 반영한 이동 후보',fontsize=18)
+    fig.legend(handles=[Patch(color='#d88938',label='RGB-D 장애물'),Patch(color='#53ad8b',label='중심 위치 후보'),
+        Patch(color='#efd17e',label='깊이 관측 확인 필요'),Patch(color='#e8b8af',label='물체·차폭 제한'),
+        Patch(color='#34434d',label='라이다 장애물'),Patch(color='#dce2e7',label='미관측'),
+        Line2D([],[],marker='o',mfc='none',mec='#235ab4',linestyle='none',label='주행 기록과 불일치 · 재확인')],loc='lower center',ncol=3,bbox_to_anchor=(.5,.055))
+    fig.text(.5,.018,'팔 제외 · 리프트 최하단 · 여유 3cm · 5° 간격 방향 검토\n초록: 가능한 방향이 있는 위치 후보 / 회전·연결 경로는 별도 검증',ha='center',fontsize=10)
+    fig.tight_layout(rect=[0,.14,1,.94]);fig.savefig(output/'movement-area.png',dpi=150);plt.close(fig)
+    return stats
 
 
 def review_traversability(args):
     from scipy.ndimage import binary_dilation
     import math
     geometry,body,surfaces=travel_geometry(ROOT,args.hold_plan,lift_m=args.lift_m,
-        mobile_mesh_dir=args.mobile_mesh_dir,d415_mesh=args.d415_mesh,lds_mesh=args.lds_mesh,include_surfaces=True)
+        mobile_mesh_dir=args.mobile_mesh_dir,d415_mesh=args.d415_mesh,lds_mesh=args.lds_mesh,
+        include_surfaces=True,exclude_arms=getattr(args,'exclude_arms',False))
+    navigation_footprint=geometry['footprint_xy_m'] if getattr(args,'fixed_body_projection',False) else None
     output=args.output
     if output.exists():raise ValueError('new review output required')
     occupancy=json.loads((args.slam_review/'occupancy.json').read_text())
@@ -359,7 +722,10 @@ def review_traversability(args):
     if poses.shape!=expected.shape or not np.allclose(poses,expected,atol=1e-8,rtol=0):
         raise ValueError('depth preview belongs to a different SLAM trajectory')
     depth_report=json.loads((args.depth_review/'report.json').read_text())
-    if depth_report.get('mode')!='offline_recorded_map_quality_preview':raise ValueError('recorded endpoint review required')
+    if depth_report.get('mode') not in ('offline_recorded_map_quality_preview','offline_recorded_ray_evidence_review'):
+        raise ValueError('recorded depth review required')
+    if depth_report.get('mode')=='offline_recorded_ray_evidence_review' and depth_report['map_sha256']!=hashlib.sha256((args.slam_review/'occupancy.json').read_bytes()).hexdigest():
+        raise ValueError('ray evidence belongs to a different map')
     # This comparison intentionally uses only heights above the lidar plane.
     # Floor/self-body points remain unresolved; do not turn endpoint absence into free space.
     lidar=json.loads((ROOT/'config/home_assistant/lidar_mount.review.json').read_text())
@@ -374,7 +740,7 @@ def review_traversability(args):
     yaw=float(poses[-1,3])
     forbidden,base_polys,bands=height_matched_candidates(occupied,voxels,surfaces,
         resolution=resolution,origin=origin,voxel_size=.05,lidar_top=bottom,
-        height=geometry['height_above_floor_m'],yaw=yaw,clearance=args.clearance_m)
+        height=geometry['height_above_floor_m'],yaw=yaw,clearance=args.clearance_m,navigation_footprint=navigation_footprint)
     extra=(grid==0)&upper
     report=dict(mode='recorded_body_clearance_candidate_review',geometry=geometry,
         candidate_clearance_m=args.clearance_m,vertical_interval_m=[bottom,top],
@@ -389,7 +755,8 @@ def review_traversability(args):
         rotation_sweep_verified=False,
         free_space_certified=False,self_geometry_removed=False,depth_motion_qualified=False,
         runtime_authorized=False,motor_commands=0,live_map_modified=False,
-        current_posture_applied_to_recorded_environment=True,
+        current_posture_applied_to_recorded_environment=not getattr(args,'exclude_arms',False),
+        articulated_arms_excluded=getattr(args,'exclude_arms',False),
         limitations=['Recorded endpoint preview, not a full-height ray-cleared traversability map.',
             'Current observed joint posture does not certify the pose at every historical depth exposure.',
             'Self returns and unsupported accessories remain unresolved; no obstacle clearing performed.',
@@ -398,6 +765,8 @@ def review_traversability(args):
             'Clearance is an explicit review setting, not measured braking or installation uncertainty.'],
         source_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in
             [args.slam_review/'occupancy.json',args.slam_review/'report.json',args.slam_review/'slam-poses.json',args.depth_review/'preview.npz',args.depth_review/'report.json']})
+    if getattr(args,'exclude_arms',False):
+        report['limitations'][1]='Articulated arm geometry excluded by operator request; physical folded envelope not verified.'
     output.mkdir(parents=True);(output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
     np.savez_compressed(output/'candidate-layers.npz',lidar_occupied=occupied,upper_hits=upper,body_forbidden=forbidden,previous_circle=legacy)
     import matplotlib
@@ -435,19 +804,128 @@ def review_traversability(args):
     fig.legend(handles=legends,loc='lower center',ncol=4,fontsize=10)
     fig.suptitle('물체 영역과 로봇 중심의 여유 영역을 구분한 비교 · 실물 주행 판정 전' if korean else 'Surfaces and centre clearance shown separately / offline review',fontsize=13)
     fig.tight_layout(rect=[0,.13,1,.94]);fig.savefig(output/'traversability-review.png',dpi=160);plt.close(fig)
+    if getattr(args,'movement_area',False):
+        report['movement_area']=movement_area_review(output,args.depth_review,grid,origin,resolution,geometry,surfaces,poses,
+            lidar_top=bottom,clearance=args.clearance_m,context_review=args.context_review,navigation_footprint=navigation_footprint)
+        (output/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
     return report
+
+
+def review_living_map(slam_review, body_review, output):
+    """Synthetic change injection on the recorded lattice, never live evidence."""
+    import time
+    from home_robot_tasks.adaptive_mapping import LivingMap
+    from home_robot_tasks.assistant.world import WorldStore
+    slam_review, body_review, output = map(Path, (slam_review, body_review, output))
+    source = slam_review/'occupancy.json'
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    raw = json.loads(source.read_text())
+    body = json.loads((body_review/'movement-area-report.json').read_text())
+    if body['source_map_sha256'] != digest:
+        raise ValueError('movement review and lidar map mismatch')
+    with np.load(body_review/'movement-area.npz', allow_pickle=False) as layers:
+        upper, candidates = layers['rgbd_obstacles'].copy(), layers['candidate_centers'].copy()
+        if (not np.allclose(layers['origin_xy_m'], raw['origin'], atol=1e-10, rtol=0) or
+                abs(float(layers['resolution_m'])-raw['resolution']) > 1e-10):
+            raise ValueError('recorded lattice mismatch')
+    cells = np.asarray(raw['data']).reshape(raw['height'], raw['width'])
+    if upper.shape != cells.shape or candidates.shape != cells.shape:
+        raise ValueError('movement grid shape mismatch')
+    rows = np.where((cells == 100) | upper, '#', np.where(cells == 0, '.', '?'))
+    free = np.argwhere(candidates & (rows == '.'))
+    if len(free) < 30:
+        raise ValueError('insufficient fixture space')
+    # These are synthetic single-cell changes, not furniture identified in the
+    # recording. The accepted map and full yaw/body candidate masks stay intact.
+    old, new, person = [tuple(map(int, free[i][::-1])) for i in (len(free)//4, len(free)//2, 3*len(free)//4)]
+    fixture = rows.copy(); fixture[old[1], old[0]] = '#'
+    doc = dict(schema_version=1, map_id='recorded-living-review', revision='fixture-1',
+        floor_id='ground', frame_id='map', floor_z_m=0., resolution_m=raw['resolution'],
+        origin=dict(zip(('x','y'), raw['origin'])), rows=[''.join(r) for r in fixture],
+        robot_radius_m=.2252786, clearance_m=.03, surface_tolerance_m=.03)
+    output.mkdir(parents=True, exist_ok=False)
+    store = WorldStore(output/'living-map.sqlite')
+    config = dict(calibration_id='recorded-review-calibration', clock_id='synthetic-change-clock',
+                  profile_id='folded-body-review', height_m=body['robot_height_m'], store=store)
+    mapping = LivingMap(doc, **config)
+    mapping.register_furniture('fixture-table', [old], registration_id='initial-fixture',
+                               source='accepted_initial_map', now_s=0.)
+    events, elapsed = [], []
+    def step(t, *, old_clear=False, person_free=False, unseen=False):
+        laser = np.full(rows.shape, '?'); depth = laser.copy()
+        if not unseen:
+            for x,y in (new, person): laser[y,x] = depth[y,x] = '#'
+            laser[old[1],old[0]] = '.'
+            if old_clear: depth[old[1],old[0]] = '.'
+            if person_free: laser[person[1],person[0]] = depth[person[1],person[0]] = '.'
+        started = time.perf_counter()
+        result = mapping.observe(lidar_rows=[''.join(r) for r in laser], depth_rows=[''.join(r) for r in depth],
+            observed_s=t, now_s=t, capture_id=f'synthetic-{t}', frame_id='map',
+            calibration_id=config['calibration_id'], clock_id=config['clock_id'],
+            localization_qualified=True, full_height_qualified=True,
+            furniture_cells=[] if unseen else [new],
+            identity_matches=[] if unseen else [dict(furniture_id='fixture-table', cells=[new],
+                capture_id=f'synthetic-{t}', observed_s=t, identity_verified=True, method='continuous_track')],
+            dynamic_cells=[] if unseen or person_free else [person])
+        elapsed.append(time.perf_counter()-started)
+        events.append(dict(time_s=t, saved=result['saved'],
+            added=result['persistent']['added_cells'], cleared=result['persistent']['cleared_cells'],
+            live_person=mapping.live.nav.rows[person[1]][person[0]],
+            stored_person=mapping.stable.rows[person[1]][person[0]]))
+    step(1.)
+    assert mapping.live.nav.rows[new[1]][new[0]] == '#'
+    assert mapping.stable.rows[old[1]][old[0]] == '#'
+    step(2., old_clear=True); step(3., old_clear=True)
+    assert mapping.stable.rows[old[1]][old[0]] == '.'
+    assert mapping.stable.rows[new[1]][new[0]] == '#'
+    step(4., unseen=True)
+    assert mapping.live.nav.rows[person[1]][person[0]] == '#'
+    step(5., old_clear=True, person_free=True); step(5.3, old_clear=True, person_free=True)
+    assert mapping.live.nav.rows[person[1]][person[0]] == '.'
+    saved = mapping.stable._document
+    store.close()
+    store = WorldStore(output/'living-map.sqlite')
+    restored = LivingMap(doc, **{**config, 'store': store, 'clock_id':'synthetic-reboot-clock'})
+    assert restored.stable._document == saved and not restored.fresh(0.)
+    store.close()
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
+    result = dict(mode='synthetic_changes_on_recorded_map_lattice', passed=True,
+        source_map_sha256=digest, movement_review_sha256=hashlib.sha256(
+            (body_review/'movement-area-report.json').read_bytes()).hexdigest(),
+        persistence_policy='registered_furniture_only_v1',
+        map_dimensions=[raw['width'],raw['height']], injected_cells=dict(old=old,new=new,person=person),
+        events=events, update_wall_ms=dict(maximum=1000*max(elapsed), median=1000*float(np.median(elapsed))),
+        stable_restart_identical=True, restored_live_evidence_fresh=False,
+        source_map_modified=False, hardware_commands=0, physical_validation=False,
+        connected_route_verified=False, navigation_authorized=False,
+        limitations=['synthetic observations, not observed furniture movement',
+                     'PC processing time is not Jetson latency',
+                     'recorded map still has unresolved body/depth boundary conflicts',
+                     'no connected yaw-aware route or physical navigation tested'])
+    (output/'report.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+    return result
 
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--capture',type=Path);p.add_argument('--output',type=Path,required=True)
     p.add_argument('--slam-review',type=Path);p.add_argument('--trajectory-review',type=Path)
+    p.add_argument('--lidar-only',action='store_true',help='Review a prepared lidar-only campaign without reading RGB-D')
     p.add_argument('--semantic',action='store_true',help='Offline DINO/SAM furniture annotations; never modifies live occupancy')
     p.add_argument('--semantic-floor-filter',action='store_true',help='Ablation: keep DINO names and filter semantic floor geometry')
     p.add_argument('--household-review',action='store_true',help='Local household crop review plus floor filtering; original geometry unchanged')
     p.add_argument('--semantic-frames',type=int,default=6)
     p.add_argument('--model-cache',type=Path,help='Existing pinned DINO/SAM cache; semantic review uses offline model loading')
     p.add_argument('--traversability',action='store_true')
+    p.add_argument('--living-map-review',action='store_true',help='Inject synthetic local changes on the recorded map lattice; no hardware')
+    p.add_argument('--movement-area',action='store_true',help='Compare 72 headings using ray-qualified depth and render robot-centre candidates')
+    p.add_argument('--context-review',type=Path,help='Optional household names on the same map')
+    p.add_argument('--ray-depth-review',action='store_true',help='Replay sampled native depth rays offline; preserve hit, clear and uncertain evidence separately')
+    p.add_argument('--exclude-arms',action='store_true',help='Offline body-only scenario: assume arms will be stowed; retain fixed mounts, lift and sensors')
+    p.add_argument('--fused-review',action='store_true',help='Compose verified lidar, depth, body and semantic review layers')
+    p.add_argument('--semantic-review',type=Path)
+    p.add_argument('--body-review',type=Path)
+    p.add_argument('--fixed-body-projection',action='store_true',help='use full fixed structure outline on lidar and unknown layers')
     p.add_argument('--hold-plan',type=Path)
     p.add_argument('--depth-review',type=Path)
     p.add_argument('--mobile-mesh-dir',type=Path)
@@ -456,6 +934,26 @@ if __name__=='__main__':
     p.add_argument('--lift-m',type=float)
     p.add_argument('--clearance-m',type=float,default=.03)
     args=p.parse_args()
+    if args.living_map_review:
+        if args.slam_review is None or args.body_review is None:
+            p.error('--living-map-review requires --slam-review and --body-review')
+        print(json.dumps(review_living_map(args.slam_review,args.body_review,args.output)))
+        raise SystemExit(0)
+    if args.movement_area and not args.traversability:p.error('--movement-area requires --traversability')
+    if args.ray_depth_review:
+        if args.traversability or args.semantic or args.exclude_arms or any(v is None for v in (args.capture,args.slam_review,args.trajectory_review)):
+            p.error('--ray-depth-review requires capture, final SLAM and trajectory inputs')
+        from home_robot_tasks.recorded_depth import review_recorded_depth
+        print(json.dumps(review_recorded_depth(args.capture,args.slam_review,args.trajectory_review,args.output)))
+        raise SystemExit(0)
+    if args.fixed_body_projection and not (args.traversability and args.exclude_arms):p.error('--fixed-body-projection requires --traversability --exclude-arms')
+    if args.exclude_arms and not args.traversability:p.error('--exclude-arms requires --traversability')
+    if args.fused_review:
+        if any(v is None for v in (args.slam_review,args.depth_review,args.body_review,args.semantic_review)):
+            p.error('--fused-review requires --slam-review, --depth-review, --body-review, --semantic-review')
+        result=review_fused_layers(args.slam_review,args.depth_review,args.body_review,args.semantic_review,args.output)
+        print(json.dumps({k:result[k]for k in ('depth_frames','semantic_views','recording_chunks','rgbd_added_on_planar_free_cells')}))
+        raise SystemExit(0)
     if args.traversability:
         if args.semantic or any(v is None for v in (args.hold_plan,args.depth_review,args.slam_review,args.mobile_mesh_dir,args.d415_mesh,args.lds_mesh,args.lift_m)):
             p.error('--traversability requires recorded maps, hold plan, original meshes and explicit lift height')
@@ -465,7 +963,10 @@ if __name__=='__main__':
         raise SystemExit(0)
     if (args.household_review or args.semantic_floor_filter) and not args.semantic:p.error('--household-review requires --semantic')
     if not args.capture:p.error('--capture required')
-    if args.semantic:
+    if args.lidar_only:
+        if not args.slam_review or args.semantic:p.error('--lidar-only requires --slam-review and excludes --semantic')
+        print(json.dumps(review_lidar(args.capture,args.slam_review,args.output)))
+    elif args.semantic:
         if not args.slam_review or not args.trajectory_review or not args.model_cache:
             p.error('--semantic requires saved SLAM, trajectory review and existing model cache')
         import os

@@ -67,4 +67,7 @@ class RGBDFurnitureMapper:
             raise InvalidTask('semantic_capture_id_conflict')
         associations = [self.memory.observe(o, now_s=now_s) for o in observations]
         self.memory.store.save_record('semantic_capture', stamp.capture_id, provenance)
-        return dict(provenance=provenance, associations=associations)
+        # Current shapes, separate from each instance's accumulated history,
+        # let the living-map worker corroborate furniture with current hits.
+        return dict(provenance=provenance, associations=associations,
+                    observations=observations)

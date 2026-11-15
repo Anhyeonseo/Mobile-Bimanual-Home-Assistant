@@ -215,6 +215,43 @@ def test_continuous_camera_stale_repeat_still_fails_age_check(monkeypatch):
     assert not recorded and camera.repeated_framesets==0
 
 
+def test_camera_settings_are_bound_to_frame_and_missing_values_stay_unknown():
+    from types import SimpleNamespace
+    from home_robot_tasks.s2_rgbd_acquisition import Capture
+    camera=Capture({'camera_device':{}},retain_frame=True)
+    camera.rs=SimpleNamespace(frame_metadata_value=SimpleNamespace(
+        actual_exposure=1,gain_level=2,auto_exposure=3))
+    frame=SimpleNamespace(supports_frame_metadata=lambda key:key!=3,
+                          get_frame_metadata=lambda key:{1:12000,2:16}[key])
+    assert camera._frame_settings(frame)=={'actual_exposure':12000,'gain_level':16}
+    def failed(key):raise RuntimeError('metadata unavailable')
+    frame.get_frame_metadata=failed
+    assert camera._frame_settings(frame)=={}
+
+
+def test_manual_depth_capture_restores_exposure_then_auto_mode_on_failure():
+    from types import SimpleNamespace
+    from home_robot_tasks.s2_rgbd_acquisition import Capture
+    camera=Capture({'camera_device':{}},depth_exposure_us=8000)
+    camera.rs=SimpleNamespace(option=SimpleNamespace(enable_auto_exposure='auto',exposure='exposure'))
+    values={'auto':1.,'exposure':33000.};writes=[]
+    def write(option,value):values[option]=value;writes.append((option,value))
+    sensor=SimpleNamespace(supports=lambda key:True,get_option=lambda key:values[key],
+        get_option_range=lambda key:SimpleNamespace(min=1,max=33000),set_option=write)
+    camera._set_depth_exposure(sensor)
+    assert values=={'auto':0.,'exposure':8000.}
+    camera.__exit__(RuntimeError)
+    assert values=={'auto':1.,'exposure':33000.}
+    assert writes[-2:]==[('exposure',33000.),('auto',1.)]
+
+
+@pytest.mark.parametrize('value',[True,0,-1,33001,float('nan')])
+def test_invalid_manual_depth_exposure_is_rejected_before_device_access(value):
+    from home_robot_tasks.s2_rgbd_acquisition import Capture
+    with pytest.raises(ValueError,match='bounded'):
+        Capture({'camera_device':{}},depth_exposure_us=value)
+
+
 def test_partial_scan_reports_the_current_failure_not_a_previous_good_sample():
     from contextlib import nullcontext
     from types import SimpleNamespace

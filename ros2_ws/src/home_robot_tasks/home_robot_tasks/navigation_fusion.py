@@ -55,6 +55,7 @@ def fuse_navigation_map(lidar_document, volume, envelope, *, calibration_id,
     if not volume.fresh(number(now_s, 'projection time')):
         raise InvalidTask('fresh_depth_required_for_traversability')
     depth = projected_grid(volume, origin_xy=(nav.ox, nav.oy), width=nav.width,
+                           resolution_m=nav.resolution,
                            height=nav.height, now=now_s,
                            historical_free=purpose == 'global_route_proposal',
                            height_interval_m=(nav.floor_z,nav.floor_z+envelope.height_m))

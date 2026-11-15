@@ -29,6 +29,8 @@ bool actuator_bus_router_submit(actuator_bus_router_t *router,actuator_bus_work_
  * Next arm slot is a hard available-time budget for every normal job. */
 bool actuator_bus_router_next(actuator_bus_router_t *router,uint32_t now_us,uint32_t available_us,
     const uint8_t **bytes,size_t *length,uint32_t *token,actuator_bus_work_t *kind);
+/* Caller proves no transmit was attempted; preserve the original deadline. */
+bool actuator_bus_router_defer_unstarted(actuator_bus_router_t *router,uint32_t token,uint32_t now_us);
 bool actuator_bus_router_complete(actuator_bus_router_t *router,uint32_t token,uint32_t now_us,bool ok);
 /* Resume only after system stop proof and explicit reactivation. */
 bool actuator_bus_router_resume(actuator_bus_router_t *router,bool stop_confirmed);

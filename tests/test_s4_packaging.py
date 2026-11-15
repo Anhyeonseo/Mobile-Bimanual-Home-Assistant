@@ -1,6 +1,8 @@
 import hashlib
 import json
 import tarfile
+import subprocess
+import pytest
 from tools.setup import package_stationary_pick as packaging
 
 
@@ -66,3 +68,30 @@ def test_s4_inspection_package_reuses_backup_and_has_no_automatic_install(tmp_pa
     (build/'CMakeCache.txt').write_text(cache+'MOBILE_WHEEL_PULSE_ONLY:BOOL=ON\n')
     import pytest
     with pytest.raises(ValueError,match='another controller'):packaging.package_s4_inspection(tmp_path/'bad')
+
+
+def test_unified_package_keeps_backup_and_explicit_install_boundary(tmp_path,monkeypatch):
+    root=tmp_path/'source';build=root/'build/s4-unified-controller';build.mkdir(parents=True)
+    profile=root/'profile';profile.mkdir()
+    for name in ('mobile_profile.h','mobile_profile.json'):(profile/name).write_text('fixture\n')
+    (profile/'manifest.json').write_text(json.dumps(dict(mode='commissioning',profile_sha256='a'*64,
+        files={n:hashlib.sha256((profile/n).read_bytes()).hexdigest() for n in ('mobile_profile.h','mobile_profile.json')})))
+    (build/'CMakeCache.txt').write_text('S4_UNIFIED_CANDIDATE:BOOL=ON\nS3_STATIONARY_PICK_CANDIDATE:BOOL=ON\n'
+        'ACTUATOR_MOBILE_FIRST_ID:STRING=7\nMOBILE_BOARD_PROFILE_HEADER:FILEPATH='+str(profile/'mobile_profile.h')+'\n')
+    for name in ('program.cfg','verify-backup.py'):
+        dest=root/'tools/setup/s2_deployment'/name;dest.parent.mkdir(parents=True,exist_ok=True)
+        dest.write_bytes((packaging.ROOT/'tools/setup/s2_deployment'/name).read_bytes())
+    (build/'stm32_g474_single_arm.hex').write_text(':00000001FF\n')
+    monkeypatch.setattr(packaging,'ROOT',root)
+    folder=packaging.package_unified(tmp_path/'out',profile)
+    subprocess.run(['sh','-n',str(folder/'install.sh')],check=True)
+    subprocess.run(['sh','-n',str(folder/'control.sh')],check=True)
+    subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=folder,check=True,capture_output=True)
+    manifest=json.loads((folder/'release.json').read_text())
+    assert not manifest['automatic_setup'] and not manifest['physical_test_ready']
+    install=(folder/'install.sh').read_text();program=(folder/'program.cfg').read_text()
+    assert '--authenticate-stdin' in install and 'flock -n 9' in install
+    assert 'stationary-pick' not in install and 's4-candidate' not in install and '--prepare' not in install
+    assert program.index('dump_image')<program.index('Incomplete firmware backup')<program.index('flash write_image erase')
+    (profile/'mobile_profile.h').write_text('changed')
+    with pytest.raises(ValueError,match='hash mismatch'):packaging.package_unified(tmp_path/'bad',profile)

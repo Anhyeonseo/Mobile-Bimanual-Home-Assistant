@@ -40,8 +40,12 @@ def association(record,camera):
 
 class Capture:
     """Owns only camera streaming/options; restores changed options on exit."""
-    def __init__(self,profile,reference_evidence=None,*,retain_frame=False,retain_native_depth=False):
+    def __init__(self,profile,reference_evidence=None,*,retain_frame=False,retain_native_depth=False,
+                 depth_exposure_us=None):
         self.expected=profile['camera_device'];self.pipeline=None;self.started=False;self.saved=[];self.buffer=[]
+        if depth_exposure_us is not None and (type(depth_exposure_us) not in (int,float) or
+                not 1<=depth_exposure_us<=33000):raise ValueError('bounded 30fps depth exposure required')
+        self.depth_exposure_us=depth_exposure_us;self.saved_depth_options=[]
         self.reference=reference_evidence
         self.last_matched=None
         self.retain_frame=retain_frame
@@ -63,12 +67,17 @@ class Capture:
             if len(devices)!=1:raise ValueError('exactly one D415 required')
             d=devices[0]
             self.device={k:d.get_info(v) for k,v in [('name',rs.camera_info.name),('serial',rs.camera_info.serial_number),('firmware',rs.camera_info.firmware_version),('usb',rs.camera_info.usb_type_descriptor)]}
+            if self.depth_exposure_us is not None:self._set_depth_exposure(d.first_depth_sensor())
             for sensor in d.query_sensors():
                 if sensor.supports(rs.option.global_time_enabled):
                     self.saved.append((sensor,sensor.get_option(rs.option.global_time_enabled)))
                     sensor.set_option(rs.option.global_time_enabled,1.)
             config=rs.config();config.enable_device(self.device['serial'])
-            config.enable_stream(rs.stream.color,640,480,rs.format.bgr8,30)
+            color_dims=(640,480) if self.reference is None else (
+                self.reference['profiles']['color']['width'],self.reference['profiles']['color']['height'])
+            if color_dims not in ((640,480),(1280,720)):
+                raise ValueError('unsupported calibrated D415 color profile')
+            config.enable_stream(rs.stream.color,*color_dims,rs.format.bgr8,30)
             dims = (1280,720) if self.reference is None else (
                 self.reference['profiles']['depth']['width'], self.reference['profiles']['depth']['height'])
             if dims not in ((1280,720), (640,360)):
@@ -92,20 +101,49 @@ class Capture:
         if self.started:
             try:self.pipeline.stop()
             except RuntimeError as e:errors.append(str(e))
+        for sensor,option,value in reversed(self.saved_depth_options):
+            try:sensor.set_option(option,value)
+            except RuntimeError as e:errors.append(str(e))
+        self.saved_depth_options=[]
         for sensor,value in reversed(self.saved):
             try:sensor.set_option(self.rs.option.global_time_enabled,value)
             except RuntimeError as e:errors.append(str(e))
         self.saved=[];self.pipeline=None;self.started=False
         if errors and exc_type is None:raise RuntimeError('camera cleanup: '+'; '.join(errors))
+    def _set_depth_exposure(self,sensor):
+        ae=self.rs.option.enable_auto_exposure;exposure=self.rs.option.exposure
+        if not sensor.supports(ae) or not sensor.supports(exposure):raise ValueError('depth exposure control unavailable')
+        limits=sensor.get_option_range(exposure)
+        if not limits.min<=self.depth_exposure_us<=limits.max:raise ValueError('depth exposure outside device range')
+        old_ae=sensor.get_option(ae);old_exposure=sensor.get_option(exposure)
+        # Record before mutation so partial initialization can also restore.
+        self.saved_depth_options=[(sensor,ae,old_ae),(sensor,exposure,old_exposure)]
+        sensor.set_option(ae,0.);sensor.set_option(exposure,float(self.depth_exposure_us))
     @staticmethod
     def _intr(i):
         return {k:getattr(i,k) for k in ('width','height','fx','fy','ppx','ppy','coeffs')}|{'model':str(i.model)}
+    def _frame_settings(self,frame):
+        """Exposure-bound settings, not a later get_option reading.
+
+        Missing SDK metadata remains unknown. It must not reject an otherwise
+        valid navigation frame or be silently replaced by a default setting.
+        """
+        result={}
+        for name in ('actual_exposure','gain_level','auto_exposure','laser_power',
+                     'laser_power_mode','frame_laser_power','frame_laser_power_mode'):
+            key=getattr(self.rs.frame_metadata_value,name,None)
+            if key is None:continue
+            try:
+                if frame.supports_frame_metadata(key):result[name]=frame.get_frame_metadata(key)
+            except RuntimeError:pass
+        return result
     def _record(self,frames):
         rs=self.rs;depth=frames.get_depth_frame();color=frames.get_color_frame()
         aligned=self.align.process(frames).get_depth_frame()
         native=depth.profile.as_video_stream_profile();cp=color.profile.as_video_stream_profile()
         extr=native.get_extrinsics_to(cp)
-        frame=lambda f:{'number':f.get_frame_number(),'timestamp_ms':f.get_timestamp(),'timestamp_domain':str(f.get_frame_timestamp_domain())}
+        frame=lambda f:{'number':f.get_frame_number(),'timestamp_ms':f.get_timestamp(),'timestamp_domain':str(f.get_frame_timestamp_domain()),
+                        'settings':self._frame_settings(f)}
         m={'device':self.device,'coordinate_frame':'color_camera_optical_frame','measurement_depth_file':'depth_aligned.png',
            'alignment':'depth to color via rs.align','captured_at_utc':datetime.now(timezone.utc).isoformat(),
            'color_intrinsics':self._intr(cp.get_intrinsics()),'native_depth_intrinsics':self._intr(native.get_intrinsics()),

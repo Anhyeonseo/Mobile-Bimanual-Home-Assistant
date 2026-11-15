@@ -52,7 +52,7 @@ def test_occlusion_stale_duplicate_and_protected_geometry_never_clear():
     bad = inputs(doc,2.,free,free);bad['now_s']=3.
     with pytest.raises(InvalidTask): updater.update(**bad)
     bad = inputs(doc,2.,free,free);bad['full_height_qualified']=False
-    with pytest.raises(InvalidTask): updater.update(**bad)
+    assert updater.update(**bad)['cleared_cells'] == []
 
 
 def test_frontiers_are_selected_from_partial_map_and_never_cross_unknown():
@@ -225,3 +225,374 @@ def test_furniture_history_is_kept_but_vacated_shape_is_not_associated_again(env
     newer={**obs,'observation_id':'fobs-new','stamp':Stamp(now[0]+1,memory.context,'desk-new').to_dict(),
            'observed_voxels':[[8,8,z] for z in range(2,6)]}
     assert memory.observe(newer,now_s=now[0]+1)['instance_id']!=old
+
+
+def living(tmp_path, doc=None, **kwargs):
+    from home_robot_tasks.adaptive_mapping import LivingMap
+    from home_robot_tasks.assistant.world import WorldStore
+    doc = doc or grid()
+    store = WorldStore(tmp_path / 'living.sqlite')
+    return LivingMap(doc, calibration_id='cal', clock_id='clock',
+                     profile_id='folded-body-v1', height_m=1., store=store, **kwargs)
+
+
+def occupied(doc, cells):
+    rows = [list(row) for row in doc['rows']]
+    for x, y in cells:
+        rows[y][x] = '#'
+    return [''.join(row) for row in rows]
+
+
+def test_person_blocks_immediately_never_persists_and_unknown_does_not_clear(tmp_path):
+    doc = grid(); mapping = living(tmp_path)
+    person = (8, 8); hit = occupied(doc, [person])
+    for t in (1., 2., 3., 4.):
+        result = mapping.observe(**inputs(doc, t, hit, hit),
+                                 furniture_cells=[person], dynamic_cells=[person])
+        assert result['live']['map_document']['rows'][8][8] == '#'
+        assert not result['saved']
+    assert mapping.store.record('living_map', doc['map_id']) is None
+    unseen = ['?' * 16] * 16
+    mapping.observe(**inputs(doc, 5., unseen, unseen))
+    assert mapping.live.nav.rows[8][8] == '#'
+    mapping.observe(**inputs(doc, 6.))
+    mapping.observe(**inputs(doc, 6.3))
+    assert mapping.live.nav.rows[8][8] == '.'
+    assert mapping.stable.rows[8][8] == '.'
+
+
+def test_unknown_object_is_avoided_without_semantic_inference(tmp_path):
+    doc = grid(); mapping = living(tmp_path)
+    hit = occupied(doc, [(8, 8)])
+    for t in (1., 2., 3.):
+        mapping.observe(**inputs(doc, t, hit, hit))
+    assert mapping.live.nav.rows[8][8] == '#'
+    assert mapping.stable.rows[8][8] == '.'
+
+
+def identity(t, cells, fid='registered-table'):
+    return [dict(furniture_id=fid, cells=cells, capture_id=f'capture-{t}',
+                 observed_s=t, identity_verified=True, method='continuous_track')]
+
+
+def registered_fixture(mapping, doc, cell=(8, 8)):
+    hit = occupied(doc, [cell])
+    mapping.observe(**inputs(doc, 0., hit, hit))
+    mapping.register_furniture('registered-table', [cell], registration_id='user-add-table',
+                               source='user_requested_local_scan', now_s=0.)
+
+
+def test_moved_table_auto_saves_and_restarts_without_transient_state(tmp_path):
+    from home_robot_tasks.adaptive_mapping import LivingMap
+    doc = grid(); doc['rows'] = occupied(doc, [(6, 6)])
+    mapping = living(tmp_path, doc)
+    mapping.register_furniture('registered-table', [(6, 6)], registration_id='initial-table',
+                               source='accepted_initial_map', now_s=0.)
+    new = occupied(grid(), [(9, 9)])
+    for t in (1., 2., 3.):
+        result = mapping.observe(**inputs(doc, t, new, new), furniture_cells=[(9, 9)], identity_matches=identity(t, [(9, 9)]))
+    assert result['saved']
+    assert mapping.stable.rows[6][6] == '.'
+    assert mapping.stable.rows[9][9] == '#'
+    persisted_revision = mapping.stable.revision
+    # A later passing person must not enter the durable snapshot.
+    hit = occupied({'rows': new}, [(7, 8)])
+    mapping.observe(**inputs(doc, 3.1, hit, hit), dynamic_cells=[(7, 8)])
+    mapping.store.close()
+    restored = living(tmp_path, doc)
+    assert restored.stable.revision == persisted_revision
+    assert restored.live.nav.rows[7][8] == '.'
+    assert restored.last_observation is None and not restored.fresh(3.2)
+    assert len(restored.previous_maps) == 2
+    with pytest.raises(InvalidTask, match='context_changed'):
+        LivingMap(doc, calibration_id='cal', clock_id='reboot-clock',
+                  profile_id='different-body', height_m=1., store=restored.store)
+
+
+def test_table_top_lidar_free_cannot_erase_depth_obstacle_and_no_height_can_add(tmp_path):
+    doc = grid(); doc['rows'] = occupied(doc, [(6, 6)])
+    mapping = living(tmp_path, doc)
+    for t in (1., 2., 3.):
+        mapping.observe(**inputs(doc, t, grid()['rows'], doc['rows']))
+    assert mapping.stable.rows[6][6] == '#'
+    assert mapping.live.nav.rows[6][6] == '#'
+    hit = occupied(grid(), [(9, 9)])
+    partial = inputs(doc, 4., hit, hit); partial['full_height_qualified'] = False
+    mapping.observe(**partial)
+    assert mapping.live.nav.rows[9][9] == '#'
+    assert mapping.live.nav.rows[6][6] == '#'
+
+
+def test_confirmation_is_reset_by_occlusion_gap_or_dynamic_evidence(tmp_path):
+    doc = grid(); mapping = living(tmp_path)
+    registered_fixture(mapping, doc)
+    hit = occupied(doc, [(8, 8)]); unknown = ['?' * 16] * 16
+    for t in (1., 2.):
+        mapping.observe(**inputs(doc, t, hit, hit), furniture_cells=[(8, 8)], identity_matches=identity(t, [(8, 8)]))
+    mapping.observe(**inputs(doc, 2.1, unknown, unknown))
+    result = mapping.observe(**inputs(doc, 3., hit, hit), furniture_cells=[(8, 8)], identity_matches=identity(3., [(8, 8)]))
+    assert not result['saved']
+    result = mapping.observe(**inputs(doc, 10., hit, hit), furniture_cells=[(8, 8)], identity_matches=identity(10., [(8, 8)]))
+    assert not result['saved']
+    mapping.observe(**inputs(doc, 11., hit, hit), furniture_cells=[(8, 8)], dynamic_cells=[(8, 8)])
+    assert not mapping.observe(**inputs(doc, 12., hit, hit), furniture_cells=[(8, 8)], identity_matches=identity(12., [(8, 8)]))['saved']
+
+
+def test_living_map_rejects_forged_semantic_free_stale_and_duplicate_atomically(tmp_path):
+    doc = grid(); mapping = living(tmp_path)
+    with pytest.raises(InvalidTask, match='occupied_evidence'):
+        mapping.observe(**inputs(doc, 1.), furniture_cells=[(8, 8)])
+    assert mapping.live.last_stamp is None
+    mapping.observe(**inputs(doc, 1.))
+    bad = inputs(doc, 2.); bad['now_s'] = 3.
+    with pytest.raises(InvalidTask, match='fresh'):
+        mapping.observe(**bad)
+    with pytest.raises(InvalidTask, match='duplicate'):
+        mapping.observe(**inputs(doc, 1.))
+    assert mapping.live.last_stamp == 1.
+
+
+def test_failed_save_keeps_new_hazard_without_committing_persistent_revision(tmp_path, monkeypatch):
+    doc = grid(); mapping = living(tmp_path)
+    registered_fixture(mapping, doc)
+    hit = occupied(doc, [(8, 8)])
+    for t in (1., 2.):
+        mapping.observe(**inputs(doc, t, hit, hit), furniture_cells=[(8, 8)], identity_matches=identity(t, [(8, 8)]))
+    def fail(*args):
+        raise OSError('disk full')
+    monkeypatch.setattr(mapping.store, 'save_record', fail)
+    with pytest.raises(OSError):
+        mapping.observe(**inputs(doc, 3., hit, hit), furniture_cells=[(8, 8)], identity_matches=identity(3., [(8, 8)]))
+    assert mapping.live.nav.rows[8][8] == '#'
+    assert mapping.stable.rows[8][8] == '.'
+
+
+def mission(tmp_path, **robot_kwargs):
+    from home_robot_tasks.application import RobotApplication
+    from home_robot_tasks.adaptive_mapping import LivingMapNavigation
+    from home_robot_tasks.fake_robot import FakeRobot
+    mapping = living(tmp_path)
+    app = RobotApplication(read('home.example.json'), mapping.live.nav,
+        FakeRobot(duration_s=10., **robot_kwargs), initial_xy=(.35, .35))
+    runner = LivingMapNavigation(app, mapping)
+    doc = grid()
+    mapping.observe(**inputs(doc, 0.))
+    req = dict(schema_version=1, operation='navigate_to', request_id='go-to-table',
+        map_id=app.map.map_id, map_revision=app.map.revision, floor_id=app.map.floor_id,
+        frame_id=app.map.frame_id, point=dict(x=1.15, y=.35, z=0.), yaw_rad=0.)
+    runner.start(req, 0.)
+    runner.tick(.1); runner.tick(.2)
+    return doc, mapping, app, runner
+
+
+def test_auto_replan_preserves_goal_waits_for_stop_and_fresh_pose(tmp_path):
+    doc, mapping, app, runner = mission(tmp_path)
+    hit = occupied(doc, [(7, 3)])
+    mapping.observe(**inputs(doc, .3, hit, hit), dynamic_cells=[(7, 3)])
+    assert runner.tick(.3)['status'] == 'STOPPING'
+    for t in (.4, .5, .6):
+        runner.tick(t)
+    assert runner.state == 'WAITING_FOR_OBSERVATION'
+    assert len(app.tasks) == 1
+    mapping.observe(**inputs(doc, .7, hit, hit), dynamic_cells=[(7, 3)])
+    runner.tick(.7, pose_xy=(.35, .35), pose_observed_s=.2)
+    assert len(app.tasks) == 1
+    result = runner.tick(.8, pose_xy=(.35, .35), pose_observed_s=.8)
+    assert result['status'] == 'MOVING' and result['replans'] == 1
+    assert result['request_id'] == 'go-to-table'
+    assert app.plans[runner.active]['goal'] == app.plans['go-to-table']['goal']
+    assert any(point['y'] != .35 for point in app.plans[runner.active]['path_xy'])
+    assert app.status('go-to-table')['simulated_stop_confirmed']
+    assert not mapping.store.records('living_map')
+
+
+def test_off_route_changes_do_not_interrupt_movement(tmp_path):
+    doc, mapping, app, runner = mission(tmp_path)
+    hit = occupied(doc, [(10, 11)])
+    mapping.observe(**inputs(doc, .3, hit, hit))
+    assert runner.tick(.3)['status'] == 'MOVING'
+    assert not any(row['kind'] == 'stop' for row in app.adapter.log)
+
+
+def test_blocked_goal_waits_then_automatically_resumes_after_measured_clear(tmp_path):
+    doc, mapping, app, runner = mission(tmp_path)
+    hit = occupied(doc, [(11, 3)])
+    mapping.observe(**inputs(doc, .3, hit, hit))
+    runner.tick(.3)
+    for t in (.4, .5, .6): runner.tick(t)
+    mapping.observe(**inputs(doc, .7, hit, hit))
+    assert runner.tick(.7, pose_xy=(.35, .35), pose_observed_s=.7)['status'] == 'WAITING_FOR_PATH'
+    mapping.observe(**inputs(doc, .8))
+    runner.tick(.8, pose_xy=(.35, .35), pose_observed_s=.8)
+    assert len(app.tasks) == 1
+    mapping.observe(**inputs(doc, 1.))
+    assert runner.tick(1., pose_xy=(.35, .35), pose_observed_s=1.)['status'] == 'MOVING'
+    assert len(app.tasks) == 2
+
+
+def test_cancel_while_waiting_never_restarts(tmp_path):
+    doc, mapping, app, runner = mission(tmp_path)
+    hit = occupied(doc, [(7, 3)])
+    mapping.observe(**inputs(doc, .3, hit, hit)); runner.tick(.3)
+    runner.cancel(.4)
+    for t in (.5, .6, .7):
+        mapping.observe(**inputs(doc, t))
+        assert runner.tick(t, pose_xy=(.35, .35), pose_observed_s=t)['status'] == 'CANCELLED'
+    assert len(app.tasks) == 1
+
+
+def test_unconfirmed_stop_never_replans(tmp_path):
+    doc, mapping, app, runner = mission(tmp_path)
+    app.adapter.never_stop = True
+    hit = occupied(doc, [(7, 3)])
+    mapping.observe(**inputs(doc, .3, hit, hit)); runner.tick(.3)
+    for t in (.4, .7, 1., 2., 3.):
+        mapping.observe(**inputs(doc, t, hit, hit))
+        runner.tick(t, pose_xy=(.35, .35), pose_observed_s=t)
+    assert len(app.tasks) == 1 and runner.state != 'MOVING'
+
+
+def test_existing_semantic_capture_drives_persistence_without_manual_cell_selection(tmp_path):
+    from home_robot_tasks.assistant.contracts import Context
+    doc = grid(); mapping = living(tmp_path)
+    registered_fixture(mapping, doc)
+    hit = occupied(doc, [(8, 8)])
+    for t in (1., 2., 3.):
+        context = Context(mapping.stable.map_id, mapping.stable.revision, 'cal', 'clock')
+        stamp = Stamp(t, context, f'capture-{t}').to_dict()
+        capture = dict(provenance=dict(stamp=stamp), observations=[dict(
+            observation_id=f'obs-{t}', category='table', detector_score=.9,
+            stamp=stamp, source='simulation', voxel_size_m=.1,
+            observed_voxels=[[8, 8, z] for z in range(4, 8)],
+            extent_complete=False, depth_valid_fraction=1.)])
+        result = mapping.observe_capture(semantic_capture=capture, identity_matches=identity(t, [(8, 8)]), **inputs(doc, t, hit, hit))
+        assert result['semantic_evidence_rejected'] is None
+    assert result['saved'] and mapping.stable.rows[8][8] == '#'
+
+
+def test_delayed_semantics_cannot_block_current_hazard_update(tmp_path):
+    doc = grid(); mapping = living(tmp_path)
+    result = mapping.observe_capture(semantic_capture={'provenance': {}},
+                                    **inputs(doc, 1., occupied(doc, [(8, 8)])))
+    assert result['semantic_evidence_rejected']
+    assert mapping.live.nav.rows[8][8] == '#' and mapping.stable.rows[8][8] == '.'
+
+
+def test_replanned_navigation_finishes_same_mission(tmp_path):
+    doc, mapping, app, runner = mission(tmp_path)
+    hit = occupied(doc, [(7, 3)])
+    mapping.observe(**inputs(doc, .3, hit, hit)); runner.tick(.3)
+    for i in range(4, 150):
+        t = i/10
+        mapping.observe(**inputs(doc, t, hit, hit))
+        result = runner.tick(t, pose_xy=(.35, .35), pose_observed_s=t)
+        if result['status'] == 'SUCCEEDED':
+            break
+    assert result['status'] == 'SUCCEEDED'
+    assert result['request_id'] == 'go-to-table' and result['replans'] == 1
+    assert not app.lease.owner and result['hardware_commands'] == 0
+
+
+def test_sensor_rays_use_actual_shifted_map_origin():
+    from home_robot_tasks.navigation_depth import DepthProfile, DepthVolume
+    from home_robot_tasks.navigation_fusion import TravelEnvelope
+    doc = grid(); doc['origin'] = dict(x=.03, y=-.07)
+    p = DepthProfile('depth','cal',.1,.1,3.,0.,1.,.5,.5,world_frame='map')
+    volume = DepthVolume(p); volume.reset('epoch')
+    volume.last_stamp = 1.; volume.error = None
+    updater = AdaptiveMap(doc, calibration_id='cal', clock_id='clock')
+    observation = updater.sensor_observation(ranges=[.8,.8], angle_min=0., angle_increment=.01,
+        range_min=.12, range_max=3.5, lidar_xy_yaw=(.35,.35,0.), volume=volume,
+        envelope=TravelEnvelope('fixture-body',.04,1.), expected_epoch='epoch',
+        observed_s=1., now_s=1., capture_id='shifted-sensor', clock_id='clock',
+        localization_qualified=True)
+    assert observation['lidar_rows'][4][11] == '#'
+    assert observation['lidar_rows'][4][3:11] == '.' * 8
+    assert observation['lidar_rows'][3][11] == '?'
+
+
+def test_living_map_protected_structure_never_erased(tmp_path):
+    doc = grid(); doc['rows'] = occupied(doc, [(6, 6)])
+    mapping = living(tmp_path, doc, protected_cells=[(6, 6)])
+    for t in (1., 2., 3.):
+        mapping.observe(**inputs(doc, t, grid()['rows'], grid()['rows']))
+    assert mapping.live.nav.rows[6][6] == mapping.stable.rows[6][6] == '#'
+
+
+def test_hazard_is_handled_before_first_executor_command(tmp_path):
+    from home_robot_tasks.application import RobotApplication
+    from home_robot_tasks.adaptive_mapping import LivingMapNavigation
+    from home_robot_tasks.fake_robot import FakeRobot
+    doc = grid(); mapping = living(tmp_path)
+    app = RobotApplication(read('home.example.json'), mapping.live.nav, FakeRobot(), initial_xy=(.35,.35))
+    runner = LivingMapNavigation(app, mapping)
+    mapping.observe(**inputs(doc, 0.))
+    runner.start(dict(schema_version=1, operation='navigate_to', request_id='before-start',
+        map_id=app.map.map_id, map_revision=app.map.revision, floor_id=app.map.floor_id,
+        frame_id=app.map.frame_id, point=dict(x=1.15,y=.35,z=0.),yaw_rad=0.), 0.)
+    hit = occupied(doc, [(7, 3)])
+    mapping.observe(**inputs(doc, .1, hit, hit))
+    runner.tick(.1)
+    assert not any(event['kind'] == 'start' for event in app.adapter.log)
+
+
+def test_new_recognized_furniture_never_auto_registers_even_after_many_views(tmp_path):
+    doc = grid(); mapping = living(tmp_path)
+    hit = occupied(doc, [(8, 8)])
+    for i in range(1, 15):
+        t = float(i)
+        result = mapping.observe(**inputs(doc, t, hit, hit), furniture_cells=[(8, 8)])
+        assert not result['saved']
+    assert mapping.live.nav.rows[8][8] == '#'
+    assert mapping.stable.rows[8][8] == '.' and not mapping.registry
+    assert mapping.store.record('living_map', doc['map_id']) is None
+
+
+def test_user_add_scan_permits_new_furniture_then_persists_registration(tmp_path):
+    doc = grid(); mapping = living(tmp_path)
+    hit = occupied(doc, [(8, 8)])
+    mapping.observe(**inputs(doc, 1., hit, hit), furniture_cells=[(8, 8)])
+    mapping.register_furniture('registered-table', [(8, 8)], registration_id='user-add',
+                               source='user_requested_local_scan', now_s=1.)
+    for t in (2., 3., 4.):
+        result = mapping.observe(**inputs(doc, t, hit, hit), furniture_cells=[(8, 8)],
+                                 identity_matches=identity(t, [(8, 8)]))
+    assert result['saved'] and mapping.stable.rows[8][8] == '#'
+    restored = living(tmp_path)
+    assert restored.registry == mapping.registry
+    assert restored.registry['registered-table']['registration']['source'] == 'user_requested_local_scan'
+
+
+def test_unverified_or_unknown_identity_cannot_promote_new_position(tmp_path):
+    doc = grid(); mapping = living(tmp_path)
+    registered_fixture(mapping, doc)
+    hit = occupied(doc, [(9, 9)])
+    for t in (1., 2., 3.):
+        matches = identity(t, [(9, 9)])
+        matches[0]['identity_verified'] = False
+        result = mapping.observe(**inputs(doc, t, hit, hit), furniture_cells=[(9, 9)], identity_matches=matches)
+        assert result['identity_matches_rejected']
+    assert mapping.live.nav.rows[9][9] == '#' and mapping.stable.rows[9][9] == '.'
+    result = mapping.observe(**inputs(doc, 4., hit, hit), furniture_cells=[(9, 9)],
+                             identity_matches=identity(4., [(9, 9)], 'unregistered-chair'))
+    assert result['identity_matches_rejected'] and not result['saved']
+
+
+def test_unknown_baseline_structure_not_removed_by_furniture_update(tmp_path):
+    doc = grid(); doc['rows'] = occupied(doc, [(6, 6)])
+    mapping = living(tmp_path, doc)
+    for t in (1., 2., 3.):
+        mapping.observe(**inputs(doc, t, grid()['rows'], grid()['rows']))
+    assert mapping.stable.rows[6][6] == '#'
+    assert mapping.live.nav.rows[6][6] == '#'
+
+
+def test_registration_requires_explicit_source_and_fresh_local_scan(tmp_path):
+    doc = grid(); mapping = living(tmp_path)
+    registered_fixture(mapping, doc)
+    with pytest.raises(InvalidTask, match='explicit_furniture_registration'):
+        mapping.register_furniture('new', [(9, 9)], registration_id='auto', source='model_detection', now_s=0.)
+    with pytest.raises(InvalidTask, match='fresh_registration_scan'):
+        mapping.register_furniture('new', [(9, 9)], registration_id='user-new', source='user_requested_local_scan', now_s=10.)
+    with pytest.raises(InvalidTask, match='unambiguous'):
+        mapping.register_furniture('new', [(9, 9)], registration_id='user-new', source='accepted_initial_map', now_s=0.)

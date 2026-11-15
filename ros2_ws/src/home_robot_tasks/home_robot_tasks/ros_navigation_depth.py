@@ -13,7 +13,8 @@ from .navigation import number
 from .ros_rgbd_source import image_array, quaternion_transform, RosRGBDSource
 
 
-def projected_grid(volume, *, origin_xy, width, height, now, historical_free=False, height_interval_m=None):
+def projected_grid(volume, *, origin_xy, width, height, now, historical_free=False,
+                   height_interval_m=None, resolution_m=None):
     """Full-height projection: occupied wins; unknown stays -1.
 
 Historical free cells may guide a global route proposal after a scan. They are
@@ -27,9 +28,11 @@ default fresh-only mode and TravelGuard independently checks live depth.
         raise InvalidTask('bounded projection required')
     r=volume.p.resolution_m
     origin=tuple(number(v,'grid origin') for v in origin_xy)
-    if len(origin)!=2 or any(abs(v/r-round(v/r))>1e-6 for v in origin):
-        raise InvalidTask('grid origin must align with voxel lattice')
-    ox,oy=(round(v/r) for v in origin)
+    if len(origin)!=2:
+        raise InvalidTask('two grid origin coordinates required')
+    target = r if resolution_m is None else number(resolution_m, 'grid resolution')
+    if not 0 < target <= r * 2:
+        raise InvalidTask('bounded projection resolution required')
     bottom,top=volume.p.minimum_height_m,volume.p.maximum_height_m
     if height_interval_m is not None:
         if not isinstance(height_interval_m,(tuple,list)) or len(height_interval_m)!=2:
@@ -47,9 +50,20 @@ default fresh-only mode and TravelGuard independently checks live depth.
             return volume.free(cell,now)
         value=volume.cells.get(cell)
         return value is not None and not value[0] and 0 <= value[1] <= now
-    return [100 if (x,y) in occupied else
-            (0 if all(free((x,y,z)) for z in range(lo,hi)) else -1)
-            for y in range(oy,oy+height) for x in range(ox,ox+width)]
+    # A SLAM origin need not be a multiple of the native voxel size. Occupied
+    # overlap blocks; free requires every intersecting voxel column. Rounding
+    # the origin shifts obstacles and can falsely clear a boundary column.
+    def indices(axis, count):
+        return [range(math.floor((axis+i*target)/r+1e-9),
+                      math.ceil((axis+(i+1)*target)/r-1e-9)) for i in range(count)]
+    xs, ys = indices(origin[0], width), indices(origin[1], height)
+    result = []
+    for yy in ys:
+        for xx in xs:
+            columns = [(x,y) for y in yy for x in xx]
+            result.append(100 if any(c in occupied for c in columns) else
+                          0 if all(free((x,y,z)) for x,y in columns for z in range(lo,hi)) else -1)
+    return result
 
 
 class RosNavigationDepth:

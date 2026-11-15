@@ -10,12 +10,60 @@ import json
 import math
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'ros2_ws/src/home_robot_tasks'))
+
+
+def normalized_graph_poses(text, report):
+    """Karto diagnostics may precede its JSON; retain actual replay timestamps."""
+    rows=json.loads(next(line for line in text.splitlines() if line.startswith('[{')))
+    rows.sort(key=lambda r:r['replay_stamp'])
+    window=report['capture_window']
+    start=window['epochs'][0]['replay_interval_s'][0] if 'epochs' in window else window['drive_window_s'][0]
+    clock_start=report['replay_clock_offset_s']+start
+    rate=report.get('replay_rate',1.)
+    last=-math.inf
+    if len(rows)<3:raise ValueError('insufficient saved graph poses')
+    for row in rows:
+        if (not all(math.isfinite(v) for v in [row['replay_stamp'],*row['xy_yaw']])
+                or len(row['xy_yaw'])!=3 or row['replay_stamp']<=last):
+            raise ValueError('invalid saved graph pose sequence')
+        last=row['replay_stamp']
+        row['stamp']=clock_start+(row['replay_stamp']-clock_start)*rate
+    return rows
+
+
+def finalize_saved_graph(source, output, exporter):
+    """Use the final optimized graph for RGB-D, preserving online estimates."""
+    source,output,exporter=map(Path,(source,output,exporter))
+    report=json.loads((source/'report.json').read_text())
+    if output.exists() or report.get('passed') is not True or not report.get('map_cells_identical_after_restart'):
+        raise ValueError('new output and verified saved map required')
+    graph=source/'posegraph.posegraph'
+    for name,expected in report['graph_sha256'].items():
+        if hashlib.sha256((source/name).read_bytes()).hexdigest()!=expected:raise ValueError('saved graph changed')
+    result=subprocess.run([str(exporter.resolve()),str(graph.resolve())],check=True,capture_output=True,text=True)
+    rows=normalized_graph_poses(result.stdout,report)
+    output.mkdir(parents=True)
+    for name in ('occupancy.json','localization.pgm','localization.yaml','posegraph.data','posegraph.posegraph','checkpoint.db'):
+        if (source/name).exists():shutil.copy2(source/name,output/name)
+    shutil.copy2(source/'slam-poses.json',output/'online-slam-poses.json')
+    (output/'slam-poses.json').write_text(json.dumps(rows))
+    (output/'graph-export.log').write_text(result.stdout+result.stderr)
+    report.update(mode='real_slam_recorded_campaign_final_graph',final_graph_poses=True,
+        pose_source='saved Karto Mapper GetAllProcessedScans/GetCorrectedPose',
+        online_pose_source=str(source/'slam-poses.json'),slam_pose_messages=len(rows),
+        graph_pose_exporter_sha256=hashlib.sha256(exporter.read_bytes()).hexdigest())
+    report['limitations']=['Coverage is limited to recorded space; no surveyed absolute accuracy.',
+        'Final optimized graph poses replace historical online estimates for RGB-D projection.',
+        'Offline graph reload and joins do not qualify live power-cycle localization.']
+    (output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
+    return report
 
 
 def recorded_replay(a):
@@ -38,15 +86,22 @@ def recorded_replay(a):
     from home_robot_tasks.mapping_checkpoint import MappingCheckpoints
     if a.output.exists():raise ValueError('new output directory required')
     a.output.mkdir(parents=True)
-    records=[json.loads(s) for s in a.teleop.read_text().splitlines()]
-    capture=json.loads((a.recorded_capture/'report.json').read_text())
-    odom,encoder=encoder_path(records,json.loads((ROOT/'config/home_assistant/s4_base.nominal.json').read_text()))
-    all_scans=json.loads((a.recorded_capture/'scans.json').read_text())
-    scans,capture_window=qualify_replay_capture(capture,records,all_scans,odom,
-        allow_startup_scan_gaps=a.allow_startup_scan_gaps)
+    if a.prepared_campaign:
+        from home_robot_tasks.recorded_campaign import load_prepared
+        odom,scans,capture=load_prepared(a.recorded_capture)
+        encoder={k:capture[k] for k in ('path_length_m','final_pose')}
+        encoder['source']=capture.get('trajectory_basis','bounded acknowledged intervals; lidar joins at gaps')
+        capture_window=dict(epochs=capture['epochs'],boundaries=capture['boundaries'])
+    else:
+        records=[json.loads(s) for s in a.teleop.read_text().splitlines()]
+        capture=json.loads((a.recorded_capture/'report.json').read_text())
+        odom,encoder=encoder_path(records,json.loads((ROOT/'config/home_assistant/s4_base.nominal.json').read_text()))
+        all_scans=json.loads((a.recorded_capture/'scans.json').read_text())
+        scans,capture_window=qualify_replay_capture(capture,records,all_scans,odom,
+            allow_startup_scan_gaps=a.allow_startup_scan_gaps)
     mount=json.loads((ROOT/'config/home_assistant/lidar_mount.review.json').read_text())
     localize = a.localization_map is not None
-    recording_id='recorded-'+a.teleop.stem
+    recording_id='recorded-'+(a.recorded_capture.name if a.prepared_campaign else a.teleop.stem)
     rclpy.init();node=rclpy.create_node('recorded_replay',namespace='/offline_s4_recorded')
     pub=node.create_publisher(LaserScan,'scan',10);dynamic=TransformBroadcaster(node);static=StaticTransformBroadcaster(node)
     maps=[];poses=[]
@@ -71,9 +126,15 @@ def recorded_replay(a):
         capture_window=capture_window,
         export_envelope_scope='placeholder needed by map document schema; not measured robot clearance',
         source_sha256={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in
-            (a.teleop,a.recorded_capture/'scans.json',a.recorded_capture/'report.json',
+            (a.recorded_capture/'trajectories.npz' if a.prepared_campaign else a.teleop,a.recorded_capture/'scans.json',a.recorded_capture/'report.json',
              ROOT/'config/home_assistant/s4_base.nominal.json',ROOT/'config/home_assistant/lidar_mount.review.json',
              ROOT/'ros2_ws/src/home_robot_tasks/config'/('localization.replay.yaml' if localize else 'slam.replay.yaml'))})
+    if a.prepared_campaign:
+        report['mode']='real_slam_recorded_campaign'
+        report['odometry_prior']=capture.get('trajectory_basis')
+        if capture.get('lidar_only'):
+            report.update(lidar_only=True, wheel_feedback_used=False, rgbd_used=False,
+                semantic_used=False, visibility=capture['visibility'])
     def until(predicate,seconds):
         end=time.monotonic()+seconds
         while not predicate():
@@ -95,7 +156,9 @@ def recorded_replay(a):
         proc=subprocess.Popen([str(executable),'--ros-args','-r','__ns:='+namespace,
             '-r','scan:=/offline_s4_recorded/scan','-r','/map:=/offline_s4_recorded/map',
             '-r','/map_metadata:=/offline_s4_recorded/map_metadata','--params-file',
-            str(ROOT/'ros2_ws/src/home_robot_tasks/config'/('localization.replay.yaml' if localize else 'slam.replay.yaml'))],stdout=log,stderr=subprocess.STDOUT)
+            str(ROOT/'ros2_ws/src/home_robot_tasks/config'/('localization.replay.yaml' if localize else 'slam.replay.yaml'))]
+            + ([] if localize else ['-p',f'minimum_time_interval:={.05/a.replay_rate}']),stdout=log,stderr=subprocess.STDOUT)
+        if not localize:report['replay_minimum_time_interval_s']=.05/a.replay_rate
         for transition in (1,3):
             req=ChangeState.Request();req.transition.id=transition
             if not service(ChangeState,node_name+'/change_state',req).success:raise RuntimeError('lifecycle failed')
@@ -165,10 +228,10 @@ def recorded_replay(a):
         source_start=odom[0,0];i=j=0
         def stamp(t):
             from builtin_interfaces.msg import Time
-            ns=round((clock_start+t-source_start)*1e9);return Time(sec=ns//10**9,nanosec=ns%10**9)
-        end=wall_start+(odom[-1,0]-source_start)+2
+            ns=round((clock_start+(t-source_start)/a.replay_rate)*1e9);return Time(sec=ns//10**9,nanosec=ns%10**9)
+        end=wall_start+(odom[-1,0]-source_start)/a.replay_rate+2
         while time.monotonic()<end:
-            at=source_start+time.monotonic()-wall_start
+            at=source_start+(time.monotonic()-wall_start)*a.replay_rate
             while i<len(odom) and odom[i,0]<=at:
                 t,x,y,yaw=odom[i];tf=TransformStamped();tf.header.stamp=stamp(t)
                 tf.header.frame_id='odom';tf.child_frame_id='base_link';tf.transform.translation.x=x;tf.transform.translation.y=y
@@ -176,8 +239,9 @@ def recorded_replay(a):
             while j<len(scans) and scans[j]['observed_s']<=at-.1:
                 s=scans[j];msg=LaserScan();msg.header.stamp=stamp(s['observed_s']);msg.header.frame_id='lidar_a'
                 msg.angle_min=s['angle_min'];msg.angle_increment=s['angle_increment'];msg.angle_max=s['angle_min']+359*s['angle_increment']
-                msg.range_min=.12;msg.range_max=3.5;msg.scan_time=s['scan_time'];msg.time_increment=s['time_increment']
-                msg.ranges=[float('inf') if v is None else float(v) for v in s['ranges']];pub.publish(msg);j+=1
+                msg.range_min=.12;msg.range_max=3.5;msg.scan_time=s['scan_time']/a.replay_rate;msg.time_increment=s['time_increment']/a.replay_rate
+                # No-return / body-shadow rays must not become free-space evidence.
+                msg.ranges=[float('nan') if v is None else float(v) for v in s['ranges']];pub.publish(msg);j+=1
             rclpy.spin_once(node,timeout_sec=.005)
         if localize:
             until(lambda:len(poses)>=3,10)
@@ -235,10 +299,10 @@ def recorded_replay(a):
             graph_sha256={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
             replay_clock_offset_s=clock_start-source_start,
             limitations=['recorded-room coverage only, not whole-home mapping',
-                'nominal encoder and mounting calibration; no surveyed map accuracy',
+                'nominal mounting calibration and odometry prior; no surveyed map accuracy',
                 'process restart passed is not physical power-reconnect relocalization'])
     except Exception as error:
-        report['error']=str(error)
+        report['error']=f'{type(error).__name__}: {error}'
         raise
     finally:
         if proc is not None:
@@ -247,9 +311,17 @@ def recorded_replay(a):
                 report['cleanup_error']=str(error);report['passed']=False
                 if proc is not None and proc.poll() is None:proc.kill();proc.wait()
         for f in logs:f.close()
+        # Preserve ROS timestamps and also expose source-time coordinates. Existing
+        # offline consumers subtract replay_clock_offset_s from stamp.
+        if a.replay_rate != 1 and 'clock_start' in locals():
+            for row in poses:
+                row['replay_stamp']=row['stamp']
+                row['stamp']=clock_start+(row['stamp']-clock_start)*a.replay_rate
+            report['replay_rate']=a.replay_rate
+            report['pose_stamp_basis']='source-time scaled stamp; actual ROS time retained as replay_stamp'
         (a.output/('amcl-poses.json' if localize else 'slam-poses.json')).write_text(json.dumps(poses))
         (a.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
-        node.destroy_node();rclpy.shutdown()
+        node.destroy_node();rclpy.try_shutdown()
     print(json.dumps(report))
     return report
 
@@ -257,21 +329,34 @@ def recorded_replay(a):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--output',type=Path,default=ROOT/'output/s4-local/slam')
+    p.add_argument('--finalize-graph-from',type=Path,help='Export final optimized poses from an existing verified map; no replay or ROS')
+    p.add_argument('--graph-pose-exporter',type=Path,help='Locally compiled export_slam_graph_poses.cpp using the matching Karto library')
     p.add_argument('--reverse-ray-timing',action='store_true',help='exercise signed ray-time metadata used by the LDS driver')
     p.add_argument('--recorded-capture',type=Path)
     p.add_argument('--teleop',type=Path)
+    p.add_argument('--prepared-campaign',action='store_true',help='Replay hash-verified offline campaign; never rewrites source teleop events')
+    p.add_argument('--replay-rate',type=float,default=1.,help='Offline SLAM wall-time speed, 1..8; ray and selection timing scale with timestamps')
     p.add_argument('--allow-startup-scan-gaps',action='store_true',help='Offline only: retain failed whole-capture status but replay a clean drive window after startup gaps')
     p.add_argument('--localization-map',type=Path,help='saved occupancy.json with report.json; same capture compares SLAM poses, new capture reviews scan/map fit')
     p.add_argument('--initial-pose',nargs=3,type=float,default=[0.,0.,0.],metavar=('X','Y','YAW'))
     p.add_argument('--global-localization',action='store_true',help='initialize AMCL across saved-map free space instead of providing a pose')
     p.add_argument('--scan-map-initialization',action='store_true',help='offline initial-scan map search; refuse ambiguous hypotheses, then test later scans with AMCL')
     a=p.parse_args();a.output=a.output.resolve()
+    if a.finalize_graph_from:
+        if not a.graph_pose_exporter or a.recorded_capture or a.teleop or a.prepared_campaign or a.localization_map:
+            p.error('graph finalization requires exporter and excludes replay inputs')
+        report=finalize_saved_graph(a.finalize_graph_from,a.output,a.graph_pose_exporter)
+        print(json.dumps(dict(passed=report['passed'],final_graph_poses=True,poses=report['slam_pose_messages'])))
+        return 0
+    if not math.isfinite(a.replay_rate) or not 1<=a.replay_rate<=8:p.error('--replay-rate must be 1..8')
+    if a.prepared_campaign and (not a.recorded_capture or a.teleop or a.localization_map):p.error('campaign requires recorded capture and excludes teleop/localization')
+    if a.replay_rate!=1 and (not a.recorded_capture or a.localization_map):p.error('accelerated replay is for recorded SLAM only')
     if a.scan_map_initialization and (not a.localization_map or a.global_localization):p.error('--scan-map-initialization requires a map and excludes --global-localization')
     if a.global_localization and not a.localization_map:p.error('--global-localization requires --localization-map')
     if a.localization_map and not a.recorded_capture:p.error('--localization-map requires --recorded-capture')
     if not all(math.isfinite(v) for v in a.initial_pose):p.error('finite initial pose required')
     if a.recorded_capture:
-        if not a.teleop:p.error('--recorded-capture requires --teleop')
+        if not a.teleop and not a.prepared_campaign:p.error('--recorded-capture requires --teleop or --prepared-campaign')
         return 0 if recorded_replay(a)["passed"] else 1
     a.output.mkdir(parents=True,exist_ok=True)
     import rclpy

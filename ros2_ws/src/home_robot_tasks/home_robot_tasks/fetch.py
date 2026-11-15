@@ -54,7 +54,7 @@ class TaskStep:
     start_requires: tuple[str, ...] = ()
 
 
-def plan_fetch(request: FetchRequest, world: Mapping[str, Any]) -> dict[str, Any]:
+def plan_fetch(request: FetchRequest, world: Mapping[str, Any], *, planning_in_skill=False) -> dict[str, Any]:
     if not isinstance(world, dict) or type(world.get("schema_version")) is not int or world["schema_version"] != 1:
         raise InvalidTask("world schema_version must be 1")
     if world.get("transport_mode") != "carry_in_gripper":
@@ -129,6 +129,18 @@ def plan_fetch(request: FetchRequest, world: Mapping[str, Any]) -> dict[str, Any
                  ("fresh_observation", "object_at_destination"), 30,
                  start_requires=stationary),
     )
+    if type(planning_in_skill) is not bool:
+        raise InvalidTask('explicit skill planning policy required')
+    if planning_in_skill:
+        # Fresh geometry is planned INSIDE the asynchronous skill. Requiring its
+        # collision result before starting that skill creates a circular gate.
+        # Motion still requires the compiled full route and resident validation.
+        from dataclasses import replace
+        steps=tuple(replace(step,
+            timeout_s=180 if step.skill.startswith('align_') else 300 if step.skill in {'pick','place'} else step.timeout_s,
+            start_requires=tuple(k for k in step.start_requires if not (step.skill in {'pick','place'} and k=='collision_checked')),
+            success_requires=tuple(k for k in step.success_requires if not (step.skill in {'reobserve_target','reobserve_destination'} and k=='reachable')))
+            for step in steps)
     return {
         "schema_version": 1,
         "task": "fetch_object",

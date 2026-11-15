@@ -7,6 +7,52 @@ from home_robot_tasks.s4_base_preparation import prepare, review_capture
 ROOT=Path(__file__).resolve().parents[1]
 
 
+def steady_lidar_fixture():
+    import numpy as np
+    records=[dict(event='session',host_monotonic_ns=0,
+        firmware=dict(firmware='mobile-base-hold-teleop-v7',max_raw=200))]
+    for n in range(1,241):
+        records.append(dict(event='command',host_monotonic_ns=n*50_000_000,session=1,sequence=n,motion='F'))
+        records.append(dict(event='reply',host_monotonic_ns=n*50_000_000+2_000_000,
+            reply=dict(type='ack',session=1,sequence=n,armed=True,fault=False,hold_confirmed=True)))
+    times=np.arange(0,12.2,.1)
+    poses=np.column_stack((times,.02*times,np.zeros(len(times)),np.zeros(len(times))))
+    return records,poses
+
+
+def test_lidar_command_fit_uses_displacement_and_retains_interrupted_prefix():
+    from home_robot_tasks.s4_base_preparation import teleop_speed_windows
+    records,poses=steady_lidar_fixture()
+    records.append(dict(event='finished',host_monotonic_ns=12_100_000_000,error='link lost'))
+    result=teleop_speed_windows(records,poses)
+    assert len(result)==3
+    assert all(w['twist']==pytest.approx((.02,0,0)) for w in result)
+
+
+@pytest.mark.parametrize('fault',['missing_ack','wrong_session','scan_gap','pause'])
+def test_lidar_fit_does_not_bridge_command_or_scan_boundaries(fault):
+    from home_robot_tasks.s4_base_preparation import teleop_speed_windows
+    records,poses=steady_lidar_fixture()
+    if fault=='missing_ack':del records[240]
+    if fault=='wrong_session':records[240]['reply']['session']=99
+    if fault=='pause':records.insert(241,dict(event='paused',host_monotonic_ns=6_003_000_000))
+    if fault=='scan_gap':poses=poses[(poses[:,0]<5.9)|(poses[:,0]>6.4)]
+    result=teleop_speed_windows(records,poses)
+    assert result and all(not w['start_s']<6<w['end_s'] for w in result)
+
+
+def test_lidar_fit_unwraps_heading_and_rejects_clock_regression():
+    import numpy as np
+    from home_robot_tasks.s4_base_preparation import teleop_speed_windows
+    records,poses=steady_lidar_fixture()
+    for row in records:
+        if row['event']=='command':row['motion']='A'
+    poses[:,1:3]=0;poses[:,3]=(3.+.1*poses[:,0]+np.pi)%(2*np.pi)-np.pi
+    assert all(w['twist']==pytest.approx((0,0,.1)) for w in teleop_speed_windows(records,poses))
+    records[20]['host_monotonic_ns']=0
+    with pytest.raises(ValueError,match='clock'):teleop_speed_windows(records,poses)
+
+
 def test_official_geometry_matches_existing_teleop_directions_without_enable():
     result=prepare(ROOT)
     assert result['wheel_order']==[7,8,9]

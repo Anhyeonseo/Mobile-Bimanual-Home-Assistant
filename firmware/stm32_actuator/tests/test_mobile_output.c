@@ -35,7 +35,30 @@ static void exercise(uint32_t start_us,uint32_t start_ms) {
     CHECK(count[ACTUATOR_BUS_WORK_WHEELS]==6000 && count[ACTUATOR_BUS_WORK_LIFT]==3000);
     CHECK(o.writes_completed==9000);
 }
+static void timer_edge(uint32_t origin) {
+    actuator_mobile_supervisor_t s;actuator_mobile_output_t o;
+    CHECK(actuator_mobile_init(&s,&limits));observe(&s,0);
+    CHECK(actuator_mobile_output_init(&o,&s,&config,origin));
+    /* Disabled supervisor isolates clock handling from motion/feedback expiry. */
+    for(uint32_t delta=0;delta<5000;delta+=100)
+        actuator_mobile_output_poll(&o,origin+delta,delta/1000,origin);
+    for(uint32_t delay=0;delay<config.schedule.guard_us;delay++) {
+        actuator_mobile_output_poll(&o,origin+5000+delay,5,origin);
+        CHECK(o.fault==MOBILE_OUTPUT_OK && !o.stop_requested);
+        CHECK(!o.available_us && !o.feedback_due);
+        const uint8_t *p;size_t n;uint32_t token;actuator_bus_work_t kind;
+        CHECK(!actuator_bus_router_next(&o.router,origin+5000+delay,o.available_us,&p,&n,&token,&kind));
+    }
+    /* Recovery requires a real newer epoch, with its arm window still reserved. */
+    actuator_mobile_output_poll(&o,origin+5200,5,origin+5199);
+    CHECK(o.fault==MOBILE_OUTPUT_OK && !o.available_us);
+    /* A stopped timer is not hidden by the edge wait. */
+    for(uint32_t d=5300;d<10300;d+=100)actuator_mobile_output_poll(&o,origin+d,d/1000,origin+5199);
+    actuator_mobile_output_poll(&o,origin+10399,10,origin+5199);
+    CHECK(o.fault==MOBILE_OUTPUT_SCHEDULE && o.stop_requested);
+}
 int main(void) {
+    timer_edge(0);timer_edge(UINT32_MAX-2500u);
     exercise(0,0);exercise(UINT32_MAX-20000u,UINT32_MAX-30000u);
     actuator_mobile_supervisor_t s;actuator_mobile_output_t o;
     CHECK(actuator_mobile_init(&s,&limits));observe(&s,0);

@@ -161,6 +161,18 @@ bool ControlTick_PeekEpoch(uint32_t *epoch_us)
     return valid;
 }
 
+bool ControlTick_PeekClock(uint32_t *now_us, uint32_t *epoch_us)
+{
+    if (now_us == NULL || epoch_us == NULL) return false;
+    const uint32_t mask = __get_PRIMASK();
+    __disable_irq();
+    bool valid = previous_started_valid != 0U;
+    *epoch_us = previous_started_us;
+    *now_us = Timebase_NowUs();
+    if (mask == 0U) __enable_irq();
+    return valid;
+}
+
 bool ControlTick_ReadWindowAvailable(uint32_t budget_us)
 {
     const uint32_t mask = __get_PRIMASK();

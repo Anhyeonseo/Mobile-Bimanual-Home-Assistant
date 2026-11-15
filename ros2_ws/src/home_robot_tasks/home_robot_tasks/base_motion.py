@@ -66,6 +66,38 @@ class OmniKinematics:
         return tuple(sum(self.inverse_columns[j][i]*values[j] for j in range(3)) for i in range(3))
 
 
+class TeleopCommandModel:
+    """Recorded floor-speed feedforward with the verified three-wheel ratios.
+
+    This models commands, NOT encoder units or measured odometry. Pure forward
+    never adds a front-wheel command. One saturation factor preserves combined
+    directions; the firmware remains the sole owner of physical motor signs.
+    """
+    def __init__(self, profile):
+        if (profile.get('mode') != 'recorded_teleop_command_candidate'
+                or profile.get('wheel_order') != [7,8,9]
+                or profile.get('reference_raw') != 200
+                or profile.get('patterns') != {'F':[-200,200,0], 'L':[-100,-100,200], 'A':[200,200,200]}):
+            raise InvalidTask('verified three-wheel teleop command basis required')
+        self.speeds = _vector(profile['axis_speed_at_reference'])
+        self.limit = number(profile['maximum_raw'],'raw command limit')
+        if any(v<=0 for v in self.speeds) or not 0<self.limit<=200:
+            raise InvalidTask('positive recorded speeds and bounded raw output required')
+
+    def raw_command(self, twist):
+        x,y,a=(v/s for v,s in zip(_vector(twist),self.speeds))
+        values=(-200*x-100*y+200*a,200*x-100*y+200*a,200*y+200*a)
+        scale=max(1.,*(abs(v)/self.limit for v in values))
+        return tuple(v/scale for v in values)
+
+    def expected_twist(self, raw):
+        """Expected feedforward response, never a substitute for observation."""
+        left,right,front=_vector(raw)
+        return ((right-left)/400*self.speeds[0],
+                (2*front-left-right)/600*self.speeds[1],
+                (left+right+front)/600*self.speeds[2])
+
+
 class WheelOdometry:
     """SE(2) integration with previous measured velocity held between samples.
 

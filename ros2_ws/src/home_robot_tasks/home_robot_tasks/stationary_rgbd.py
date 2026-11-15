@@ -7,10 +7,163 @@ robot returns to its former pose. This module never authorizes motor commands.
 """
 
 from dataclasses import dataclass
+import hashlib
+import json
+from pathlib import Path
+import numpy as np
 
 from .fetch import InvalidTask
 from .navigation import identifier, number
 from .perception import CameraIntrinsics, depth_target
+
+
+# Camera-only A/B/A and independent restart trials, 2026-11-15. This is an
+# acquisition choice for stopped height review, not a new geometric offset or
+# a change to navigation/arm capture defaults. Capture restores it on exit.
+HEIGHT_DEPTH_EXPOSURE_US = 16000
+
+
+def height_frame_issue(record):
+    """Check exposure-time evidence; never substitute sensor option readback.
+
+    A failed check requests another height frame, not a controller fault.
+    Automatic exposure's get_option(exposure) can remain 33000 while the actual
+    frame exposure is different. Gain/laser metadata are retained for review.
+    """
+    settings=record.get('depth_frame',{}).get('settings',{})
+    if settings.get('auto_exposure')!=0:return 'depth_manual_exposure_unconfirmed'
+    if settings.get('actual_exposure')!=HEIGHT_DEPTH_EXPOSURE_US:
+        return 'depth_exposure_not_settled'
+    return None
+
+
+@dataclass(frozen=True)
+class SurfaceHeightModel:
+    """Absolute optical-point height model; does not replace a rigid XYZ TF.
+
+    Use raw registered optical XYZ, never previously corrected base/map XYZ.
+    Only the Z row of the measured camera calibration is adopted. Arm zeros,
+    arm mounts, map XY, and the released manipulation TF remain untouched.
+    Requires the stopped upright base/floor convention used by the capture.
+    """
+    model_id: str
+    base_z_from_optical: tuple
+    ground_z_m: float
+
+    def __post_init__(self):
+        identifier(self.model_id,'height model id')
+        row=np.asarray(self.base_z_from_optical,dtype=float)
+        if (row.shape!=(4,) or not np.isfinite(row).all() or
+                not np.isclose(np.linalg.norm(row[:3]),1.,atol=1e-8,rtol=0) or
+                not 0<row[3]<3 or not np.isfinite(self.ground_z_m)):
+            raise InvalidTask('valid absolute optical height projection required')
+
+    def heights(self,optical_xyz):
+        xyz=np.asarray(optical_xyz,dtype=float)
+        if xyz.ndim<1 or xyz.shape[-1]!=3 or not np.isfinite(xyz).all():
+            raise InvalidTask('finite raw optical XYZ required')
+        row=np.asarray(self.base_z_from_optical)
+        # The calibrated translation is absolute: no legacy -9.1mm adjustment.
+        return xyz@row[:3]+row[3]-self.ground_z_m
+
+
+def load_surface_height_model(root):
+    root=Path(root)
+    config=json.loads((root/'config/home_assistant/camera_height.calibrated.json').read_text())
+    unsigned={k:v for k,v in config.items() if k!='model_id'}
+    digest=hashlib.sha256(json.dumps(unsigned,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+    profile=json.loads((root/'config/home_assistant/s2_coordinates.development.json').read_text())
+    if (config.get('model_id')!='height-'+digest[:24] or
+            config.get('mode')!='absolute_optical_height_only' or
+            config.get('profile_calibration_id')!=profile['calibration_id'] or
+            config.get('source_frame')!=profile['source_frame'] or
+            config.get('ground_z_m')!=profile['ground_z_m'] or
+            config.get('legacy_z_adjustment_applied') is not False):
+        raise InvalidTask('height model/profile binding mismatch')
+    return SurfaceHeightModel(config['model_id'],tuple(config['base_z_from_optical']),config['ground_z_m'])
+
+
+def observed_floor_height_model(root, optical_xyz):
+    """Height-only reference for one stopped frame; never changes a rigid TF.
+
+    Reuse navigation's bounded floor-plane fit on the original rigid transform.
+    The measured optical plane supplies only signed height above that floor.
+    A missing/ambiguous floor returns the calibrated model with explicit source;
+    callers must not label that fallback as an observed floor correction.
+    Base/lift stillness and exposure identity remain the caller's responsibility.
+    """
+    from .navigation_depth import measured_floor_heights
+    root=Path(root)
+    nominal=load_surface_height_model(root)
+    xyz=np.asarray(optical_xyz,dtype=float)
+    if xyz.ndim!=2 or xyz.shape[1]!=3 or not np.isfinite(xyz).all():
+        raise InvalidTask('finite optical point cloud required')
+    profile=json.loads((root/'config/home_assistant/s2_coordinates.development.json').read_text())
+    rigid=np.asarray(profile['base_from_optical'],dtype=float)
+    base=xyz@rigid[:3,:3].T+rigid[:3,3]
+    _,plane=measured_floor_heights(base,profile['ground_z_m'])
+    evidence=dict(source='calibrated_height_fallback',parent_model_id=nominal.model_id,
+                  floor_observed=False,rigid_transform_changed=False,arm_calibration_changed=False)
+    if plane is None:return nominal,evidence
+    normal=np.asarray(plane['normal'])
+    optical_normal=normal@rigid[:3,:3]
+    distance=float((rigid[:3,3]-np.asarray(plane['point_m']))@normal)
+    row=tuple(optical_normal.tolist()+[distance+nominal.ground_z_m])
+    identity='floor-height-'+hashlib.sha256(json.dumps(row).encode()).hexdigest()[:24]
+    observed=SurfaceHeightModel(identity,row,nominal.ground_z_m)
+    return observed,{**evidence,'source':'observed_floor_plane','floor_observed':True,
+        'floor_fit':plane,'base_z_from_optical':list(row),'model_id':identity}
+
+
+def settled_surface_height(samples, *, stopped_s, settle_s=1., minimum_span_s=1.,
+                           maximum_spread_m=.006):
+    """Review a stopped, exposure-bound surface sequence without motor authority.
+
+    Each sample supplies capture_id, observed_s, pose_revision, surface_id,
+    calibration_id and height_m. The caller fits the SAME surface at each
+    exposure and binds pose_revision to stopped base/lift evidence. Discarding
+    transient samples is allowed, but a persistent height change is not hidden
+    by averaging. The selected frame is real, not a synthetic averaged image.
+    Stable depth does not prove a correct extrinsic calibration or level camera.
+    """
+    for name,value in (('stopped_s',stopped_s),('settle_s',settle_s),
+                       ('minimum_span_s',minimum_span_s),('maximum_spread_m',maximum_spread_m)):
+        if not np.isfinite(value) or value<0:raise InvalidTask('invalid surface window '+name)
+    if not 0<maximum_spread_m<=.02 or minimum_span_s<=0:
+        raise InvalidTask('bounded surface window required')
+    if not isinstance(samples,(list,tuple)) or len(samples)>300:
+        raise InvalidTask('bounded surface samples required')
+    rows=[];identities=set();ids=set();previous=-float('inf')
+    for sample in samples:
+        stamp=number(sample['observed_s'],'surface exposure')
+        height=number(sample['height_m'],'surface height')
+        capture=identifier(sample['capture_id'],'surface capture')
+        identity=tuple(identifier(sample[k],k) for k in ('pose_revision','surface_id','calibration_id'))
+        if not 0<=height<=3 or stamp<=previous or capture in ids:
+            raise InvalidTask('unique ordered surface exposures required')
+        previous=stamp;ids.add(capture)
+        if stamp>=stopped_s+settle_s:
+            rows.append(sample);identities.add(identity)
+    if len(identities)>1:raise InvalidTask('surface or stopped configuration changed')
+    result=dict(status='RETRY_CAPTURE',motion_authorized=False,physical_accuracy_verified=False,
+                retained_capture_ids=[],height_m=None,reason='insufficient_settled_exposures')
+    if len(rows)<5 or rows[-1]['observed_s']-rows[0]['observed_s']<minimum_span_s:return result
+    heights=np.array([s['height_m'] for s in rows]);median=float(np.median(heights))
+    # A single sensor spike must not force a lift step. A changed or oscillating
+    # plateau occupying more than 20% of the window requests another capture.
+    keep=np.abs(heights-median)<=maximum_spread_m/2
+    kept=[r for r,k in zip(rows,keep) if k]
+    result.update(total_frames=len(rows),inlier_frames=len(kept),raw_range_m=float(np.ptp(heights)))
+    if (len(kept)<5 or keep.mean()<.8 or
+            kept[-1]['observed_s']-kept[0]['observed_s']<minimum_span_s):
+        result['reason']='surface_height_not_settled';return result
+    median=float(np.median(heights[keep]))
+    representative=min(kept,key=lambda r:(abs(r['height_m']-median),-r['observed_s']))
+    return {**result,'status':'SETTLED_SURFACE','reason':'stable_height_window',
+            'height_m':median,'spread_m':float(np.ptp(heights[keep])),
+            'representative_capture_id':representative['capture_id'],
+            'retained_capture_ids':[r['capture_id'] for r in kept],
+            'window_s':[kept[0]['observed_s'],kept[-1]['observed_s']]}
 
 
 @dataclass(frozen=True)

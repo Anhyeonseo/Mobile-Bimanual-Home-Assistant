@@ -39,6 +39,8 @@ typedef struct
 } BimanualTrackingFeedbackSnapshot;
 
 HAL_StatusTypeDef BimanualTrackingFeedback_Begin(void);
+/* Caller MUST enforce per-joint freshness; no use by trajectory or STOP. */
+HAL_StatusTypeDef BimanualTrackingFeedback_BeginObservation(void);
 void BimanualTrackingFeedback_End(void);
 uint8_t BimanualTrackingFeedback_Active(void);
 uint8_t BimanualTrackingFeedback_CanStart(void);

@@ -1,0 +1,17 @@
+[
+  {"capture": "07_same_objects", "object": "cup", "location": null, "expect": "AMBIGUOUS_TARGET"},
+  {"capture": "07_same_objects", "object": "cup", "location": "left", "expect": [61, 45, 214, 234]},
+  {"capture": "07_same_objects", "object": "cup", "location": "right", "expect": [429, 28, 589, 220]},
+  {"capture": "08_same_objects", "object": "cup", "location": "front", "expect": [269, 134, 470, 369]},
+  {"capture": "08_same_objects", "object": "cup", "location": "back", "expect": [291, 9, 428, 144]},
+  {"capture": "10_misc_objects", "object": "remote control", "location": null, "expect": [545, 110, 609, 237]},
+  {"capture": "10_misc_objects", "object": "calculator", "location": null, "expect": [56, 103, 210, 250]},
+  {"capture": "03_similar_objects", "object": "marker pen", "location": null, "expect": [536, 132, 598, 286]},
+  {"capture": "03_similar_objects", "object": "utility knife", "location": null, "expect": [125, 168, 243, 325]},
+  {"capture": "10_misc_objects", "object": "marker pen", "location": null, "expect": [127, 215, 351, 271]},
+  {"capture": "10_misc_objects", "object": "utility knife", "location": null, "expect": [376, 89, 485, 215]},
+  {"capture": "05_remote_only", "object": "cup", "location": null, "expect": "NOT_FOUND"},
+  {"capture": "05_remote_only", "object": "calculator", "location": null, "expect": "NOT_FOUND"},
+  {"capture": "07_same_objects", "object": "remote control", "location": null, "expect": "NOT_FOUND"},
+  {"capture": "04_similar_objects", "object": "cup", "location": null, "expect": "NOT_FOUND"}
+]

@@ -205,7 +205,7 @@ static RightServoReadStatus RightServo_ReadDataOwned(
 static RightServoReadStatus RightServo_ReadData(
     uint8_t servo_id, uint8_t address, uint8_t length, uint8_t *data)
 {
-#if HOST_MOBILE_BASE_PRESERVE_HOLD
+#if HOST_MOBILE_BASE_PRESERVE_HOLD || HOST_S4_UNIFIED_CANDIDATE
     /* A late RX byte can leave End busy after a completed read. Retain the
      * owner until it can be released; never strand all later hold queries. */
     if (right_service_token != 0U) {

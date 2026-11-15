@@ -99,6 +99,10 @@ option(MOBILE_WHEEL_PULSE_ONLY "Raised-wheel single bounded pulse; no arm/lift o
 
 option(S3_LEFT_GRIP_BENCH_ONLY "Bounded low-speed left ID6 closing test" OFF)
 option(S3_STATIONARY_PICK_CANDIDATE "Resident stationary pick candidate with measured ranges and bounded gripper output" OFF)
+option(S4_UNIFIED_CANDIDATE "Explicit arm/mobile/lift commissioning; no boot setup" OFF)
+if(S4_UNIFIED_CANDIDATE AND NOT S3_STATIONARY_PICK_CANDIDATE)
+    message(FATAL_ERROR "S4 unified candidate reuses the S3 calibrated resident")
+endif()
 if(S3_STATIONARY_PICK_CANDIDATE AND
    (NOT BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE OR NOT S1_ARM_RANGE_PROFILE_HEADER OR
     S3_LEFT_GRIP_BENCH_ONLY OR HOME_ASSISTANT_INVENTORY))
@@ -486,7 +490,11 @@ if(BIMANUAL_DMA_DISPATCH_CANDIDATE OR
                     endif()
                 else()
                     if(S3_STATIONARY_PICK_CANDIDATE)
-                        target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024911UL HOST_S3_STATIONARY_PICK=1U)
+                        if(S4_UNIFIED_CANDIDATE)
+                            target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x0002492DUL HOST_S3_STATIONARY_PICK=1U)
+                        else()
+                            target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024911UL HOST_S3_STATIONARY_PICK=1U)
+                        endif()
                     elseif(S1_ARM_RANGE_PROFILE_HEADER)
                         target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x0002490AUL)
                     elseif(HOME_ASSISTANT_INVENTORY)
@@ -789,6 +797,12 @@ endif()
 if(MOBILE_BOARD_PROFILE_HEADER)
     target_compile_definitions(${TARGET_NAME} PRIVATE MOBILE_BOARD_PROFILE_HEADER="${MOBILE_BOARD_PROFILE_HEADER}")
 endif()
+if(S4_UNIFIED_CANDIDATE)
+    if(NOT MOBILE_BOARD_PROFILE_HEADER)
+        message(FATAL_ERROR "S4 unified candidate requires an explicit review profile")
+    endif()
+    target_compile_definitions(${TARGET_NAME} PRIVATE HOST_S4_UNIFIED_CANDIDATE=1U)
+endif()
 
 # Same motor allocation in normal output, feedback, provisioning and STOP.
 set(ACTUATOR_MOBILE_FIRST_ID "8" CACHE STRING "First of four consecutive mobile servo IDs; assembled robot uses 7")
@@ -817,9 +831,9 @@ endif()
 
 if(S1_ARM_RANGE_PROFILE_HEADER)
     if(NOT BIMANUAL_GRIPPER_TERMINAL_SETTLE_CANDIDATE OR HOME_ASSISTANT_INVENTORY OR
-       TAUGHT_POSE_PROFILE_HEADER OR MOBILE_BOARD_PROFILE_HEADER OR
+       TAUGHT_POSE_PROFILE_HEADER OR (MOBILE_BOARD_PROFILE_HEADER AND NOT S4_UNIFIED_CANDIDATE) OR
        NOT EXISTS "${S1_ARM_RANGE_PROFILE_HEADER}")
-        message(FATAL_ERROR "S1 ranges require dual-arm resident verification with no taught/mobile/inventory profile")
+        message(FATAL_ERROR "S1 ranges require the calibrated resident; mobile profile requires explicit S4 unified build")
     endif()
     target_compile_definitions(${TARGET_NAME} PRIVATE
         S1_ARM_RANGE_PROFILE_HEADER="${S1_ARM_RANGE_PROFILE_HEADER}")

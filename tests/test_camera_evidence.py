@@ -143,3 +143,27 @@ def test_near_mode_rejects_changed_factory_geometry(mutation):
     near['camera_device']['stream_profile_id']='rgbd-v1-'+geo.digest(near['profiles'])
     with pytest.raises(ValueError):
         near_depth_profile(profile,base,near)
+
+
+@pytest.mark.parametrize('bad',[None,'depth','device','extrinsics','tamper'])
+def test_wide_rgb_uses_measured_intrinsics_and_preserves_robot_model(bad):
+    from home_robot_tasks.camera_evidence import wide_color_profile
+    base=from_metadata(metadata())
+    profile=dict(camera_device=base['camera_device'],motion_authorized=False,calibration_id='old',
+                 arms={'left':'unchanged'},base_from_optical=np.eye(4).tolist())
+    m=metadata();m['color_capture'].update(width=1280,height=720)
+    for key in ('color_intrinsics','aligned_depth_intrinsics'):
+        m[key].update(width=1280,height=720,fx=930.,fy=930.,ppx=640.,ppy=360.)
+    if bad=='depth':m['native_depth_intrinsics']['fx']+=1
+    if bad=='device':m['device']['serial']='another'
+    if bad=='extrinsics':m['depth_to_color']['translation_m'][0]+=.001
+    measured=from_metadata(m)
+    if bad=='tamper':measured['sdk_calibration']['color_intrinsics']['fx']+=1
+    if bad:
+        with pytest.raises(ValueError):wide_color_profile(profile,base,measured)
+    else:
+        wide=wide_color_profile(profile,base,measured)
+        assert wide['camera_device']==measured['camera_device']
+        assert wide['calibration_id']!='old' and wide['base_profile_id']=='old'
+        assert wide['arms']==profile['arms'] and wide['base_from_optical']==profile['base_from_optical']
+        assert profile['calibration_id']=='old' and not wide['motion_authorized']

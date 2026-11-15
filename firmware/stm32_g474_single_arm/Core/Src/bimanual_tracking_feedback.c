@@ -17,6 +17,7 @@ typedef struct
     uint32_t started_at_ms;
     uint8_t pair_failed;
     uint8_t faulted;
+    uint8_t observation_only;
     uint16_t left_commanded_raw[BIMANUAL_TRACKING_ARM_JOINT_COUNT];
     uint16_t right_commanded_raw[BIMANUAL_TRACKING_ARM_JOINT_COUNT];
     int32_t left_commanded_urad;
@@ -37,7 +38,7 @@ static BimanualTrackingFeedbackResult RecordPairFailure(void)
         tracking.snapshot.consecutive_failed_pairs++;
     }
     if (tracking.snapshot.consecutive_failed_pairs >=
-        HOST_BIMANUAL_TRACKING_READ_FAILURE_LIMIT)
+        HOST_BIMANUAL_TRACKING_READ_FAILURE_LIMIT && !tracking.observation_only)
     {
         tracking.faulted = 1U;
         return BIMANUAL_TRACKING_FAULT;
@@ -75,6 +76,16 @@ HAL_StatusTypeDef BimanualTrackingFeedback_Begin(void)
 #endif
     tracking.snapshot.active = 1U;
     return HAL_OK;
+}
+
+/* Background observation has an independent, unchanged per-joint age bound.
+ * Only fully retired, healthy-RX missing responses may retry inside that bound.
+ * Trajectory and STOP monitoring keep the default consecutive-failure limit. */
+HAL_StatusTypeDef BimanualTrackingFeedback_BeginObservation(void)
+{
+    HAL_StatusTypeDef status = BimanualTrackingFeedback_Begin();
+    if (status == HAL_OK) tracking.observation_only = 1U;
+    return status;
 }
 
 void BimanualTrackingFeedback_End(void)

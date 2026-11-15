@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 import numpy as np
 from .navigation_depth import native_endpoints
-from .s4_recorded_mapping import interpolate, transform, pose
 
 
 def clip_recorded_boxes(detections,shape):
@@ -58,8 +57,10 @@ def register_native_depth(raw, metadata):
 
 
 class RecordedMapPoses:
-    def __init__(self, odom, slam_poses, clock_offset):
+    def __init__(self, odom, slam_poses, clock_offset, *, final_graph=False):
+        from .s4_recorded_mapping import interpolate, transform, pose
         self.odom=odom
+        self.final_graph=final_graph
         self.rows=np.array([[p['stamp']-clock_offset,*p['xy_yaw']] for p in slam_poses])
         self.rows[:,3]=np.unwrap(self.rows[:,3])
         wheel=interpolate(odom,self.rows[:,0])
@@ -68,12 +69,48 @@ class RecordedMapPoses:
         self.corrections[:,3]=np.unwrap(self.corrections[:,3])
 
     def at(self, stamp, maximum_correction_gap_s=.75):
+        from .s4_recorded_mapping import interpolate, transform, pose
         index=int(np.searchsorted(self.rows[:,0],stamp,side='right'))
         if not 0<index<len(self.rows):raise ValueError('outside recorded map pose coverage')
         gap=self.rows[index,0]-self.rows[index-1,0]
-        if gap>maximum_correction_gap_s:raise ValueError('sparse SLAM correction interval')
+        if gap>maximum_correction_gap_s:
+            # A final optimized graph intentionally keeps sparse keyframes.
+            # Dense recorded lidar motion may bridge these; an online stream
+            # still uses the original conservative freshness requirement.
+            left,right=self.rows[index-1,0],self.rows[index,0]
+            sample_times=self.odom[(self.odom[:,0]>=left)&(self.odom[:,0]<=right),0]
+            # Evaluate a correction at the robot, not at the arbitrary odom
+            # origin. A small rotation far from that origin otherwise looks
+            # like a large translation and wrongly drops stationary restarts.
+            anchor=transform(interpolate(self.odom,[(left+right)/2])[0])
+            correction_delta=pose(np.linalg.inv(transform(self.corrections[index-1,1:])@anchor)
+                                  @(transform(self.corrections[index,1:])@anchor))
+            if (not self.final_graph or len(sample_times)<2
+                    or np.max(np.diff(np.r_[left,sample_times,right]))>2.
+                    or np.linalg.norm(correction_delta[:2])>.5 or abs(correction_delta[2])>np.deg2rad(20)):
+                raise ValueError('sparse SLAM correction interval')
         matrix=transform(interpolate(self.corrections,[stamp])[0])@transform(interpolate(self.odom,[stamp])[0])
         return matrix,float(gap)
+
+
+def choose_recorded_views(eligible, poses, count):
+    """Cover each source recording, then add spatially different viewpoints."""
+    from .s4_recorded_mapping import pose
+    groups={}
+    for i,row in enumerate(eligible):groups.setdefault(row.get('source_epoch','single'),[]).append(i)
+    if len(groups)>count:
+        return [eligible[i] for i in np.unique(np.linspace(0,len(eligible)-1,count,dtype=int))]
+    chosen=[indices[len(indices)//2] for indices in groups.values()]
+    locations=np.array([pose(poses.at(row['color_time_s'])[0]) for row in eligible])
+    while len(chosen)<min(count,len(eligible)):
+        distance=np.full(len(eligible),np.inf)
+        for index in chosen:
+            yaw=(locations[:,2]-locations[index,2]+np.pi)%(2*np.pi)-np.pi
+            score=np.linalg.norm(locations[:,:2]-locations[index,:2],axis=1)/.5+np.abs(yaw)/(np.pi/3)
+            distance=np.minimum(distance,score)
+        distance[chosen]=-1
+        chosen.append(int(np.argmax(distance)))
+    return [eligible[i] for i in sorted(chosen)]
 
 
 def landmark_view_support(store,instances):
@@ -168,26 +205,33 @@ def review_semantics(root,capture,slam,trajectory,output,model,segmenter,*,model
     from .fetch import InvalidTask
     import cv2
     root,capture,slam,trajectory,output=map(Path,(root,capture,slam,trajectory,output))
-    if output.exists() or type(frames) is not int or not 1<=frames<=20:raise ValueError('new output and 1..20 frames required')
+    if output.exists() or type(frames) is not int or not 1<=frames<=120:raise ValueError('new output and 1..120 frames required')
     sr=json.loads((slam/'report.json').read_text());tr=json.loads((trajectory/'report.json').read_text())
     if sr.get('passed') is not True or not sr.get('map_cells_identical_after_restart'):raise ValueError('verified saved SLAM required')
-    for report in (sr,tr):
-        for name in ('scans.json','report.json'):
-            expected=[v for k,v in report['source_sha256'].items() if k.endswith('/'+name)]
-            if expected!=[hashlib.sha256((capture/name).read_bytes()).hexdigest()]:raise ValueError('cross-capture map/trajectory refused')
+    capture_report=json.loads((capture/'report.json').read_text())
+    if capture_report.get('mode')=='offline_lidar_rgbd_attachment':
+        from .recorded_campaign import verify_rgbd_attachment
+        verify_rgbd_attachment(capture,sr,trajectory)
+    else:
+        for report in (sr,tr):
+            for name in ('scans.json','report.json'):
+                expected=[v for k,v in report['source_sha256'].items() if k.endswith('/'+name)]
+                if expected!=[hashlib.sha256((capture/name).read_bytes()).hexdigest()]:raise ValueError('cross-capture map/trajectory refused')
     metadata=json.loads((capture/'rgbd/metadata.json').read_text())
     match_observed_identity(from_metadata(metadata),json.loads((root/'config/home_assistant/camera_device.observed.json').read_text()))
     with np.load(trajectory/'trajectories.npz',allow_pickle=False) as data:odom=data['encoder']
-    poses=RecordedMapPoses(odom,json.loads((slam/'slam-poses.json').read_text()),sr['replay_clock_offset_s'])
+    poses=RecordedMapPoses(odom,json.loads((slam/'slam-poses.json').read_text()),sr['replay_clock_offset_s'],
+        final_graph=sr.get('final_graph_poses') is True and tr.get('trajectory_basis','').startswith('lidar_'))
     manifest=[json.loads(l) for l in (capture/'rgbd/frames.jsonl').read_text().splitlines()]
     eligible=[];excluded=[]
     for row in manifest:
         try:
+            if row.get('pose_covered') is False:raise ValueError('outside source segment lidar pose coverage')
             if abs(row['color_time_s']-row['depth_time_s'])>.05:raise ValueError('RGB/depth exposure skew')
             poses.at(row['color_time_s']);eligible.append(row)
         except ValueError as e:excluded.append(dict(file=row['file'],reason=str(e)))
     if not eligible:raise ValueError('no capture-time map poses')
-    chosen=[eligible[i] for i in np.unique(np.linspace(0,len(eligible)-1,min(frames,len(eligible)),dtype=int))]
+    chosen=choose_recorded_views(eligible,poses,frames)
     report=json.loads((capture/'report.json').read_text())
     transforms={t['child']:np.array(t['matrix']) for t in report['sensor_frames']['transforms']}
     optical=transforms['color_camera_optical_frame'].copy()
@@ -205,7 +249,8 @@ def review_semantics(root,capture,slam,trajectory,output,model,segmenter,*,model
             with np.load(path,allow_pickle=False) as data:rgb=data['color_bgr'][...,::-1].copy();raw=data['native_depth'].copy()
             registered=register_native_depth(raw,metadata)
             matrix,gap=poses.at(row['color_time_s']);world=np.eye(4);world[:2,:2]=matrix[:2,:2];world[:2,3]=matrix[:2,2];world=world@optical
-            stamp=Stamp(row['color_time_s'],context,row['capture_id'])
+            capture_id=(row['source_epoch']+'-'+row['capture_id']) if 'source_epoch' in row else row['capture_id']
+            stamp=Stamp(row['color_time_s'],context,capture_id)
             tf=TransformSample(stamp,'color_camera_optical_frame','map',world,'measured')
             entry=dict(capture=row,correction_gap_s=gap,registration='native pixel centres to RGB, nearest color-Z, no filling',
                 aligned_valid_fraction=float(np.mean(registered>0)),camera_to_map=world.tolist())

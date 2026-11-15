@@ -191,3 +191,117 @@ def review_teleop_capture(records):
 def _confirmed_stop(reply):
     return (reply.get('armed') is False and reply.get('fault') is False
             and reply.get('stop_confirmed') is True and reply.get('hold_confirmed') is True)
+
+
+def teleop_speed_windows(records, poses, *, time_offset_s=0.):
+    """Match acknowledged steady commands to independent, masked LiDAR poses.
+
+    Interrupted runs contribute their complete ACK intervals. Never cross a
+    pause, missing ACK, session change or scan gap. Ignore transition settling,
+    then fit 2–3 s SE(2) displacements rather than noisy per-frame derivatives.
+    """
+    poses=np.asarray(poses,dtype=float)
+    if (poses.ndim!=2 or poses.shape[1]!=4 or len(poses)<2 or
+            not np.isfinite(poses).all() or np.any(np.diff(poses[:,0])<=0)):
+        raise ValueError('ordered finite independent lidar poses required')
+    if (not records or records[0].get('event')!='session' or
+            records[0].get('firmware',{}).get('firmware')!='mobile-base-hold-teleop-v7' or
+            records[0]['firmware'].get('max_raw')!=200 or not math.isfinite(time_offset_s)):
+        raise ValueError('identified raw-200 teleop recording required')
+    pending=None;run=[];runs=[];last=-1
+    def boundary():
+        nonlocal run
+        if run:runs.append(run)
+        run=[]
+    for row in records:
+        stamp=row.get('host_monotonic_ns')
+        if type(stamp) is not int or stamp<last:raise ValueError('teleop clock regression')
+        last=stamp
+        if row['event']=='command':
+            if pending is not None:boundary()
+            pending=row
+        elif row['event']=='reply':
+            reply=row['reply'];command=pending;pending=None
+            valid=(command is not None and reply.get('type')=='ack' and
+                   reply.get('sequence')==command.get('sequence') and reply.get('session')==command.get('session') and
+                   reply.get('armed') is True and reply.get('fault') is False and reply.get('hold_confirmed') is True)
+            if not valid:boundary();continue
+            at=(stamp+command['host_monotonic_ns'])/2e9+time_offset_s
+            if not 0<=(stamp-command['host_monotonic_ns'])/1e9<=.2:boundary();continue
+            key=(command.get('motion'),command.get('session'))
+            if key[0] not in 'FBLRADZ':raise ValueError('unknown teleop motion')
+            if run and (key!=run[-1][1] or not 0<at-run[-1][0]<=.2 or command['sequence']!=run[-1][2]+1):boundary()
+            run.append((at,key,command['sequence']))
+        elif row['event'] in ('paused','finished','armed','browser_expired'):
+            boundary();pending=None
+    boundary();windows=[]
+    unwrapped=poses.copy();unwrapped[:,3]=np.unwrap(unwrapped[:,3])
+    for run in runs:
+        start,end=run[0][0]+.7,run[-1][0]-.3
+        if end-start<2 or run[0][1][0]=='Z':continue
+        for at in np.arange(start,end-1.99,3.):
+            finish=min(at+3.,end)
+            if at<poses[0,0] or finish>poses[-1,0]:continue
+            lo=max(0,np.searchsorted(poses[:,0],at)-1)
+            hi=min(len(poses),np.searchsorted(poses[:,0],finish)+1)
+            if np.max(np.diff(poses[lo:hi,0]))>.35:continue
+            a,b=np.array([[np.interp(t,unwrapped[:,0],unwrapped[:,i]) for i in range(1,4)] for t in (at,finish)])
+            yaw=b[2]-a[2];c,s=math.cos(a[2]),math.sin(a[2]);dx,dy=b[:2]-a[:2]
+            aa,bb=(math.sin(yaw)/yaw,(1-math.cos(yaw))/yaw) if abs(yaw)>1e-8 else (1.,0.)
+            velocity=np.linalg.solve([[aa,-bb],[bb,aa]],[c*dx+s*dy,-s*dx+c*dy])/(finish-at)
+            windows.append(dict(motion=run[0][1][0],start_s=float(at),end_s=float(finish),
+                                twist=[*velocity,float(yaw/(finish-at))]))
+    return windows
+
+
+def summarize_command_speed(windows, patterns):
+    expected={'F':[-200,200,0],'B':[200,-200,0],'L':[-100,-100,200],
+              'R':[100,100,-200],'A':[200,200,200],'D':[-200,-200,-200]}
+    if {v[0]:list(v[1]) for v in patterns.values()}!=expected:
+        raise ValueError('existing three-wheel teleop pattern mismatch')
+    directions={};axes=[]
+    for axis,pair in enumerate(('FB','LR','AD')):
+        centers=[]
+        for motion,sign in zip(pair,(1,-1)):
+            rows=np.asarray([w['twist'] for w in windows if w['motion']==motion])
+            if rows.ndim!=2 or len(rows)<3 or not np.isfinite(rows).all():
+                raise ValueError('insufficient complete steady intervals: '+motion)
+            speed=rows[:,axis]*sign;center=float(np.median(speed))
+            if center<=0:raise ValueError('recorded motion direction disagrees: '+motion)
+            directions[motion]=dict(windows=len(rows),median_twist=np.median(rows,axis=0).tolist(),
+                signed_axis_speed=center,axis_speed_q10_q90=np.quantile(speed,[.1,.9]).tolist(),
+                relative_median_deviation=float(np.median(abs(speed-center))/center))
+            centers.append(center)
+        axes.append(float(np.mean(centers)))  # balance both directions, not sample counts
+    return dict(schema_version=1,mode='recorded_teleop_command_candidate',hardware_enabled=False,
+        motion_authorized=False,physical_validation_pending=True,wheel_order=[7,8,9],reference_raw=200,
+        maximum_raw=200,patterns={k:expected[k] for k in ('F','L','A')},axis_speed_at_reference=axes,
+        directions=directions,windows=windows,feedback_scale_changed=False,
+        limitations=['Independent masked LiDAR estimate; not surveyed ground truth.',
+                    'Single output amplitude; low-output deadband and combined motions require live validation.',
+                    'Command model only; never replace measured feedback with command prediction.'])
+
+
+def review_lidar_command_scale(campaign, patterns):
+    """Reuse the completed lidar-only preparation and all original teleop epochs."""
+    campaign=Path(campaign);report=json.loads((campaign/'report.json').read_text())
+    if (report.get('passed') is not True or report.get('lidar_only') is not True or
+            report.get('wheel_feedback_used') is not False or not report.get('visibility',{}).get('masked_ray_indices')):
+        raise ValueError('independent body-shadow-masked lidar campaign required')
+    hashes={}
+    for name in ('report.json','trajectories.npz'):
+        path=campaign/name;hashes[str(path)]=hashlib.sha256(path.read_bytes()).hexdigest()
+        if name in report.get('artifact_sha256',{}) and hashes[str(path)]!=report['artifact_sha256'][name]:
+            raise ValueError('lidar trajectory digest mismatch')
+    with np.load(campaign/'trajectories.npz',allow_pickle=False) as data:poses=data['encoder']
+    windows=[]
+    for epoch in report['epochs']:
+        lo,hi=epoch['replay_interval_s'];selected=poses[(poses[:,0]>=lo)&(poses[:,0]<=hi)]
+        for path in sorted((campaign.parent/epoch['segment']/'teleop').glob('*.jsonl')):
+            hashes[str(path)]=hashlib.sha256(path.read_bytes()).hexdigest()
+            rows=[json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+            windows.extend(dict(w,segment=epoch['segment']) for w in teleop_speed_windows(rows,selected,time_offset_s=epoch['time_offset_s']))
+    result=summarize_command_speed(windows,patterns)
+    result.update(source_sha256=hashes,trajectory_basis=report['trajectory_basis'],
+                  visibility=report['visibility']['invalid_ray_policy'],hardware_commands=0)
+    return result

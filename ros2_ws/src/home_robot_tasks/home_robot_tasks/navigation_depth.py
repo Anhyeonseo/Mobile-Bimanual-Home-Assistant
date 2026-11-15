@@ -27,6 +27,29 @@ def native_endpoints(depth, valid, intrinsics, transform):
     return xyz@transform[:3,:3].T+transform[:3,3]
 
 
+def measured_floor_heights(points, ground_z):
+    """Remove small observed floor tilt, with nominal-height fallback.
+
+    Reuses the grasp support-plane fitter on a bounded sample. This affects
+    navigation classification only, not sensor extrinsics or grasp calibration.
+    """
+    from home_perception.geometry.plane import fit_plane
+    p=np.asarray(points,dtype=float).reshape(-1,3)
+    nominal=p[:,2]-ground_z
+    near=p[(np.abs(nominal)<.08)&(p[:,0]>.2)&(p[:,0]<1.5)&(np.abs(p[:,1])<1.)]
+    if len(near)<300:return nominal,None
+    near=near[::max(1,math.ceil(len(near)/4000))]
+    if np.linalg.eigvalsh(np.cov(near[:,:2].T))[0]<.2**2:return nominal,None
+    try:plane=fit_plane(near,threshold_m=.012,iterations=60,sample_size=4000)
+    except (ValueError,np.linalg.LinAlgError):return nominal,None
+    normal=plane.normal if plane.normal[2]>0 else -plane.normal
+    # A table, narrow patch or large mounting change is not a floor reference.
+    if (plane.inlier_fraction<.8 or plane.rms_m>.008 or normal[2]<math.cos(math.radians(5))
+            or abs(plane.point[2]-ground_z)>.04):return nominal,None
+    return (p-plane.point)@normal,dict(normal=normal.tolist(),point_m=plane.point.tolist(),
+        rms_m=plane.rms_m,inlier_fraction=plane.inlier_fraction)
+
+
 @dataclass(frozen=True)
 class DepthProfile:
     frame: str
@@ -81,9 +104,11 @@ class DepthVolume:
     def key(self, point):
         return tuple(math.floor(float(v) / self.p.resolution_m) for v in point)
 
-    def _ray(self, start, end):
+    def _ray(self, start, end, *, resolution_m=None):
         """Voxel traversal, excluding endpoint. Ties advance all crossed axes."""
-        r = self.p.resolution_m
+        r = self.p.resolution_m if resolution_m is None else number(resolution_m, 'ray resolution')
+        if r <= 0:
+            raise InvalidTask('positive ray resolution required')
         a,b=tuple(start),tuple(end)
         cell=[math.floor(v/r) for v in a]
         target=tuple(math.floor(v/r) for v in b)
