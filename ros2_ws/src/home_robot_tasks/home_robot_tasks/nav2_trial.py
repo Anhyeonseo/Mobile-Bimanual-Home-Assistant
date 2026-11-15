@@ -86,7 +86,7 @@ class Nav2Trial(TurnDriveTrial):
         return self.path(pose,goal)
 
     def start(self,now,pose,*,operator_confirmed):
-        if self.fine_alignment and not fresh_stationary(self.stationary_report,now):
+        if self.fine_alignment and not fresh_stationary(self.stationary_report,now,revision=self.required_map_revision):
             raise InvalidTask('정지 위치 관측을 모으는 중입니다')
         super().start(now,pose,operator_confirmed=operator_confirmed)
         self.motion_since=now;self.phase='NAV2'
@@ -139,7 +139,7 @@ class Nav2Trial(TurnDriveTrial):
         nav=self.nav
         if self.fine_alignment and self.state=='VERIFYING_ALIGNMENT':
             report=self.stationary_report
-            if (sensors_fresh and fresh_stationary(report,now)
+            if (sensors_fresh and fresh_stationary(report,now,revision=self.required_map_revision)
                     and report['observed_s']-report.get('span_s',0)>=self.verification_started):
                 measured=report['pose']
                 xy=math.dist(measured[:2],self.goal[:2]);yaw=abs(angle(measured[2]-self.goal[2]))

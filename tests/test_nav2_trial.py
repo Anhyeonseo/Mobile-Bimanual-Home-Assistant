@@ -450,3 +450,13 @@ def test_fine_nav2_config_changes_only_final_checker_not_collision_or_velocity()
     c['goal_checker']=regular['/s4_nav2_trial/controller_server']['ros__parameters']['goal_checker']
     c['FollowPath']['xy_goal_tolerance']=.025
     assert fine==regular
+
+
+def test_fine_alignment_rejects_stationary_window_from_replaced_map():
+    t=fine_trial();t.required_map_revision='new'
+    t.stationary_report=dict(ready=True,observed_s=1,map_revision='old')
+    with pytest.raises(ValueError,match='정지'):t.start(1,(0,0,0),operator_confirmed=True)
+    t.state='VERIFYING_ALIGNMENT';t.verification_started=1
+    t.stationary_report.update(observed_s=4,span_s=1.5,pose=list(t.goal))
+    assert not any(t.command(4,t.goal,4,sensors_fresh=True,corridor_clear=True))
+    assert t.state=='VERIFYING_ALIGNMENT' and not t.fine_verified

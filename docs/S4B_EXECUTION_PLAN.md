@@ -1017,3 +1017,18 @@ scope1 바퀴 정지를 확인했다. 종료 순간 오차 약4.2cm/16.5°, 이�
 `output/s4b-remote-trial-20261115/directional-base-02-review/`의
 `approved-start.json`, `approved-run-result.json`, `settled-status.json`,
 `final-status.json` 및 원본 실행 JSONL.
+
+
+## 2026-11-16 — 정지 위치 안정화·광각 호스트 배포
+
+호스트 `s4-local-4f55171fc2d8`를 새 디렉터리에 배포하고 파일 해시 및 관련 검사 168개를 젯슨에서 확인했다. 기존 펌웨어 `0x2492D`와 양팔 보정은 그대로 유지했다. 이 실행은 실제 이동 전 준비 요청에 따라 조회만 수행했다.
+
+- `inspection-04`: 약 38.9초, 위치 관측 194개 중 안정화 창 173개. 안정화 창 P90 흔들림 중앙값 2.51mm·0.039°. 마지막 승인 목표 잔차는 추정값 1.49cm·0.46°다. 실제 절대 오차 검증은 아니다.
+- 바퀴 7/8/9 조회 275회 중 정지 위치 창 272회. 8번의 속도·움직임 표시는 원본 기록에 보존하며, 토크 OFF 유지보수 조회에서만 400ms/2카운트 위치 창을 사용한다. 모터 허가와 정지 명령 성공 판단에 재사용하지 않는다.
+- 이동 명령 0건, Nav2 경로 준비 성공·실행 false·경로 여유 확인. 검증 후 조회 프로그램을 종료했다.
+- RGB/depth 1280×720 수신 및 `wide-height-01` 고정 16ms 촬영 성공. 기존 높이 모델 `height-2b4512f39d52caae4cae1a10` 유지, 팔 영점·XY 보정 없음.
+- 이전 설치·시험 중 조회용 mobile endpoint가 준비 전에는 없다는 조건과 Python 숫자 타입을 수정했다. 최종 실행은 기존 inventory 조회만 사용하며, 이 과정에서 제어기 재시작은 없었다.
+
+다음 준비 파일은 젯슨 새 release의 `prepare-fine-alignment.sh`다. `--fine-alignment --camera-mode wide`와 기존 승인 목표를 명시한다. **파일은 준비만 했으며 실행하지 않았다.** 실행 시 자세 유지 준비가 포함되므로 현재 지지·빈 집게·최하단을 확인하고, 실제 바퀴 이동은 화면의 명시적 시작 이후에만 진행한다. 승인 목표를 바꾼 경우에는 먼저 후보 확인을 받는다.
+
+PC 증거는 `output/s4-fine-wide-deploy-20261116-r4/inspection-review/summary.json`, 젯슨 원본은 `/home/hyper/robot/shared/diagnostics/s4b-fine-wide-20261116/`에 보관한다. 실내 영상과 접속 키는 Git에 포함하지 않는다.

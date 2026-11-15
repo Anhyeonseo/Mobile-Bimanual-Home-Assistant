@@ -725,3 +725,15 @@ def test_transport_arming_needs_only_heartbeat_and_three_wheels(monkeypatch):
     web.arm_observed_stationary(lambda:None,NS(status=feedback,arm=armed.append),transport_only=True,
         clock=lambda:now[0],sleep=lambda dt:now.__setitem__(0,now[0]+dt))
     assert armed==[1]
+
+
+def test_inspection_queries_only_wheels_without_motion_endpoint():
+    from navigation_trial_web import inspection_wheel_observation
+    from types import SimpleNamespace
+    calls=[]
+    class Inventory:
+        def read_device_inventory(self,bus,motor):
+            calls.append((bus,motor));return {'id':motor}
+    window=SimpleNamespace(observe=lambda rows,start,end,geometry:(rows,start,end))
+    result,rows=inspection_wheel_observation(Inventory(),None,window,clock=lambda:1)
+    assert calls==[(0,7),(0,8),(0,9)] and result==(rows,1,1)

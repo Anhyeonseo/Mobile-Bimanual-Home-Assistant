@@ -17,7 +17,7 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path[:0]=[str(ROOT),str(ROOT/'ros2_ws/src/home_robot_tasks'),str(ROOT/'ros2_ws/src/so101_arm_bridge')]
 from home_robot_tasks.navigation_trial import NearGoal,TurnDriveTrial,swept_path_obstacle,swept_obstacle,angle,voxel_centers,validate_navigation_body
 from home_robot_tasks.nav2_trial import Nav2Trial,Nav2SensorBridge
-from home_robot_tasks.stationary_localization import StationaryScanWindow,fresh_stationary
+from home_robot_tasks.stationary_localization import StationaryScanWindow,StationaryWheelInventory,fresh_stationary
 from home_robot_tasks.s4_recorded_mapping import align,transform,scan_points
 from base_teleop_web import SessionRecord
 import prepare_unified_controller as commissioning
@@ -180,7 +180,7 @@ class State:
             return dict(state=self.trial.state,pose=self.pose,goal=self.trial.goal,path=self.path,
                 ready=self.controller_ready and (not self.navigation_required or self.navigation_revision is not None) and sensors and bool(self.path) and (not isinstance(self.trial,Nav2Trial) or self.trial.backend_ready()) and (clear or (hits is not None and getattr(self.trial,'allow_blocked_start',False))) and not self.finished
                     and self.trial.state=='READY' and self.request is None
-                    and (not getattr(self.trial,'fine_alignment',False) or fresh_stationary(self.stationary_localization,now)),
+                    and (not getattr(self.trial,'fine_alignment',False) or fresh_stationary(self.stationary_localization,now,revision=self.trial.required_map_revision)),
                 resume_ready=self.controller_ready and sensors and clear and not self.finished
                     and self.trial.state in NearGoal.WAITING and self.trial.recovery_ready and self.request is None,
                 stationary_localization=self.stationary_localization,
@@ -430,7 +430,7 @@ def sensor_worker(state,args):
                             sweep=registered_lidar_sweep(s,state.pose,review)
                             state.scan_history.append(sweep);state.scan_history=state.scan_history[-20:]
                         if state.trial.state=='PREVIEW':
-                            try:state.path=state.trial.plan(state.pose)
+                            try:state.path=state.trial.plan(state.pose);state.error=None
                             except ValueError as e:state.error=str(e)
                     state.record.write('localization',pose=state.pose,raw_pose=candidate.tolist(),stationary=state.stationary_localization,observed_s=last,fit=fit,quality=quality,tracking_support=support)
                 except Exception as e:
@@ -546,7 +546,7 @@ def sensor_bridge_worker(state,args):
                     if state.nav2_feedback.get('goal')==list(state.trial.goal or ()) and state.nav2_feedback.get('path'):
                         state.path=state.nav2_feedback['path']
                 if state.trial.state=='PREVIEW' and state.sensors_ready(time.monotonic()):
-                    try:state.path=state.trial.plan(state.pose)
+                    try:state.path=state.trial.plan(state.pose);state.error=None
                     except ValueError as e:state.error=str(e)
     finally:
         closed.set();process.join(timeout=7)
@@ -681,6 +681,13 @@ def enter_base_transport(observe,evidence,*,clock=time.monotonic,sleep=time.slee
     raise TimeoutError('이동 모드 전환 대기 시간 초과')
 
 
+def inspection_wheel_observation(transport, geometry, window, *, clock=time.monotonic):
+    """Maintenance inventory is available before motion-endpoint registration."""
+    started=clock()
+    rows=[transport.read_device_inventory(0,motor) for motor in (7,8,9)]
+    return window.observe(rows,started,clock(),geometry),rows
+
+
 def controller_worker(state,args):
     import serial
     from so101_arm_bridge.backend_lease import acquire_backend_lease
@@ -707,10 +714,27 @@ def controller_worker(state,args):
             hello=t.enter_binary_mode()
             if hello.firmware_version!=FIRMWARE:raise ValueError('제어기 버전 불일치')
             if any(getattr(hello,k)!=baseline['hello'][k] for k in ('left_calibration_hash','right_calibration_hash')):raise ValueError('보정값 불일치')
+            wheel_scales=None;last_wheel_query=-1.
+            if isinstance(state.trial,Nav2Trial):
+                pending=json.loads((ROOT/'config/home_assistant/s4_commissioning.pending.json').read_text())
+                wheel_scales=pending['measurement_inputs']['wheel_geometry_and_raw_speed_scale']['candidate_raw_per_encoder_rad_s']
+                if len(wheel_scales)!=3 or not all(math.isfinite(v) and v>0 for v in wheel_scales):raise ValueError('wheel feedback scale missing')
+            def wheel_observed(result,sent):
+                if wheel_scales is None:return
+                age=((result.mcu_tick_ms-result.feedback_tick_ms)&0xffffffff)/1000
+                if not result.feedback_is_fresh(250):return
+                twist=state.trial.geometry.body_twist(tuple(v/s for v,s in zip(result.velocity_raw[:3],wheel_scales)))
+                with state.lock:state.wheel_observation=dict(observed_s=sent-age,twist=twist,
+                    feedback_tick_ms=result.feedback_tick_ms,boot_id=result.boot_id)
             if not args.prepare_supported:
                 with state.lock:state.controller='조회 연결 확인 · 자세 유지 준비 필요';state.boot=CommissionClient(t).query().boot_id
                 state.record.write('inspection',hello=asdict(hello),motion_commands=0)
-                while not state.closed.wait(.25):
+                inspection_window=StationaryWheelInventory()
+                while not state.closed.wait(.1):
+                    if wheel_scales is not None:
+                        wheel,rows=inspection_wheel_observation(t,state.trial.geometry,inspection_window)
+                        with state.lock:state.wheel_observation=wheel
+                        state.record.write('inspection_wheels',devices=rows,observation=wheel)
                     with state.lock:
                         if state.request:state.request=None;state.error='현재는 조회 준비 화면입니다'
                 return
@@ -763,18 +787,6 @@ def controller_worker(state,args):
                 posture_monitoring='initial_only',post_arrival='fresh_recommission_required')
             with state.lock:state.controller_ready=True;state.controller='현재 자세 유지 · 시작 대기'
             state.record.write('parked_ready',boot=mobile.boot_id,nonzero_commands=0,arm_anchor=list(anchor))
-            wheel_scales=None;last_wheel_query=-1.
-            if isinstance(state.trial,Nav2Trial):
-                pending=json.loads((ROOT/'config/home_assistant/s4_commissioning.pending.json').read_text())
-                wheel_scales=pending['measurement_inputs']['wheel_geometry_and_raw_speed_scale']['candidate_raw_per_encoder_rad_s']
-                if len(wheel_scales)!=3 or not all(math.isfinite(v) and v>0 for v in wheel_scales):raise ValueError('wheel feedback scale missing')
-            def wheel_observed(result,sent):
-                if wheel_scales is None:return
-                age=((result.mcu_tick_ms-result.feedback_tick_ms)&0xffffffff)/1000
-                if not result.feedback_is_fresh(250):return
-                twist=state.trial.geometry.body_twist(tuple(v/s for v,s in zip(result.velocity_raw[:3],wheel_scales)))
-                with state.lock:state.wheel_observation=dict(observed_s=sent-age,twist=twist,
-                    feedback_tick_ms=result.feedback_tick_ms,boot_id=result.boot_id)
             zero_since=None;previous=time.monotonic();stop_until=None
             while not state.closed.is_set():
                 if time.monotonic()-previous>.2:raise RuntimeError('제어 통신 주기 지연')
