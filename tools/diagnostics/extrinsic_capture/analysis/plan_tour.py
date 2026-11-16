@@ -33,6 +33,8 @@ ap.add_argument('--cand', type=int, default=400, help='candidate nodes per arm a
 ap.add_argument('--speed', type=float, default=20.0, help='peak joint speed, deg/s')
 ap.add_argument('--tol', type=float, default=0.015, help='allowed distance outside swept space, m')
 ap.add_argument('--seed', type=int, default=11)
+ap.add_argument('--rest-sweeps', nargs='+', default=None,
+                help='only these sweeps define where the other arm rests (use the latest ones when the supports moved)')
 args = ap.parse_args()
 if os.path.exists(args.out): sys.exit('output exists: ' + args.out)
 
@@ -72,9 +74,16 @@ def inside_ranges(arm, raw, margin=25):
 
 
 REST = {}
+rest_src = {}                    # arm swept -> samples, from --rest-sweeps only (if given)
+for d in (args.rest_sweeps or []):
+    head, samples = load_sweep(os.path.join(d, 'sweep.jsonl'))
+    rest_src.setdefault(head['arm'], []).extend(samples)
 for arm in ARMS:
     other = 'right' if arm == 'left' else 'left'
-    resting = [s['raw'] for (a, _), v in sweeps.items() if a == other for samples in v for s in samples]
+    if args.rest_sweeps is not None:
+        resting = [s['raw'] for s in rest_src.get(other, [])]
+    else:
+        resting = [s['raw'] for (a, _), v in sweeps.items() if a == other for samples in v for s in samples]
     if not resting: resting = [v[0][0]['raw'] for (a, _), v in sweeps.items() if a == arm]
     if not resting: sys.exit(f'no sweep shows where the {arm} arm rests')
     REST[arm] = {j: int(round(np.median([r[f'{arm}/{j}'] for r in resting]))) for j in JOINTS6}
