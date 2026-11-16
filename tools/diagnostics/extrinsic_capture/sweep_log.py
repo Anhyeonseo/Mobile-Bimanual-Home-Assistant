@@ -108,7 +108,9 @@ with sp.acquire_backend_lease('stm32', 87), sp.open_exclusive_serial(serial, sp.
                 lift_raw = t.stationary_platform()['positions_raw'][3]
             log.write(json.dumps(dict(t=round(now - started, 3), raw=raw, lift_raw=lift_raw)) + '\n'); count += 1
             m, joint = margin_deg(raw)
-            if now - last_print > .5:
+            # near a range edge the controller latches on the next step: warn at once (with a beep), not every 0.5 s
+            if now - last_print > (.1 if m <= 5 else .5):
+                if m <= 5: print('\a', end='')
                 print(f'\r{count:6d} samples  {shots:3d} photos  range margin {m:5.1f} deg ({joint}){"  WARN" if m <= 5 else "     "}', end='', flush=True)
                 last_print = now
             if camera:
