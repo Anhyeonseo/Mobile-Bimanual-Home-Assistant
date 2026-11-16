@@ -364,3 +364,41 @@ def test_compiler_rejects_stale_or_incomplete_plan(fault):
     if fault=='jaw':report['candidates'][0]['jaw_preview']['measured_gap_preview']['entry_raw']+=1
     if fault=='lift':arm.lift_m=.31
     with pytest.raises(ValueError):compile_program(report,profile,jaw,arm,bounds=bounds())
+
+
+@pytest.mark.parametrize('settles',[True,False])
+def test_small_handoff_error_services_hold_without_global_stop(settles):
+    from home_robot_tasks.carry_execution import HandoffRecheck
+    calls=[];clock=SimClock();p=program();attempts=[0]
+    def start(*a):
+        attempts[0]+=1
+        if not settles or attempts[0]<3:raise HandoffRecheck({'error_rad':.02463,'route_dispatched':False})
+        calls.append('dispatch')
+    motion=NS(ready=lambda:True,maintain=lambda:calls.append('heartbeat'),start=start,
+              poll=lambda *a:NS(state='RUNNING',reason=''))
+    stop=NS(request=lambda *a:calls.append('stop'))
+    session=CarrySession(p,motion,stop,lambda:feedback(p,clock,sequence=round(clock()*1000)),clock,recoverable_handoffs=True)
+    session.start('small-settle');session.index=1
+    for _ in range(20):session.poll();clock.advance(.1)
+    assert 'stop' not in calls and calls.count('heartbeat')==20
+    if settles:
+        assert session.state=='RUNNING' and calls.count('dispatch')==1
+    else:
+        assert session.state=='AWAITING_ROUTE_REPLAN' and 'dispatch' not in calls
+        before=attempts[0];session.poll();assert attempts[0]==before
+        session.cancel();assert 'stop' in calls
+
+
+def test_handoff_classification_keeps_initial_anchor_and_large_offsets_strict():
+    from home_robot_tasks.carry_execution import HandoffRecheck
+    p=program();b=CarryRouteBuilder(p,lambda *a:True)
+    def snap(i,error=0):
+        q=list(p.stages[i].points[0].positions_rad);q[3]+=error
+        return NS(positions_urad=tuple(round(x*1e6) for x in q))
+    with pytest.raises(ValueError) as e:b({'carry_stage':0},snap(0,.02463))
+    assert not isinstance(e.value,HandoffRecheck)
+    b({'carry_stage':0},snap(0))
+    with pytest.raises(HandoffRecheck):b({'carry_stage':1},snap(1,.02463))
+    assert b.last_index==0
+    with pytest.raises(ValueError) as e:b({'carry_stage':1},snap(1,.1))
+    assert not isinstance(e.value,HandoffRecheck)

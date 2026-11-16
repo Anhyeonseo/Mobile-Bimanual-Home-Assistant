@@ -1,32 +1,111 @@
 #include "s3_platform_snapshot.h"
+#include "actuator_core/wire_bytes.h"
+
 #include <string.h>
-static bool retry_pending;
-static uint8_t retry_slot;
-static struct { bool enabled,due; uint8_t next,mask; uint16_t raw[4]; uint32_t stamp[4],count; } s;
-static void put32(uint8_t *p,uint32_t v){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(8*i));}
-void S3Platform_Enable(bool enabled){
-    if(enabled && !s.enabled && s.mask==15U){
-        /* A handoff preserves measurements, but may cancel the read whose
-         * scheduling already advanced next. Refresh the oldest actual sample
-         * before another six-arm sweep. Never refresh a timestamp here. */
-        uint8_t oldest=0;
-        for(uint8_t j=1;j<4;j++)
-            if((int32_t)(s.stamp[j]-s.stamp[oldest])<0)oldest=j;
-        s.next=oldest;s.due=true;
+
+static struct {
+    bool enabled;
+    bool due;
+    bool retry_pending;
+    uint8_t retry_slot;
+    uint8_t next;
+    uint8_t mask;
+    uint16_t raw[S3_PLATFORM_AUX_COUNT];
+    uint32_t stamp[S3_PLATFORM_AUX_COUNT];
+    uint32_t count;
+} snapshot;
+
+static bool IsAuxiliarySlot(uint8_t slot)
+{
+    return slot >= S3_PLATFORM_FIRST_AUX_SLOT && slot < S3_PLATFORM_SLOT_COUNT;
+}
+
+void S3Platform_Enable(bool enabled)
+{
+    if (enabled && !snapshot.enabled && snapshot.mask == S3_PLATFORM_PRESENT_MASK) {
+        /* A handoff may cancel a read whose scheduling already advanced next.
+         * Refresh the oldest actual sample before another arm sweep. Preserve
+         * all sample timestamps, including across the millisecond clock wrap. */
+        uint8_t oldest = 0U;
+        for (uint8_t i = 1U; i < S3_PLATFORM_AUX_COUNT; i++) {
+            if ((int32_t)(snapshot.stamp[i] - snapshot.stamp[oldest]) < 0) {
+                oldest = i;
+            }
+        }
+        snapshot.next = oldest;
+        snapshot.due = true;
     }
-    s.enabled=enabled;
+    snapshot.enabled = enabled;
 }
-uint8_t S3Platform_Select(uint8_t j){return retry_pending?retry_slot:s.enabled&&s.due&&j==0?(uint8_t)(6+s.next):j;}
-void S3Platform_Scheduled(uint8_t j){if(retry_pending && j==retry_slot){retry_pending=false;return;}if(j==5)s.due=true;else if(j>=6&&j<10){s.due=false;s.next=(s.next+1)%4;}}
-void S3Platform_Update(uint8_t j,uint16_t raw,uint32_t stamp){
-    if(j<6||j>=10)return;
-    j-=6;s.raw[j]=raw;s.stamp[j]=stamp;s.mask|=(1u<<j);s.count++;
+
+uint8_t S3Platform_Select(uint8_t arm_joint)
+{
+    if (snapshot.retry_pending) {
+        return snapshot.retry_slot;
+    }
+    if (snapshot.enabled && snapshot.due && arm_joint == 0U) {
+        return S3_PLATFORM_FIRST_AUX_SLOT + snapshot.next;
+    }
+    return arm_joint;
 }
-void S3Platform_CancelRetry(void){retry_pending=false;}
-void S3Platform_Retry(uint8_t j){if(j<10){retry_slot=j;retry_pending=true;}}
-void S3Platform_Invalidate(uint8_t j){if(j>=6&&j<10)s.mask&=~(1u<<(j-6));}
-void S3Platform_Copy(uint32_t now,uint8_t out[44]){
-    memset(out,0,44);out[0]=1;out[1]=s.enabled;out[2]=s.mask;
-    put32(out+4,now);put32(out+8,s.count);
-    for(unsigned j=0;j<4;j++){put32(out+12+4*j,s.raw[j]);put32(out+28+4*j,(s.mask&(1u<<j))?now-s.stamp[j]:UINT32_MAX);}
+
+void S3Platform_Scheduled(uint8_t slot)
+{
+    if (snapshot.retry_pending && slot == snapshot.retry_slot) {
+        snapshot.retry_pending = false;
+        return;
+    }
+    if (slot == S3_PLATFORM_FIRST_AUX_SLOT - 1U) {
+        snapshot.due = true;
+    } else if (IsAuxiliarySlot(slot)) {
+        snapshot.due = false;
+        snapshot.next = (snapshot.next + 1U) % S3_PLATFORM_AUX_COUNT;
+    }
+}
+
+void S3Platform_Update(uint8_t slot, uint16_t raw, uint32_t observed_ms)
+{
+    if (!IsAuxiliarySlot(slot)) {
+        return;
+    }
+    uint8_t index = slot - S3_PLATFORM_FIRST_AUX_SLOT;
+    snapshot.raw[index] = raw;
+    snapshot.stamp[index] = observed_ms;
+    snapshot.mask |= 1U << index;
+    snapshot.count++;
+}
+
+void S3Platform_CancelRetry(void)
+{
+    snapshot.retry_pending = false;
+}
+
+void S3Platform_Retry(uint8_t slot)
+{
+    if (slot < S3_PLATFORM_SLOT_COUNT) {
+        snapshot.retry_slot = slot;
+        snapshot.retry_pending = true;
+    }
+}
+
+void S3Platform_Invalidate(uint8_t slot)
+{
+    if (IsAuxiliarySlot(slot)) {
+        snapshot.mask &= ~(1U << (slot - S3_PLATFORM_FIRST_AUX_SLOT));
+    }
+}
+
+void S3Platform_Copy(uint32_t now, uint8_t out[S3_PLATFORM_SNAPSHOT_SIZE])
+{
+    memset(out, 0, S3_PLATFORM_SNAPSHOT_SIZE);
+    out[0] = 1U;
+    out[1] = snapshot.enabled;
+    out[2] = snapshot.mask;
+    actuator_write_u32_le(out + 4, now);
+    actuator_write_u32_le(out + 8, snapshot.count);
+    for (unsigned i = 0U; i < S3_PLATFORM_AUX_COUNT; i++) {
+        uint32_t age = (snapshot.mask & (1U << i)) ? now - snapshot.stamp[i] : UINT32_MAX;
+        actuator_write_u32_le(out + 12 + 4 * i, snapshot.raw[i]);
+        actuator_write_u32_le(out + 28 + 4 * i, age);
+    }
 }

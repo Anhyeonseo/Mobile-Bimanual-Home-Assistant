@@ -67,9 +67,15 @@ def test_recovered_base_lift_is_a_true_five_joint_fk_witness(planner):
     for c in result['candidates']:
         tcp=model(c['lift_travel_m']).fk(c['fk_witness_model_rad'])[0]
         x,y,yaw=c['base_xy_yaw'];co,si=math.cos(yaw),math.sin(yaw)
-        xy=np.array([[co,-si],[si,co]])@tcp[:2,3]+[x,y]
-        z=tcp[2,3]-arm.profile['ground_z_m']
-        np.testing.assert_allclose([*xy,z],c['observed_region']['anchor_map_m'],atol=1e-10)
+        stock=tcp@arm.tcp_from_stock
+        fixed=stock[:3,3]-stock[:3,0]*arm.jaw.fixed_face_m
+        rotation=np.array([[co,-si],[si,co]])
+        xy=rotation@fixed[:2]+[x,y]
+        z=fixed[2]-arm.profile['ground_z_m']
+        region=c['observed_region'];axis=np.array(region['closing_xy'])
+        sign=1 if (rotation@(-stock[:2,0]))@axis>0 else -1
+        expected=np.array(region['anchor_map_m'])-np.r_[axis*sign,0.]*region['observed_width_m']/2
+        np.testing.assert_allclose([*xy,z],expected,atol=1e-10)
         direction=np.array([[co,-si],[si,co]])@(-tcp[:2,0])
         direction/=np.linalg.norm(direction)
         assert abs(np.dot(direction,c['observed_region']['closing_xy']))>1-1e-10

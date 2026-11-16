@@ -365,7 +365,7 @@ def test_hold_reference_stop_orchestration_retains_torque_and_never_fake_confirm
             clock[0]+=.01
             return Snapshot(sample_age_ms=(999 if failure=='stale' else 50,)*12)
     class Adapter:
-        def __init__(self,*a,**kw):self._limits=kw.get('authorized_limits',Limits());self.state=NS(value='new');self.prepared_state=Pose()
+        def __init__(self,*a,**kw):self.motion_limits=kw.get('authorized_limits',Limits());self.state=NS(value='new');self.prepared_state=Pose()
         def prepare(self):events.append('prepare');self.state.value='ready';return self.prepared_state
         def current_pose_hold_points(self):return (Pose(),)*3
         def start_current_pose_hold(self,*a,**kw):

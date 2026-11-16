@@ -57,6 +57,28 @@ def match_exposure(history, color_s, depth_s, now):
     return min(matches,key=lambda j:abs(j.observed_s-(color_s+depth_s)/2))
 
 
+def match_held_exposure(history, color_s, depth_s, now):
+    """Admission only, with constant pose commands and a base-fixed camera.
+
+    Integrated telemetry scans the twelve joints over about 100 ms, so its
+    conservative exposure interval cannot fit the moving-camera 50 ms test.
+    Require measured stability over two sweeps instead; retain actual sample
+    times and the 200 ms consumption deadline. Never use this during a route.
+    """
+    if not 0 <= now-min(color_s,depth_s) <= .2 or max(color_s,depth_s)>now:
+        raise ValueError('camera exposure stale')
+    samples=[j for j in history if 0 <= now-j.upper_s <= .4]
+    if len({j.sequence for j in samples})<3 or samples[-1].lower_s-samples[0].lower_s<.2:
+        raise ValueError('waiting for measured stationary joint window')
+    latest=samples[-1]
+    if not 0 <= now-latest.lower_s <= .2:
+        raise ValueError('stationary joint window stale')
+    # Four encoder counts; do not mistake rounded encoder noise for motion.
+    if np.max(np.ptp(np.asarray([j.positions_rad for j in samples]),axis=0))>4*2*math.pi/4096:
+        raise ValueError('joints changed during stationary camera admission')
+    return latest
+
+
 class FixedPlatformGuard:
     """Continuity relative to an explicitly established height, not auto-homing."""
     maximum_age_s = .2
@@ -145,10 +167,13 @@ class MeasuredFK:
 class LiveCarryInputs:
     def __init__(self,program,fk,reference,mask,intrinsics,base_from_optical,
                  platform,*,clock=time.monotonic,error_budget_m=.0006,robot_sweep_mask=None,maximum_background_depth_m=None,
-                 observation_policy='continuous_patch'):
+                 observation_policy='continuous_patch', stationary_hold_admission=False):
         if observation_policy not in ('continuous_patch','snapshot_then_verify'):
             raise ValueError('explicit supported observation policy required')
         self.observation_policy=observation_policy
+        if stationary_hold_admission and observation_policy!='snapshot_then_verify':
+            raise ValueError('held admission requires a stationary snapshot policy')
+        self.stationary_hold_admission=stationary_hold_admission
         self.admitted=False
         self.program,self.fk,self.platform,self.clock=program,fk,platform,clock
         self.reference,self.mask,self.intrinsics,self.transform=reference,mask,intrinsics,base_from_optical
@@ -249,8 +274,10 @@ class LiveCarryInputs:
             if not validation['unchanged']:
                 raise SceneValidationError('planned target changed before admission',validation)
             # Lack of a matching pair can be temporary during acquisition.
-            try:j=match_exposure(history,stamp,record['depth_time_s'],self.clock())
+            matcher=match_held_exposure if self.stationary_hold_admission else match_exposure
+            try:j=matcher(history,stamp,record['depth_time_s'],self.clock())
             except ValueError:return
+            validation['joint_admission_basis']='measured_constant_hold' if self.stationary_hold_admission else 'synchronized_50ms'
             with self.lock:
                 if self.admitted or self.phase!='IDLE' or self.failure or epoch!=self.epoch:return
                 self.validation=validation;self.scene_time=stamp;self.camera_time=stamp

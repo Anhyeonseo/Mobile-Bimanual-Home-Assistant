@@ -21,7 +21,7 @@ def fixture(folder,*,hypothetical=False,simulation=True):
     model={'profile':profile}
     data=asdict(p);write_json(folder/'program.json',data);write_json(folder/'model.json',model)
     write_json(folder/'proof.json',dict(program_sha256=digest(data),model_sha256=digest(model),
-        native_geometry={'status':'PASSED'},simulation_passed=simulation))
+        native_geometry={'status':'PASSED','fixed_finger_contact':{'accepted':True}},simulation_passed=simulation))
     write_json(folder/'bundle.json',dict(kind='stationary_carry_bundle',schema_version=1,
         files_sha256={p.name:sha(p) for p in folder.iterdir()}))
 
@@ -31,6 +31,19 @@ def test_bundle_checks_source_and_geometry_proof_before_hardware(tmp_path):
     assert p.candidate_id=='grasp'
     (tmp_path/'color.png').write_bytes(b'changed')
     with pytest.raises(ValueError,match='bundle changed'):load_bundle(tmp_path,for_execution=True)
+
+
+def test_old_centre_only_contact_proof_requires_rebuilding(tmp_path):
+    fixture(tmp_path)
+    proof=json.loads((tmp_path/'proof.json').read_text())
+    del proof['native_geometry']['fixed_finger_contact']
+    write_json(tmp_path/'proof.json',proof)
+    manifest=json.loads((tmp_path/'bundle.json').read_text())
+    manifest['files_sha256']['proof.json']=sha(tmp_path/'proof.json')
+    write_json(tmp_path/'bundle.json',manifest)
+    load_bundle(tmp_path)  # Historical/offline review remains available.
+    with pytest.raises(ValueError,match='fixed-finger contact proof'):
+        load_bundle(tmp_path,for_execution=True)
 
 
 @pytest.mark.parametrize('kwargs',[{'hypothetical':True},{'simulation':False}])

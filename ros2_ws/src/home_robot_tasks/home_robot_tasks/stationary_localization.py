@@ -17,13 +17,19 @@ class StationaryScanWindow:
         self.scans = []
         self.poses = []
         self.anchor = None
+        self.command_observation = False
         self.report = {'ready': False, 'reason': 'stationary evidence unavailable'}
 
     def prepare(self, scan, seed, wheel, *, execute, now):
         stamp = scan['observed_s']
+        # A zero command is not a physical STOP proof. If speed bytes are noisy,
+        # collect independent, unsmoothed scan registrations instead of claiming
+        # wheel rest. The pose drift/spread checks below decide whether this
+        # observation window is usable; motor/STOP admission stays separate.
+        command_observation = bool(wheel and wheel.get('zero_command_elapsed_s',0)>=.4)
         quiet = (not execute and wheel is not None
                  and 0 <= now-wheel['observed_s'] <= .35
-                 and (wheel.get('stationary_inventory') is True or all(abs(v) < .001 for v in wheel['twist']))
+                 and (command_observation or wheel.get('stationary_inventory') is True or all(abs(v) < .001 for v in wheel['twist']))
                  and 0 <= now-stamp <= .35)
         if not quiet:
             self.reset()
@@ -32,8 +38,13 @@ class StationaryScanWindow:
             self.reset()
         if self.anchor is None:
             self.anchor = list(seed)
+        if self.scans and command_observation!=self.command_observation:
+            self.reset();self.anchor=list(seed)
+        self.command_observation=command_observation
         self.scans.append((stamp, np.asarray(scan['ranges'], dtype=float)))
         self.scans = [(t, r) for t, r in self.scans if stamp-t <= self.window_s]
+        if command_observation:
+            return scan, self.anchor
         # Invalid/no-return rays cannot become repeated old obstacle readings.
         values = np.stack([r for _, r in self.scans])
         values[~np.isfinite(values) | (values < .25) | (values > 12)] = np.nan
@@ -64,6 +75,7 @@ class StationaryScanWindow:
                  and np.quantile(yaw_errors, .9) <= math.radians(.7)
                  and np.linalg.norm(drift[:2]) <= .008 and abs(drift[2]) <= math.radians(.5))
         self.report = dict(ready=bool(ready), samples=len(self.poses), span_s=span,
+            source='raw_scan_zero_command_window' if self.command_observation else 'wheel_stationary_scan_window',
             observed_s=stamp, map_revision=revision, pose=center.tolist(),
             p90_xy_m=float(np.quantile(errors, .9)), p90_yaw_rad=float(np.quantile(yaw_errors, .9)),
             half_window_drift_xy_m=float(np.linalg.norm(drift[:2])),

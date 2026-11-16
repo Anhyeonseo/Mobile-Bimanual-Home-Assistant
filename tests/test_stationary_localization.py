@@ -92,3 +92,28 @@ def test_inspection_encoder_window_handles_speed_flag_but_not_motion_or_power():
     for n in range(6):w.observe(rows(2+n*.1),2+n*.1,2+n*.1+.02,geometry)
     assert w.observe(rows(2.5),2.6,2.62,geometry) is None  # repeated MCU timestamp
     assert w.observe(rows(2.7),2.7,3.,geometry) is None  # late query
+
+
+def test_zero_command_window_uses_unfiltered_scans_and_never_claims_stop():
+    w=StationaryScanWindow()
+    for n in range(11):
+        t=1+n*.2;wheel=dict(observed_s=t,twist=[.005,0,.01],zero_command_elapsed_s=.5+n*.2)
+        source=scan(t,[1+n*.001]*360)
+        registered,seed=w.prepare(source,[n*.03,0,0],wheel,execute=False,now=t)
+        assert registered is source and seed==[0,0,0]
+        w.observe([.002*(-1)**n,0,.001*(-1)**n],t)
+    assert w.report['ready'] and w.report['source']=='raw_scan_zero_command_window'
+    assert not w.report.get('stop_confirmed') and not w.report['surveyed_accuracy_verified']
+    w.prepare(scan(t+.2),[0,0,0],dict(wheel,observed_s=t+.2,zero_command_elapsed_s=0),execute=False,now=t+.2)
+    assert not w.report['ready'] and w.anchor is None
+
+
+def test_zero_command_alone_does_not_validate_motion_or_stale_feedback():
+    w=StationaryScanWindow()
+    for n in range(11):
+        t=1+n*.2;wheel=dict(observed_s=t,twist=[.005,0,0],zero_command_elapsed_s=1)
+        w.prepare(scan(t),[0,0,0],wheel,execute=False,now=t)
+        w.observe([n*.008,0,0],t)
+    assert not w.report['ready']
+    w.prepare(scan(t+.5),[0,0,0],wheel,execute=False,now=t+.5)
+    assert w.anchor is None

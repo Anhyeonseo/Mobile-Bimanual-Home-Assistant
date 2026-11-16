@@ -190,6 +190,40 @@ class StockJaw:
             raise ValueError('SO101_JAW_SECTION_LIMIT')
         return self.fixed_face_m + width/2
 
+    def contact_section(self, base_from_stock_tcp, vertices_base):
+        """Intersect the actual signed closing line with observed convex geometry.
+
+        A stored width or object centroid is not a fixed-finger contact. The
+        returned correction translates the fixed face to the near boundary;
+        it is an offline target, never an instruction to push through an object.
+        The convex envelope is conservative and does not infer hidden concavity.
+        """
+        from scipy.spatial import ConvexHull
+        from .s2_geometry import rigid
+        pose=rigid(base_from_stock_tcp)
+        vertices=np.asarray(vertices_base,dtype=float)
+        if vertices.ndim!=2 or vertices.shape[1]!=3 or len(vertices)<4 or not np.isfinite(vertices).all():
+            raise ValueError('finite observed solid geometry required')
+        local=(vertices-pose[:3,3])@pose[:3,:3]
+        hull=ConvexHull(local)
+        # q increases from the fixed finger towards the moving finger: -TCP X.
+        slope=-hull.equations[:,0];offset=hull.equations[:,3]
+        parallel=abs(slope)<1e-10
+        if np.any(offset[parallel]>1e-8):
+            raise ValueError('closing line misses observed object')
+        low=float(np.max(-offset[slope < -1e-10]/slope[slope < -1e-10]))
+        high=float(np.min(-offset[slope > 1e-10]/slope[slope > 1e-10]))
+        if high-low<=1e-6:raise ValueError('closing line misses observed object')
+        axis=-pose[:3,0];shift=low-self.fixed_face_m
+        return dict(basis='observed_convex_section_along_signed_stock_closing_line',
+            low_m=low,high_m=high,width_m=high-low,
+            fixed_intrusion_m=self.fixed_face_m-low,
+            fixed_contact_base_m=(pose[:3,3]+axis*low).tolist(),
+            moving_contact_base_m=(pose[:3,3]+axis*high).tolist(),
+            fixed_face_base_m=(pose[:3,3]+axis*self.fixed_face_m).tolist(),
+            fixed_to_moving_base=axis.tolist(),tcp_correction_base_m=(axis*shift).tolist(),
+            motion_authorized=False)
+
 
 @lru_cache(maxsize=4)
 def load_stock_jaw(urdf: Path, meshes: Path):

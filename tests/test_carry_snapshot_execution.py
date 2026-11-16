@@ -226,3 +226,35 @@ def test_idle_reader_cleanup_preserves_first_failure():
         assert str(exc) == 'cleanup rejected'
     else:
         raise AssertionError('standalone cleanup failure was swallowed')
+
+
+def test_integrated_sequential_scan_admits_measured_constant_hold_only():
+    from home_robot_tasks.carry_live_inputs import JointExposure,match_exposure,match_held_exposure
+    history=[JointExposure(i,9.55+i*.02,9.65+i*.02,(0.,)*12) for i in range(16)]
+    with pytest.raises(ValueError):match_exposure(history,9.98,9.98,10.)
+    assert match_held_exposure(history,9.98,9.98,10.) is history[-1]
+    for invalid in (history[-2:],history[:5],
+                    history[:-1]+[replace(history[-1],positions_rad=(.01,)+(0.,)*11)]):
+        with pytest.raises(ValueError):match_held_exposure(invalid,9.98,9.98,10.)
+    with pytest.raises(ValueError):match_held_exposure(history,9.7,9.7,10.)
+    with pytest.raises(ValueError):match_held_exposure(history,10.01,10.01,10.)
+
+
+def test_snapshot_held_admission_preserves_scene_and_stale_sample_rejection():
+    inputs,now,record,images=admitted_inputs()
+    inputs.stationary_hold_admission=True;inputs.validation=None;inputs.joints.clear()
+    from home_robot_tasks.carry_live_inputs import JointExposure
+    inputs.joints.extend(JointExposure(i,9.59+i*.02,9.69+i*.02,(0.,)*12) for i in range(16))
+    inputs.feedback_time=inputs.joints[-1].observed_s
+    inputs.add_frame(record,images)
+    assert inputs.validation['joint_admission_basis']=='measured_constant_hold'
+    inputs.admit_snapshot()
+    now[0]+=.3
+    with pytest.raises(ValueError):inputs.feedback()
+
+
+def test_constant_hold_admission_is_not_available_for_moving_visual_tracking():
+    color,depth,mask,intr=scene()
+    with pytest.raises(ValueError,match='stationary snapshot'):
+        LiveCarryInputs(program(),lambda q:np.eye(4),(color,depth),mask,intr,np.eye(4),
+                        None,stationary_hold_admission=True)

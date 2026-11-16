@@ -1,3 +1,4 @@
+#include "actuator_core/wire_bytes.h"
 #include "actuator_core/device_inventory.h"
 #include "actuator_core/protocol.h"
 
@@ -10,29 +11,6 @@
     ACTUATOR_ENABLE_STREAM_V2_MESSAGES
 #include "actuator_core/stream_contract_v2.h"
 #endif
-
-static void write_u16_le(uint8_t *destination, uint16_t value) {
-    destination[0] = (uint8_t)(value & 0xFFu);
-    destination[1] = (uint8_t)((value >> 8u) & 0xFFu);
-}
-
-static void write_u32_le(uint8_t *destination, uint32_t value) {
-    destination[0] = (uint8_t)(value & 0xFFu);
-    destination[1] = (uint8_t)((value >> 8u) & 0xFFu);
-    destination[2] = (uint8_t)((value >> 16u) & 0xFFu);
-    destination[3] = (uint8_t)((value >> 24u) & 0xFFu);
-}
-
-static uint16_t read_u16_le(const uint8_t *source) {
-    return (uint16_t)((uint16_t)source[0] | ((uint16_t)source[1] << 8u));
-}
-
-static uint32_t read_u32_le(const uint8_t *source) {
-    return (uint32_t)source[0] |
-           ((uint32_t)source[1] << 8u) |
-           ((uint32_t)source[2] << 16u) |
-           ((uint32_t)source[3] << 24u);
-}
 
 bool actuator_protocol_message_is_known(uint8_t message_type) {
     switch (message_type) {
@@ -132,19 +110,19 @@ actuator_protocol_result_t actuator_frame_encode(
         return ACTUATOR_PROTOCOL_OUTPUT_TOO_SMALL;
     }
 
-    write_u16_le(&decoded[0], ACTUATOR_PROTOCOL_MAGIC);
+    actuator_write_u16_le(&decoded[0], ACTUATOR_PROTOCOL_MAGIC);
     decoded[2] = (uint8_t)ACTUATOR_PROTOCOL_VERSION;
     decoded[3] = frame->message_type;
-    write_u16_le(&decoded[4], frame->flags);
-    write_u16_le(&decoded[6], frame->payload_length);
-    write_u32_le(&decoded[8], frame->sequence);
-    write_u32_le(&decoded[12], frame->sender_time_ms);
+    actuator_write_u16_le(&decoded[4], frame->flags);
+    actuator_write_u16_le(&decoded[6], frame->payload_length);
+    actuator_write_u32_le(&decoded[8], frame->sequence);
+    actuator_write_u32_le(&decoded[12], frame->sender_time_ms);
     if (frame->payload_length > 0u) {
         memcpy(&decoded[ACTUATOR_PROTOCOL_HEADER_SIZE], frame->payload, frame->payload_length);
     }
     decoded_length = ACTUATOR_PROTOCOL_HEADER_SIZE + frame->payload_length;
     crc = actuator_crc32c(decoded, decoded_length);
-    write_u32_le(&decoded[decoded_length], crc);
+    actuator_write_u32_le(&decoded[decoded_length], crc);
     decoded_length += ACTUATOR_PROTOCOL_CRC_SIZE;
 
     if (!actuator_cobs_encode(decoded, decoded_length, output, output_capacity - 1u, &encoded_length)) {
@@ -175,7 +153,7 @@ actuator_protocol_result_t actuator_frame_decode(
     if (decoded_length < ACTUATOR_PROTOCOL_HEADER_SIZE + ACTUATOR_PROTOCOL_CRC_SIZE) {
         return ACTUATOR_PROTOCOL_FRAME_TOO_SHORT;
     }
-    if (read_u16_le(&decoded[0]) != ACTUATOR_PROTOCOL_MAGIC) {
+    if (actuator_read_u16_le(&decoded[0]) != ACTUATOR_PROTOCOL_MAGIC) {
         return ACTUATOR_PROTOCOL_BAD_MAGIC;
     }
     if (decoded[2] != (uint8_t)ACTUATOR_PROTOCOL_VERSION) {
@@ -185,7 +163,7 @@ actuator_protocol_result_t actuator_frame_decode(
         return ACTUATOR_PROTOCOL_UNKNOWN_MESSAGE;
     }
 
-    payload_length = read_u16_le(&decoded[6]);
+    payload_length = actuator_read_u16_le(&decoded[6]);
     if (payload_length > ACTUATOR_PROTOCOL_MAX_PAYLOAD) {
         return ACTUATOR_PROTOCOL_BAD_LENGTH;
     }
@@ -194,17 +172,17 @@ actuator_protocol_result_t actuator_frame_decode(
         return ACTUATOR_PROTOCOL_BAD_LENGTH;
     }
 
-    expected_crc = read_u32_le(&decoded[ACTUATOR_PROTOCOL_HEADER_SIZE + payload_length]);
+    expected_crc = actuator_read_u32_le(&decoded[ACTUATOR_PROTOCOL_HEADER_SIZE + payload_length]);
     actual_crc = actuator_crc32c(decoded, ACTUATOR_PROTOCOL_HEADER_SIZE + payload_length);
     if (actual_crc != expected_crc) {
         return ACTUATOR_PROTOCOL_BAD_CRC;
     }
 
     frame->message_type = decoded[3];
-    frame->flags = read_u16_le(&decoded[4]);
+    frame->flags = actuator_read_u16_le(&decoded[4]);
     frame->payload_length = payload_length;
-    frame->sequence = read_u32_le(&decoded[8]);
-    frame->sender_time_ms = read_u32_le(&decoded[12]);
+    frame->sequence = actuator_read_u32_le(&decoded[8]);
+    frame->sender_time_ms = actuator_read_u32_le(&decoded[12]);
     if (payload_length > 0u) {
         memcpy(frame->payload, &decoded[ACTUATOR_PROTOCOL_HEADER_SIZE], payload_length);
     }

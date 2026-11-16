@@ -100,6 +100,8 @@ def shape_regions(points, support_z_m, width_range_m, policy=AlignmentPolicy()):
                 obliquity=math.asin(float(np.clip(abs(closing@axes[:,-1]),0,1)))
                 direction_cost=elongation_weight*(obliquity/math.radians(30))**2
                 regions.append(dict(anchor_map_m=anchor.tolist(),closing_xy=closing.tolist(),
+                    section_low_map_m=(anchor-np.r_[closing,0.]*width/2).tolist(),
+                    section_high_map_m=(anchor+np.r_[closing,0.]*width/2).tolist(),
                     observed_width_m=width,points=int(mask.sum()),centrality_cost=centrality,
                     long_axis_preference_weight=elongation_weight,long_axis_xy=axes[:,-1].tolist(),direction_cost=direction_cost,
                     cost=centrality+direction_cost+.15*(width/upper)**2))
@@ -286,19 +288,22 @@ class ObjectAlignmentPlanner:
             for region_index,region in enumerate(regions):
                 anchor=np.asarray(region['anchor_map_m']);axis=np.asarray(region['closing_xy'])
                 for sample_index,sample in enumerate(self.samples[side]):
-                    tcp=sample['pose'];closing=-tcp[:2,0]
+                    tcp=sample['pose'];stock=tcp@arm.tcp_from_stock;closing=-stock[:2,0]
+                    fixed=stock[:3,3]-stock[:3,0]*arm.jaw.fixed_face_m
                     heading=math.atan2(axis[1],axis[0])-math.atan2(closing[1],closing[0])
-                    h=arm.lift_m+(anchor[2]+arm.profile['ground_z_m']-tcp[2,3])/lift_axis[2]
+                    h=arm.lift_m+(anchor[2]+arm.profile['ground_z_m']-fixed[2])/lift_axis[2]
                     if not 0<=h<=travel:
                         rejected['lift_outside_model']+=2;continue
                     for flip in (0,math.pi):
                         yaw=math.atan2(math.sin(heading+flip),math.cos(heading+flip))
                         c,s=math.cos(yaw),math.sin(yaw)
                         rotation=np.array([[c,-s],[s,c]])
-                        xy=anchor[:2]-rotation@(tcp[:2,3]+(h-arm.lift_m)*lift_axis[:2])
+                        directed=axis*(1 if flip==0 else -1)
+                        fixed_target=anchor[:2]-directed*region['observed_width_m']/2
+                        xy=fixed_target-rotation@(fixed[:2]+(h-arm.lift_m)*lift_axis[:2])
                         evaluated+=1
-                        # FK anchor is a coarse task-region reference. It is NOT
-                        # the asymmetric stock fingers' physical contact midpoint.
+                        # Bind the fixed face to one observed boundary, with a
+                        # separately evaluated opposite-finger alternative.
                         terms=dict(shape=region['cost'],posture=sample['cost'],
                             travel=float(np.linalg.norm(xy-current[:2])),
                             yaw=abs(math.atan2(math.sin(yaw-current[2]),math.cos(yaw-current[2])))/math.pi,
@@ -306,6 +311,7 @@ class ObjectAlignmentPlanner:
                         candidate=dict(candidate_id=f'alignment-{side}-{region_index}-{sample_index}-{int(bool(flip))}',
                             arm=side,base_xy_yaw=[*map(float,xy),yaw],lift_travel_m=float(h),
                             observed_region=region,fk_witness_model_rad=sample['q'].tolist(),
+                            contact_reference='stock_fixed_face_to_observed_section_boundary',
                             joint_margin_fraction=sample['margin'],posture=sample['posture'],
                             cost_terms=terms,cost=sum(terms.values()),checks={})
                         if screen is not None:
@@ -340,7 +346,7 @@ class ObjectAlignmentPlanner:
             motion_authorized=False,executable=False,requires_reobservation=True,
             fine_grasp_generated=False,physical_contact_or_force_verified=False,
             limitations=['observed local spans only; hidden shape and mass unknown',
-                         'FK anchor is not physical contact midpoint',
+                         'observed section boundaries require final-orientation geometry revalidation',
                          'sampled tabletop search is not a reachability proof',
                          'fresh GraspNet and full STL pick/retreat checks required after alignment'])
 
@@ -470,14 +476,17 @@ class FixedHeightAlignmentPlanner(ObjectAlignmentPlanner):
                         for flip in (0., math.pi):
                             yaw = math.atan2(math.sin(heading+flip), math.cos(heading+flip))
                             c,s = math.cos(yaw), math.sin(yaw)
-                            xy = target[:2]-np.array([[c,-s],[s,c]])@center[:2]
+                            directed=np.asarray(axis)*(1 if flip==0 else -1)
+                            fixed_target=target[:2]-directed*width/2
+                            fixed=pose[:3,3]-pose[:3,0]*arm.jaw.fixed_face_m+(height-arm.lift_m)*lift_axis
+                            xy = fixed_target-np.array([[c,-s],[s,c]])@fixed[:2]
                             cost = (region['cost']+posture['cost']+float(np.linalg.norm(xy-current[:2]))
                                 +abs(math.atan2(math.sin(yaw-current[2]), math.cos(yaw-current[2])))/math.pi
                                 +abs(height-current_lift_m)/travel)
                             candidate=dict(candidate_id=f'fixed-{side}-{offset:g}-{ri}-{si}-{int(bool(flip))}',
                                 arm=side, base_xy_yaw=[*map(float,xy),yaw], lift_travel_m=height,
                                 observed_region=region, fk_witness_model_rad=fit.x.tolist(),
-                                contact_reference='stock_stl_section_midpoint', cost=cost,
+                                contact_reference='stock_fixed_face_to_observed_section_boundary', cost=cost,
                                 posture=posture, height_lookup_m=h0, checks={})
                             direction=contact_direction_review(arm,candidate)
                             if not direction['accepted']:

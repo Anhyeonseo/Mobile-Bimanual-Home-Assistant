@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import pytest
+from home_robot_tasks import platform_preparation
 from home_robot_tasks.navigation_trial import NearGoal,swept_obstacle
 
 
@@ -546,80 +547,38 @@ def test_processed_obstacle_still_waits_without_nonzero_command():
 def test_evidence_timeout_has_distinct_observed_reason():
     from so101_arm_bridge.stationary_telemetry import describe_runtime_fault
     assert '자세 상태 갱신 지연' in describe_runtime_fault({'mobile_board':{'source':1}})
-def test_bottom_reference_waits_for_quiet_read_and_renews_pending_lease():
+def test_bottom_reference_uses_lift_samples_before_mobile_feedback_exists():
     from types import SimpleNamespace as NS
     from navigation_trial_web import reference_supported_bottom
-    clock=[0.];events=[];started=[False];renewals=[0];reference_time=[None]
+    clock=[0.];referenced=[];renewals=[]
     def observe():
-        holding=started[0] and clock[0]>=reference_time[0]+.6
-        return NS(flags=29 if holding else 6 if started[0] else 12,
-                  state=5 if holding else 4,fault=0,command_raw=0,
-                  height_um=0,target_um=0,mcu_tick_ms=100,observed_ms=100)
-    def status():
-        return NS(velocity_raw=(0,0,0,50 if clock[0]<.1 else 0),
-                  feedback_is_fresh=lambda age:True)
+        holding=bool(referenced) and clock[0]>=referenced[0]+.6
+        return NS(flags=29 if holding else 6 if referenced else 12,
+            state=5 if holding else 4 if referenced else 0,fault=0,command_raw=0,
+            height_um=0,target_um=0,position_raw=3833+int(clock[0]*10)%2,
+            mcu_tick_ms=int(clock[0]*1000),observed_ms=int(clock[0]*1000))
+    def status():raise AssertionError('unhomed AS feedback must not gate bottom reference')
     def reference(*a,**kw):
-        assert clock[0]>=.55 and kw['operator_confirmed']
-        started[0]=True;reference_time[0]=clock[0];events.append('reference')
-    def keepalive():renewals[0]+=1;events.append('keepalive')
-    reference_supported_bottom(observe,NS(status=status),NS(reference_bottom=reference,keepalive=keepalive),
+        assert clock[0]>=.45 and kw['operator_confirmed'];referenced.append(clock[0])
+    reference_supported_bottom(observe,NS(status=status),NS(reference_bottom=reference,keepalive=lambda:renewals.append(clock[0])),
         clock=lambda:clock[0],sleep=lambda t:clock.__setitem__(0,clock[0]+t))
-    assert events[0]=='reference' and events.count('reference')==1 and renewals[0]>20
+    assert len(referenced)==1 and len(renewals)>20
 
 
-def test_bottom_reference_does_not_use_a_single_initial_quiet_interlock():
+@pytest.mark.parametrize('problem',['stale','repeated','motion','fault','interlock','command'])
+def test_bottom_reference_requires_fresh_stationary_lift_and_mcu_interlocks(problem):
     from types import SimpleNamespace as NS
     from navigation_trial_web import reference_supported_bottom
-    clock=[0.];referenced=[]
+    clock=[1.]
     def observe():
-        if referenced:
-            return NS(flags=29,state=5,fault=0,command_raw=0,height_um=0,target_um=0,
-                      mcu_tick_ms=100,observed_ms=100)
-        return NS(flags=12 if clock[0]<.1 or clock[0]>=.3 else 8)
-    def reference(*args,**kw):
-        assert clock[0]>=.75
-        referenced.append(clock[0])
-    reference_supported_bottom(observe,
-        NS(status=lambda:NS(velocity_raw=(0,0,0,0),feedback_is_fresh=lambda age:True)),
-        NS(reference_bottom=reference),clock=lambda:clock[0],
-        sleep=lambda t:clock.__setitem__(0,clock[0]+t))
-    assert len(referenced)==1
-
-
-@pytest.mark.parametrize('age_ms,accepted',[(120,True),(251,False)])
-def test_bottom_reference_uses_complete_sweep_freshness_budget(age_ms,accepted):
-    from types import SimpleNamespace as NS
-    from navigation_trial_web import reference_supported_bottom
-    clock=[0.];references=[]
-    def observe():
-        return NS(flags=29 if references else 12,state=5 if references else 0,
-                  fault=0,command_raw=0,height_um=0,target_um=0,
-                  mcu_tick_ms=100,observed_ms=100)
-    def reference(*args,**kwargs):
-        assert clock[0]>=.45
-        references.append(clock[0])
-    def run():
-        reference_supported_bottom(observe,
-            NS(status=lambda:NS(velocity_raw=(0,0,0,0),
-                                feedback_is_fresh=lambda budget:age_ms<=budget)),
-            NS(reference_bottom=reference),clock=lambda:clock[0],
-            sleep=lambda t:clock.__setitem__(0,clock[0]+t))
-    if accepted:
-        run();assert len(references)==1
-    else:
-        with pytest.raises(TimeoutError):run()
-        assert references==[]
-
-
-def test_bottom_reference_never_sends_reference_without_fresh_zero_speed():
-    import pytest
-    from types import SimpleNamespace as NS
-    from navigation_trial_web import reference_supported_bottom
-    clock=[0.]
+        tick=int(clock[0]*1000)
+        return NS(flags=8 if problem=='interlock' else 12,state=0,
+            fault=1 if problem=='fault' else 0,command_raw=1 if problem=='command' else 0,
+            position_raw=int(clock[0]*100)%4096 if problem=='motion' else 3833,
+            mcu_tick_ms=tick,observed_ms=tick-201 if problem=='stale' else 1000 if problem=='repeated' else tick)
     with pytest.raises(TimeoutError):
-        reference_supported_bottom(lambda:NS(flags=12),
-            NS(status=lambda:NS(velocity_raw=(0,0,0,50),feedback_is_fresh=lambda age:True)),object(),
-            clock=lambda:clock[0],sleep=lambda t:clock.__setitem__(0,clock[0]+t))
+        reference_supported_bottom(observe,object(),object(),clock=lambda:clock[0],
+            sleep=lambda t:clock.__setitem__(0,clock[0]+t))
 
 
 @pytest.mark.parametrize('condition',['transient','persistent','stale','rejected'])
@@ -627,7 +586,7 @@ def test_mobile_admission_waits_parked_and_never_retries_rejected_arm(monkeypatc
     from types import SimpleNamespace as NS
     import navigation_trial_web as web
     clock=[0.];calls=[];observations=[]
-    monkeypatch.setattr(web.commissioning,'supported_lift_is_holding',lambda _:True)
+    monkeypatch.setattr(platform_preparation,'supported_lift_is_holding',lambda _:True)
     def observe():observations.append(clock[0])
     def status():
         speed=50 if condition=='persistent' or clock[0]<.1 else 0
@@ -658,7 +617,7 @@ def test_initial_arm_only_defers_proven_unarmed_speed_race(monkeypatch,fault):
     from so101_arm_bridge.mobile_client import MobileReplyError
     import navigation_trial_web as web
     now=[0.];attempts=[]
-    monkeypatch.setattr(web.commissioning,'supported_lift_is_holding',lambda _:True)
+    monkeypatch.setattr(platform_preparation,'supported_lift_is_holding',lambda _:True)
     def status():
         tick=int(now[0]*1000)
         return MobileStatus(5,1,tick,58,7,0,0,0,0,23,tick,(0,0,0,0),0,0)
@@ -689,7 +648,7 @@ def test_initial_arm_wait_requires_distinct_samples(monkeypatch):
     from types import SimpleNamespace as NS
     import navigation_trial_web as web
     now=[0.];attempts=[]
-    monkeypatch.setattr(web.commissioning,'supported_lift_is_holding',lambda _:True)
+    monkeypatch.setattr(platform_preparation,'supported_lift_is_holding',lambda _:True)
     feedback=NS(velocity_raw=(0,0,0,0),feedback_tick_ms=1,feedback_is_fresh=lambda age:True)
     with pytest.raises(TimeoutError):
         web.arm_observed_stationary(lambda:None,NS(status=lambda:feedback,arm=attempts.append),
@@ -702,7 +661,7 @@ def test_transport_admission_uses_fresh_initial_hold_and_retries_only_busy(monke
     import navigation_trial_web as web
     from types import SimpleNamespace as NS
     now=[0.];calls=[]
-    monkeypatch.setattr(web.commissioning,'supported_lift_is_holding',lambda s:s=='held')
+    monkeypatch.setattr(platform_preparation,'supported_lift_is_holding',lambda s:s=='held')
     def observe():calls.append('measure');return 'held'
     def enter():calls.append('enter');return calls.count('enter')==2
     web.enter_base_transport(observe,NS(enter_transport=enter),clock=lambda:now[0],
@@ -720,7 +679,7 @@ def test_transport_arming_needs_only_heartbeat_and_three_wheels(monkeypatch):
     from types import SimpleNamespace as NS
     now=[0.];armed=[]
     def forbidden(_):raise AssertionError('no lift telemetry during base transport')
-    monkeypatch.setattr(web.commissioning,'supported_lift_is_holding',forbidden)
+    monkeypatch.setattr(platform_preparation,'supported_lift_is_holding',forbidden)
     def feedback():return NS(velocity_raw=(0,0,0,0),feedback_tick_ms=int(now[0]*1000),feedback_is_fresh=lambda _:True)
     web.arm_observed_stationary(lambda:None,NS(status=feedback,arm=armed.append),transport_only=True,
         clock=lambda:now[0],sleep=lambda dt:now.__setitem__(0,now[0]+dt))
@@ -737,3 +696,20 @@ def test_inspection_queries_only_wheels_without_motion_endpoint():
     window=SimpleNamespace(observe=lambda rows,start,end,geometry:(rows,start,end))
     result,rows=inspection_wheel_observation(Inventory(),None,window,clock=lambda:1)
     assert calls==[(0,7),(0,8),(0,9)] and result==(rows,1,1)
+
+
+def test_fine_candidate_is_collision_bound_and_never_dispatches_nav2_followpath():
+    from test_nav2_trial import fine_trial
+    s=web_state();s.trial=fine_trial();s.trial.state='RUNNING';s.trial.fine_twist=(0.,-.007,0.)
+    control=s.sensor_control()
+    assert control['execute'] is False and control['motion_active'] is True
+    assert control['fine_twist']==[0.,-.007,0.]
+    s.async_corridor=True
+    s.corridor_observation=dict(goal=s.trial.goal,pose_stamp=s.pose_stamp,scan_stamp=s.scan_stamp,
+        depth_stamp=s.depth_stamp,nav_twist=[0.,0.,0.],hits=dict(lidar=[],depth=[]))
+    assert s.corridor_hits() is None
+    s.corridor_observation['nav_twist']=control['fine_twist']
+    assert s.corridor_hits()==dict(lidar=[],depth=[])
+    s.trial._fine_observe(1)
+    assert s.sensor_control()['motion_active'] is False
+    assert s.corridor_hits() is None  # old nonzero candidate does not match observation phase
