@@ -108,8 +108,10 @@ python3 $A/joint_calib.py . ~/cal_20261113,~/cal_X calib2.json --cv 5
 | `analysis/intrinsics_check.py` | 체커보드로 렌즈 왜곡 확인 (공장값·왜곡 0 vs 추정, 사진 하나씩 빼고 검증) |
 | `analysis/tcp_touch.py` | 집게 끝 피벗 보정 + 카메라가 본 점과 팔이 닿은 점의 차이 (자 없는 최종 검증) |
 | `analysis/make_tcp_target.py` | 집게 끝 표적지 생성 (`docs/tcp_touch_target_A4.pdf`) |
+| `analysis/make_arm_markers.py` | 팔 마커 생성 (`docs/calibration_arm_markers_A4.pdf`, 왼팔 id 4 / 오른팔 id 5). `calib_model.MARKER_ID`가 같은 규칙을 쓴다 |
+| `analysis/make_checkerboard.py` | 렌즈 확인용 체커보드 생성 (`docs/calibration_checkerboard_A4.pdf`, 10×7칸 25mm) |
 
 리프트: `calib_model.py`의 연속 리프트 모델(`lk` 엔코더→높이 배율, `lt_x`/`lt_y` 리프트 축 기울기, 날짜별 `lo_` 오프셋).
 `joint_calib.py`의 모델 E·F가 이를 쓴다. 높이 5개 이상에서 찍어야 의미가 있다.
 
-현장 절차는 [촬영 가이드](../../../docs/CALIBRATION_TOUR_FIELD_GUIDE.md).
+현장 절차는 [2026-11-16 현장 가이드](../../../docs/CALIBRATION_FIELD_GUIDE_20261116.md) (이전: [11/15 투어 가이드](../../../docs/CALIBRATION_TOUR_FIELD_GUIDE.md)).

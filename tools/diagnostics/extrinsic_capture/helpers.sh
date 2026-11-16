@@ -1,5 +1,5 @@
-# Calibration capture helpers. On the Jetson:  source ~/cal_20261113/helpers.sh
-CAL=~/cal_20261113
+# Calibration capture helpers. On the Jetson:  source ~/cal_20261116/helpers.sh
+CAL=~/cal_20261116
 PY=/home/hyper/robot/shared/venvs/room-scan-bag/bin/python
 cd /home/hyper/robot/releases/s3-stationary-9d2fd662e718 || return
 

@@ -21,7 +21,11 @@ import sys, json, glob, pathlib
 import numpy as np, cv2
 from scipy.spatial.transform import Rotation as Rot
 
-SIDE = 0.070                       # ArUco id 4 black square, measured
+SIDE = 0.070                       # ArUco black square, measured
+# marker id per arm, first match wins: since 2026-11-16 the right arm wears id 5
+# (make_arm_markers.py) so a resting left-arm id 4 in the same photo is not mistaken for it;
+# the 2026-11-13 right-arm shots used id 4
+MARKER_ID = {'left': (4,), 'right': (5, 4)}
 OBJ = np.array([[-1, 1, 0], [1, 1, 0], [1, -1, 0], [-1, -1, 0]], float) * SIDE / 2
 PX_PER_MM = 1.5                    # ~617 px focal / 0.4 m: plane mm residuals on the marker pixel scale
 OP = {'L1': .20, 'L2': .35, 'H50': .50, 'RCD': .35}   # operator-entered lift heights (m)
@@ -106,8 +110,10 @@ class Context:
             k = json.load(open(f.replace('color.png', 'metadata.json')))['color_intrinsics']
             K = np.array([[k['fx'], 0, k['ppx']], [0, k['fy'], k['ppy']], [0, 0, 1]])
             c, ids, _ = det.detectMarkers(cv2.imread(f, 0))
-            if ids is None or 4 not in ids.ravel(): continue
-            c = c[list(ids.ravel()).index(4)].reshape(4, 2)
+            seen = [] if ids is None else list(ids.ravel())
+            mid = next((m for m in MARKER_ID[arm] if m in seen), None)
+            if mid is None: continue
+            c = c[seen.index(mid)].reshape(4, 2)
             _, r, t = cv2.solvePnP(OBJ, c, K, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
             R = cv2.Rodrigues(r)[0]; t = t.ravel()
             tilt = np.degrees(np.arccos(abs(R[:, 2] @ (-t / np.linalg.norm(t)))))
