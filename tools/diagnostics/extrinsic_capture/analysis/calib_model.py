@@ -36,6 +36,19 @@ CJ = ('shoulder', 'elbow', 'wrist_flex')        # joints that carry a gravity mo
 ARMS = ('left', 'right')
 
 
+def marker_side_m(folder, arm):
+    """Measured black-square side of this arm's marker for one capture folder.
+
+    measurements.json in the folder or its parent, e.g. {"marker_side_mm": {"left": 66.4, "right": 66.4}}
+    (2026-11-16: printed at 95 %). Without it the 70.0 mm of the 2026-11-13 capture is used."""
+    for p in (pathlib.Path(folder), pathlib.Path(folder).parent):
+        f = p / 'measurements.json'
+        if f.exists():
+            mm = json.load(open(f)).get('marker_side_mm', {}).get(arm)
+            if mm: return float(mm) / 1000
+    return SIDE
+
+
 def T(v):
     M = np.eye(4); M[:3, :3] = Rot.from_rotvec(v[:3]).as_matrix(); M[:3, 3] = v[3:]; return M
 
@@ -114,14 +127,15 @@ class Context:
             mid = next((m for m in MARKER_ID[arm] if m in seen), None)
             if mid is None: continue
             c = c[seen.index(mid)].reshape(4, 2)
-            _, r, t = cv2.solvePnP(OBJ, c, K, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
+            obj = OBJ * marker_side_m(d, arm) / SIDE
+            _, r, t = cv2.solvePnP(obj, c, K, None, flags=cv2.SOLVEPNP_IPPE_SQUARE)
             R = cv2.Rodrigues(r)[0]; t = t.ravel()
             tilt = np.degrees(np.arccos(abs(R[:, 2] @ (-t / np.linalg.norm(t)))))
             side = np.linalg.norm(c - np.roll(c, -1, 0), axis=1).min()
             if tilt > 62 or side < 35 or max(abs(raw[q] - before[q]) for q in raw if q.startswith(arm)) > 3: continue
             cm = np.eye(4); cm[:3, :3] = R; cm[:3, 3] = t
             ang = self.s2.model_angles({q: raw[arm + '/' + q] for q in self.s2.JOINTS}, self.P['arms'][arm]['alignment'])
-            shots.append(dict(name=name, arm=arm, att=att, lvl=lvl, c=c, K=K, ang=ang, lift=raw['lift/id10'], cm=cm, tilt=tilt,
+            shots.append(dict(name=name, arm=arm, att=att, lvl=lvl, c=c, K=K, ang=ang, obj=obj, lift=raw['lift/id10'], cm=cm, tilt=tilt,
                               session=(j.get('calibration_group') or {}).get('session', pathlib.Path(d).name), lift_op=float(j.get('lift_m_operator', self.op[lvl]))))
         ref = {}
         for s in shots: ref.setdefault(s['lvl'], s['lift'])
@@ -275,7 +289,7 @@ class Model:
     def residuals(self, p, shots, planes):
         d = self.unpack(p); out = []
         for s in shots:
-            cm = self.marker_in_cam(s, d); pts = (cm[:3, :3] @ OBJ.T).T + cm[:3, 3]
+            cm = self.marker_in_cam(s, d); pts = (cm[:3, :3] @ s['obj'].T).T + cm[:3, 3]
             uv = (s['K'] @ pts.T).T; out.append((uv[:, :2] / uv[:, 2:] - s['c']).ravel())
         X = d['cam']
         for q in planes:
