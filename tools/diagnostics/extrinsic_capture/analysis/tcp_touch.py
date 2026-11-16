@@ -31,6 +31,13 @@ d = model.unpack(p)
 X = d['cam']
 det = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50), cv2.aruco.DetectorParameters())
 session = os.path.basename(os.path.abspath(touch_dir))
+# measured print of the target sheet (TOUCH_DIR/measurements.json "tcp_target"); default = nominal 70 / 80 mm
+_meas = os.path.join(touch_dir, 'measurements.json')
+_tgt = json.load(open(_meas)).get('tcp_target', {}) if os.path.exists(_meas) else {}
+side_mm = float(_tgt.get('marker_side_mm', 70.0)); offset_mm = float(_tgt.get('offset_mm', 80.0 * side_mm / 70.0))
+OBJ = OBJ * side_mm / 70.0
+OFFSET = {1: np.array([offset_mm / 1000, 0, 0]), 2: np.array([-offset_mm / 1000, 0, 0])}
+print(f'touch target: marker {side_mm:.1f} mm, centre -> cross-hair {offset_mm:.1f} mm')
 
 rows = []
 for f in sorted(glob.glob(touch_dir + '/TCP-*/joints.json')):
