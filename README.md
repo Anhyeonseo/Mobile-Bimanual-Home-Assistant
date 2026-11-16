@@ -1,55 +1,61 @@
 # Mobile Bimanual Home Assistant
 
-ALOHA Mini 1 기반으로, **사람의 자연어 요청을 이해하고 집 안을 이동하며 물건을 집어 옮기는 홈 어시스턴트**를 개발한다.
-예: “거실 탁자의 검은 마커펜을 침실 협탁에 놓아줘.”
+ALOHA Mini 1 기반으로 사용자의 요청에 따라 집 안에서 물건을 찾아 집고, 지정한 곳에 옮기는
+홈 어시스턴트를 개발한다. **최종 목표는 온디바이스에서 전체 작업을 정확히 끝내고,
+사용자의 대기 시간과 중간 개입을 줄이는 것**이다.
 
-**2026-11-16 기준:** S3 정지 집기는 사용자 수락을 받았고, S4 지도·주행·장애물 대응과 기존 탁자 위치 갱신을 실물에서 확인했다. 현재는 집기용 베이스 정렬을 보완하는 S4b 단계다. S5 로컬 언어·앱 연결은 준비했지만, 실제 이동→집기→운반→놓기 전체 작업은 아직 완료하지 않았다.
+예: “책상 위 리모컨을 침대의 지정한 곳으로 옮겨줘.”
 
-| 단계 | 현재 상태 |
+## 현재 방향
+
+2026-11-16 기준, 자율주행·지도·기존 가구 위치 갱신과 제한된 위치의 집기는 실물 확인 이력이
+있다. 개입 없는 이동→집기→운반→놓기 전체 작업과 최종 온디바이스 구성은 아직 미완료다.
+로봇 작업은 사용자 요청으로 중단 상태이며 이번 문서 정리는 재개 지시가 아니다.
+
+개발은 **수납장 앞 고정 위치 자동 집기 → 좌우 이동 후 집기 → 지정 목적지까지 전체 작업**
+순서로 진행한다. TF·캘리브레이션, 5DOF·고정 손가락 집기, 베이스 정차, 오른팔 통신을
+전체 성공률·시간·개입 관점에서 개선한다. 실제 하드웨어의 측정 편차와 구동 반복성에 맞는
+허용 오차를 사용하며 계산 정밀도를 실물 성능으로 표현하지 않는다.
+
+| 읽을 문서 | 내용 |
 |---|---|
-| S0·S1 설치/제어 | 장치 조사, 보정 보존, 통합 유지·정지 및 3륜 주행 확인. 간헐 통신 문제의 잔여 원인 조사 필요 |
-| S2 좌표·관측 | 공식 기구 모델과 촬영 시각 좌표 연결. 높이 전용 보정·고정 노출 정지 촬영 확인 |
-| S3 정지 집기 | 흰색 리모컨 집기·들기 성공 1회로 사용자 수락. 약 8mm 접촉 오차와 반복 검증은 후속 범위 |
-| S4a 지도·주행 | 3구간 라이다/RGB-D 지도, 목적지 이동·회전, 상자 우회·침입 정지, 기존 가구 위치 교체 시험 |
-| S4b 모바일 조작 | 방향·도달성을 고려한 베이스 후보 이동 완료. 미세 정렬·저장 관측 집기·운반·놓기 검증 필요 |
-| S5 자연어 작업 | PC 로컬 모델, 텍스트 요청·질문·확인·취소 연결. 실물 전체 수행 전 |
+| [개발 로드맵](docs/ROADMAP.md) | 합의한 목표, 해결할 문제, 현실적인 오차·평가 기준과 개발 순서 |
+| [현재 상태](docs/CURRENT_STATUS.md) | 마지막 실물 결과, 미검증 범위, 로컬/GitHub·배포 상태 |
+| [제품 설계](docs/MOBILE_MANIPULATION_DESIGN.md) | 사용자 흐름, 온디바이스 실행과 계층별 책임 |
 
-정지 위치 안정화·미세 정렬·넓은 RGB 모드 연결은 로컬 수정 단계이며 젯슨 실행본 적용 전이다. 실물 작업은 현재 중단 상태다.
+## 문서 구조
 
-- [현재 상태와 다음 순서](docs/CURRENT_STATUS.md)
-- [문제·보정값·운영 합의 통합 기록](docs/PROJECT_HISTORY_AND_DECISIONS_2026-11-15.md)
+README가 유일한 안내 입구다. 목표·현재 상태·설계는 위 세 문서에서 관리하고, 필요한 기술
+참고는 아래에서 바로 연다. 과거 실험은 `docs/history/` 한 폴더에 모으며 하위 폴더를 더 나누지 않는다.
 
-## 시스템 동작
+| 필요한 내용 | 바로가기 |
+|---|---|
+| 통신·상태·구성 | [시스템 구조](docs/ARCHITECTURE.md), [프로토콜](protocol/README.md), [하드웨어](hardware/README.md) |
+| 센서·좌표·지도 | [카메라](docs/REALSENSE.md), [팔 Home](docs/ARM_HOME_CALIBRATION.md), [방 스캔](docs/ROOM_SCAN_CAPTURE.md), [생활 지도](docs/S4_LIVING_MAP_DESIGN.md) |
+| 실행·진단·배포 | [도구](tools/README.md), [장치 조회](docs/DEVICE_INVENTORY_PROTOCOL.md), [텔레옵](docs/WHEEL_HOLD_TELEOP.md), [저장소 관리](docs/REPOSITORY_MANAGEMENT.md) |
+| 기술 비교·의존성 | [인지·지도 참고](docs/PERCEPTION_MAPPING_DECISIONS.md), [설치 의존성](requirements/README.md) |
+| 집기·주행 실험 이력 | [S3 집기](docs/history/S3_STATIONARY_LAB.md), [S4 주행](docs/history/S4_PREEXPERIMENT.md), [S4b 정렬·집기](docs/history/S4B_EXECUTION_PLAN.md) |
+| 이전 판단·실행 근거 | [문제·보정 기록](docs/history/PROJECT_HISTORY_AND_DECISIONS_2026-11-15.md), [11월 16일 상태 원문](docs/history/EXECUTION_STATUS_THROUGH_2026-11-16.md), [이력 폴더](docs/history/) |
+
+과거 문서의 승인·대기 상태는 현재 지시가 아니다. 긴 참고 문서는 첫 요약과 접을 수 있는
+목차로 필요한 부분만 읽는다. 왼팔 시연 안내 세 개는 [기존 시연 문서](docs/history/FIXED_PICK_DEMO.md)에
+합쳤으며, 오프라인 실행 예시는 [도구 안내](tools/README.md#하드웨어-없는-실행-예시)로 모았다.
+
+## 실행 흐름
 
 ```text
-텍스트 요청 → 의미 추출·모호한 요청 확인 → 공간·물체 기억 조회
-→ 관측 위치로 이동 → 물체 확인 → 베이스 정차 위치·리프트 높이 선택
-→ 정지 재관측 또는 저장 관측의 상대 좌표 추적 → 집기·성공 확인 → 운반 → 놓기·결과 확인
+요청 이해·필요한 확인 → 대상 위치로 이동 → 관측 → 정차·집기 결정
+→ 집기·집힘 확인 → 운반·놓기 → 실제 결과 확인·응답
 ```
 
-첫 스캔 앱은 지도 생성과 검토를 돕는다. RGB-D에서 본 침대·소파·책상 등의 의미와
-높이별 장애물을 2D LiDAR 지도에 연결한다. 라이다에 침대 다리만 보이더라도 RGB-D에서
-확인한 몸체를 **지도 생성·저장 단계부터** 이동 불가 영역에 반영하는 방향이다.
-현재는 전원선을 옮기며 텔레옵으로 구간별 촬영·저장·재개한다. 자동 탐색의 실물 검증은 배터리 도착 뒤로 미룬다.
+현재 장비는 Jetson Orin Nano Super, STM32G474, 3륜 베이스·리프트·양팔 SO101,
+RealSense D415와 LDS-01이다. PC 로컬 언어 모델은 현재 개발 구성이며 최종 온디바이스
+완료를 뜻하지 않는다. 사용 중인 인식·계획 기술은 전체 작업에 도움이 되는지 측정해 유지하거나 교체한다.
 
-## 계층과 현재 상태
+## 하드웨어 없이 시작하기
 
-| 영역 | 역할 | 현재 확인 수준 |
-|---|---|---|
-| STM32·장치 통신 | 양팔·베이스·리프트 제어와 상태·정지 관리 | 공통 유지·정지·주행 확인, 잔여 통신 오류 조사 |
-| 위치·지도·인지 | 위치 추정, 가구·물체 기억, 높이 장애물 반영 | 기록 기반 지도 생성과 실물 위치 추정·가구 이동 갱신 |
-| 이동·조작 계획 | 정차 위치·높이·팔 동작 후보와 충돌 검토 | 형상·5DOF·고정 손가락 후보와 베이스 이동 확인; 집기 통합 전 |
-| 작업 실행 | 이동·집기·놓기 순서, 취소·실패·재관측 관리 | 공통 실행기 및 PC 회귀 검사 |
-| 자연어·앱 | 요청 의미 추출, 질문·상태·스캔 검토 | 로컬 언어 모델·질문·확인·취소 연결; 실물 전체 작업 전 |
-
-현재 장비는 Jetson Orin Nano Super, STM32G474, 양팔, 모바일 베이스·리프트,
-RealSense D415 및 LDS-01이다. LDS-01 패킷 수신과 본체 가림을 반영한 위치 추정·주행을 확인했다.
-DINO·SAM은 기존 인식/마스킹 출발점이며, 최종 인식 엔진은 실제 장면과 Jetson 부하를 비교해 결정한다.
-자연어 모델이 모터 명령을 직접 만드는 구조는 사용하지 않는다.
-
-## 먼저 실행하기
-
-모바일 브랜치의 저장소 루트에서 Python 3.12로 실행한다. 아래 데모·앱은 모의 장치를 사용한다.
+모바일 작업 폴더의 저장소 루트에서 Python 3.12로 실행한다. 현재 개발 PC의 실제 작업 폴더는
+`workspaces/home-assistant`이며, 새 clone은 clone한 저장소 루트에서 실행한다.
 
 ```bash
 python3 -m venv .venv-host
@@ -60,180 +66,15 @@ python tools/run/home_assistant.py demo --fail-skill pick
 python tools/run/home_assistant.py serve
 ```
 
-앱: `http://127.0.0.1:18766/assistant`. 접속 키는 로컬 `output/home-assistant/access-key.txt`에 생성된다.
-키·장치별 설정·촬영 자료·실측 로그는 Git에 넣지 않는다. 모델 다운로드나 모터 동작은 위 명령으로 시작되지 않는다.
+앱은 `http://127.0.0.1:18766/assistant`, 접속 키는 로컬 `output/home-assistant/access-key.txt`에
+생성된다. 위 명령은 모의 장치를 사용하며 모델 다운로드나 모터 동작을 시작하지 않는다.
+상세 재생·ROS·펌웨어 검사는 [기존 도구 안내](tools/README.md#하드웨어-없는-실행-예시)를 따른다.
 
-## 개발 순서와 문서
-
-**S0 설치 조사 → S1 공통 제어 → S2 좌표 보정 → S3 고정 베이스 관측 집기 → S4 지도·주행·모바일 집기 → S5 자연어 전체 작업**
-
-- [시스템 요구사항·계층별 책임](docs/MOBILE_MANIPULATION_DESIGN.md)
-- [구현 범위·검사 결과·남은 연결](docs/HOME_ASSISTANT_IMPLEMENTATION.md)
-- [S0 설치 조사 요약](docs/HOME_ASSISTANT_S0.md)
-- [S1 공통 제어 연결](docs/HOME_ASSISTANT_S1.md)
-- [S2 좌표와 관측 연결](docs/HOME_ASSISTANT_S2.md)
-- [S2 완료 결과·배포·남은 운용 과제](docs/S2_HANDOFF.md)
-- [D415 방 스캔 촬영·파일 전달](docs/ROOM_SCAN_CAPTURE.md)
-- [인지·지도 기술 선택 기준](docs/PERCEPTION_MAPPING_DECISIONS.md)
-- [파일 구조·GitHub 업로드·젯슨 배포 관리](docs/REPOSITORY_MANAGEMENT.md)
-
-아래 도구 안내와 기존 [아키텍처](docs/ARCHITECTURE.md)·[상태 기록](docs/CURRENT_STATUS.md)·
-[초기 로드맵](docs/ROADMAP.md)은 기반 구현의 상세 자료다. 과거 하드웨어 구성이나 실기 성공을
-현재 통합 시스템의 완료 상태로 해석하지 않는다.
-
-## 하드웨어 없는 확인
-
-저장소 루트에서 실행한다. 센서·보드·모터 없이 PC에서만 실행한다.
-주행 안전 검사까지 연결한 전체 작업은 `python3 tools/run/run_fetch_stack.py --guarded-navigation`으로 확인한다. 영상·공간·바퀴 피드백은 합성이다.
-
-```bash
-python3 -m venv .venv-host
-source .venv-host/bin/activate
-python -m pip install -r requirements/offline.lock.txt
-python tools/run/verify_offline.py --bundle
-```
-
-예제 요청의 계획 출력:
-
-```bash
-PYTHONPATH=ros2_ws/src/home_robot_tasks python -m home_robot_tasks.cli \
-  --world config/home.example.json \
-  --request config/fetch_remote.example.json
-```
-
-결과는 `plan_only`, `executable=false`다. 예제는 소파 탐색과 침대의 지정 영역을 의미 이름으로 표현하며 실측 지도 좌표는 없다. 손에 든 채 운반하는 경로의 자세·적재 한계는 실물 검증이 필요하다.
-
-가상 성공 기록으로 15단계 재생:
-
-```bash
-PYTHONPATH=ros2_ws/src/home_robot_tasks python3 -m home_robot_tasks.replay_cli \
-  --world config/home.example.json --request config/fetch_remote.example.json \
-  --recording config/fetch_remote.replay.example.json
-```
-
-`COMPLETED`는 재생 완료만 의미한다. `physical_task_completed=false`,
-`motion_commands=0`이며 센서·모터에 연결하지 않는다. 기록 형식과 실패 사례는
-[시스템 구조](docs/ARCHITECTURE.md#오프라인-작업-재생-계약)에 설명한다.
-
-PC에서 가짜 장치로 지도 지점 이동 실행:
-
-```bash
-PYTHONPATH=ros2_ws/src/home_robot_tasks python3 -m home_robot_tasks.simulate_cli \
-  --world config/home.example.json --map config/navigation_map.simulation.json \
-  --request config/navigate_to.simulation.json
-```
-
-`--request config/fetch_remote.example.json`으로 15단계 배달도 실행한다.
-`--cancel-at-s 0.1` 또는 `--fail-skill pick`으로 취소/실패를 재현한다.
-결과는 simulation이며 실제 하드웨어 명령은 0개다. 지도 이동은 XY/yaw 경로를
-따르는 기구학 모형이고, 배달의 집기 등은 합성 skill 결과다. 입체 점유 지도 UI와 인증 HTTP 서버는 PC 시뮬레이션에서 사용할 수 있다. 실측 지도 연결과 시맨틱 지도 자동 생성은 후속 개발이다.
-
-### 소파 재탐색을 PC에서 실행
-
-```bash
-PYTHONPATH=ros2_ws/src/home_robot_tasks python3 -m home_robot_tasks.search_simulator --config config/search_sofa.simulation.json --scenario alternate_found
-```
-
-정면 미발견→미확인 영역이 많은 다른 시점→정지 후 새 RGB-D→3D 후보 발견을
-합성 입력으로 실행한다. `hidden`, `invalid_depth`, `stale_transform`,
-`cancel_pending`도 지원한다. 실제 영상 인식·주행·팔 동작은 없으며 전체 fetch
-실행기에 아직 연결하지 않았다. 좌표는 집기 자세/충돌 검사 전 후보이고,
-미발견 결과는 물체 부재를 증명하지 않는다.
-
-### 앱 연결 서버를 PC에서 실행
-
-```bash
-mkdir -p output/gateway
-python3 -c "import secrets,pathlib; p=pathlib.Path('output/gateway/token'); p.touch(mode=0o600,exist_ok=False); p.write_text(secrets.token_urlsafe(32))"
-PYTHONPATH=ros2_ws/src/home_robot_tasks python3 -m home_robot_tasks.gateway \
-  --world config/home.example.json --map config/navigation_map.simulation.json \
-  --token-file output/gateway/token --database output/gateway/requests.db
-```
-
-첫 생성 이후에는 기존 토큰 파일을 유지한다. 기본 주소 `http://127.0.0.1:8765`에서
-bearer 인증으로 지도/permit/요청/상태/취소를 제공한다. LAN 연결에는 `--bind`와
-TLS 인증서/키가 필요하다. [API와 재연결 규칙](protocol/README.md#http-경로와-실행)을 따른다.
-서버 재시작은 미완료 작업을 INTERRUPTED로 기록하며 자동 재개하지 않는다.
-
-통합 검증 보고서와 선택한 소스 묶음은 `output/offline-verification/`에 생성한다.
-`--stm32`는 ARM toolchain으로 두 프로파일을 빌드하며 flash하지 않는다.
-`--ros`는 ROS Jazzy·nav2_msgs·xacro·URDF parser 환경에서 모델/액션 시험을 추가한다.
-1시간 반복 시험은 **가속한 모의 시간**이며 실제 장치의 1시간 운용 시험이 아니다.
-
-펌웨어 공통 코어 시험:
-
-```bash
-cmake -S firmware/stm32_actuator -B build/stm32_actuator-host
-cmake --build build/stm32_actuator-host
-ctest --test-dir build/stm32_actuator-host --output-on-failure
-```
-
-## 구성과 문서
-
-| 경로 | 역할 |
-|---|---|
-| `firmware/` | 기존 STM32 제어기와 독립 C 코어 |
-| `ros2_ws/src/so101_arm_bridge/` | 팔 명령·피드백·정지 브릿지 |
-| `ros2_ws/src/so101_interfaces/` | 양팔 명령·피드백 ROS 메시지 |
-| `ros2_ws/src/so101_description/` | SO101 팔 기구학과 형상 |
-| `ros2_ws/src/home_robot_tasks/` | 가사 작업 요청·15단계 계획·오프라인 이벤트 재생 |
-| `config/`, `hardware/` | 관절 한계, 예제 요청, 하드웨어 참조 |
-| `protocol/`, `tools/`, `tests/` | 통신 규격, 검증 도구, 회귀 시험 |
-
-[현재 상태](docs/CURRENT_STATUS.md) · [로드맵](docs/ROADMAP.md) · [시스템 구조](docs/ARCHITECTURE.md) · [팔 브릿지 사용](ros2_ws/src/so101_arm_bridge/README.md)
-
-이전 수건 접기 개발은 [SO101-Towel-Folding](https://github.com/Anhyeonseo/SO101-Towel-Folding/tree/5b16fff82e400e4cca8cdcff96a6d1548058ef80)에 보관한다.
-
-## 전체 작업 틀을 하드웨어 없이 실행
-
-```bash
-python3 tools/run/run_fetch_stack.py
-python3 tools/run/run_fetch_stack.py --cancel-step 7
-python3 tools/run/run_fetch_stack.py --fault sensor_loss
-```
-
-등록 장소→관측 위치/리프트→RGB-D 좌표→계획/작업 실행을 조립한 15단계 모의 실행이다.
-센서·모터·집기 결과는 합성이며 실제 성공을 뜻하지 않는다. 설정 생성·ROS 증거 입력·
-재시작 복구와 남은 실물 연결은 [현재 상태](docs/CURRENT_STATUS.md)를 따른다.
-
-## 실제 ROS 계획·주행의 PC 검사
-
-ROS Jazzy와 MoveIt/Nav2 의존성 및 새 증거 메시지를 빌드한 환경에서:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-colcon build --base-paths ros2_ws/src --packages-select so101_interfaces so101_arm_bridge home_robot_tasks so101_description
-source install/setup.bash
-```
-
-```bash
-export PYTHONPATH=ros2_ws/src/home_robot_tasks:ros2_ws/src/so101_arm_bridge:$PYTHONPATH
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST ROS_DOMAIN_ID=173
-python3 tools/run/verify_offline.py --ros --moveit --nav2 --stm32 --bundle
-```
-
-Nav2·AMCL의 합성 라이다 주행, 인증 HTTP 요청/취소·scan/TF 손실 정지, Python↔C 바퀴 피드백과 양팔
-MoveIt IK/충돌/계획을 검사한다. 실제 장치는 열지 않는다. MoveIt 종료 문제의
-프로세스 한정 우회를 포함하며 의존성과 범위는 [시스템 구조](docs/ARCHITECTURE.md)를 따른다.
+소스는 `firmware/`, `ros2_ws/src/`, `tools/`, 설정은 `config/`, 검사는 `tests/`에 둔다.
+실내 영상·지도·접속 키·실측 원본은 Git에 넣지 않는다. [파일·배포 관리](docs/REPOSITORY_MANAGEMENT.md)를 따른다.
 
 ## License
 
-자체 작성 코드와 문서는 [Apache License 2.0](LICENSE)을 따른다. 로봇 모델과 STM32 구성 요소의 조건은 [제3자 고지](docs/THIRD_PARTY_NOTICES.md)에 정리했다.
-
-### 휴대폰용 지도 화면 (PC 시뮬레이션)
-
-`robot_gateway` 실행 후 같은 주소의 `/`를 열면 입체 점유 지도에서 바닥을 선택하고 경로 확인·이동·취소할 수 있다. Python 모듈로도 실행할 수 있다.
-
-```bash
-PYTHONPATH=ros2_ws/src/home_robot_tasks:ros2_ws/src/so101_arm_bridge python3 -m home_robot_tasks.gateway \
-  --world config/home.example.json --map config/navigation_map.simulation.json \
-  --token-file /절대/경로/token --database /절대/경로/requests.db
-```
-
-기본 주소는 `http://127.0.0.1:8765`이며 token 파일에는 32자 이상의 무작위 접속 키를 넣는다. 화면은 키를 저장하지 않는다. 휴대폰의 LAN 접근에는 `--bind`, `--cert`, `--key`, 정확한 `--public-origin https://호스트:포트`를 함께 지정한다. 현재 화면과 gateway는 시뮬레이션용이다.
-
-## 2026-09-16 주행 구조 재점검
-
-Mini 1의 공식 소스 리비전을 고정해 Mini 2 기본값과 분리했다. 원 시각을 보존하는 `TwistStamped → 바퀴 명령/실측 odometry` 재사용 브릿지, native depth의 3D 점유→2D 주행 격자, 관측되지 않은 정지 거리 차단, 비동기 정지 후 지도 교체와 카메라 3대의 후보 TF를 추가했다. 실제 DDS/C 모형 및 기존 회귀를 검증한다. 상세 연결·검증 한계는 [구조](docs/ARCHITECTURE.md#2026-09-16-주행센서지도-재점검), 남은 기구/실측 확인은 [로드맵](docs/ROADMAP.md)을 따른다.
-
-한 대의 D415로 전신·전방 근거리·옆/뒤의 모든 공간을 볼 수 있다고 가정하지 않는다. `python3 tools/run/check_camera_coverage.py`로 장착 후보의 기하학적 사각을 먼저 확인한다. 예시 치수나 합성 성공은 실물 주행 승인 근거가 아니다.
+자체 코드와 문서는 [Apache License 2.0](LICENSE), 로봇 모델·STM32 구성 요소는
+[제3자 고지](docs/THIRD_PARTY_NOTICES.md)를 따른다.
+이전 수건 접기 개발은 [SO101-Towel-Folding](https://github.com/Anhyeonseo/SO101-Towel-Folding/tree/5b16fff82e400e4cca8cdcff96a6d1548058ef80)에 보관한다.

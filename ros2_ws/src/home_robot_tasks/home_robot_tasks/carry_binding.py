@@ -50,6 +50,26 @@ class PregraspRejected(PlanRejected):
             f"{diagnostics['position_error_m']*1000:.1f} mm / {diagnostics['orientation_error_deg']:.1f} deg residual")
 
 
+def bind_observed_fixed_contact(arm, grip, vertices_base, *, entry_clearance_m=.004):
+    """Offline corrected TCP/width for the actual stock closing direction.
+
+    Call before IK/pregrasp/route generation. Rebinding moves the hand target,
+    never the observed object, and invalidates every earlier path to that target.
+    """
+    if not np.isfinite(entry_clearance_m) or not .004<=entry_clearance_m<=.020:
+        raise ValueError('bounded entry clearance required')
+    grip=geo.rigid(grip).copy()
+    section=arm.jaw.contact_section(grip@arm.tcp_from_stock,vertices_base)
+    width=section['width_m']
+    if not arm.jaw.accepts(width+entry_clearance_m):
+        raise PlanRejected('observed directed section and entry clearance exceed stock jaw')
+    grip[:3,3]+=section['tcp_correction_base_m']
+    section.update(entry_gap_m=width+entry_clearance_m,requires_new_ik_and_route=True)
+    source=dict(width_m=width,closing_section=dict(status='VISIBLE_SPAN',
+        low_m=-width/2,high_m=width/2,method='observed_contact_line'))
+    return grip,source,section
+
+
 def bind_grasp(arm, review, group, index, payload, installed_left_jaw, *,
                approach_distance_m=.02, upright_object_axis=None,
                maximum_tilt_rad=None, orientation_evidence=None, hypothetical_lift_m=None,
@@ -96,6 +116,16 @@ def bind_grasp(arm, review, group, index, payload, installed_left_jaw, *,
     fixed_extent=-source['closing_section']['low_m']
     shift=fixed_extent-source['width_m']/2
     grip[:3,3]+=grip[:3,0]*shift
+    section_binding=None
+    if target_vertices is not None:
+        grip,effective,section_binding=bind_observed_fixed_contact(
+            arm,grip,target_vertices,entry_clearance_m=entry_clearance_m)
+        source=dict(source,**effective)
+        close=closure_plan(arm.jaw,source,entry_clearance_m=entry_clearance_m,close_allowance_m=close_allowance_m)
+        gap=installed_left_jaw.preview(close)
+        if gap['status'] not in ('MEASURED_GAP_PREVIEW','NOMINAL_STL_GAP_PREVIEW'):
+            raise PlanRejected(gap['status'])
+        fixed_extent=source['width_m']/2
     seed=checked_joints(arm,[review['left_anchor_rad'][n] for n in geo.JOINTS[:5]])
     # Roll is free only for an observed pinch-line section. Legacy rectangular
     # sampling bands cannot justify changing the approach orientation.
@@ -125,6 +155,7 @@ def bind_grasp(arm, review, group, index, payload, installed_left_jaw, *,
         angle(gap['entry_raw']),angle(held_raw),constraint,payload.mesh)
     preview_key='measured_gap_preview' if gap['status']=='MEASURED_GAP_PREVIEW' else 'nominal_gap_preview'
     return candidate, dict(closure=close,**{preview_key:gap},
+                           observed_directed_section=section_binding,
                            held_geometry_raw=held_raw,contact_fit=fit,jaw_sign=jaw_sign,
                            fixed_contact_binding=dict(policy='observed_low_contact_not_open_gap_center',
                                fixed_extent_m=fixed_extent,entry_gap_m=close['entry_gap_m'],

@@ -4,7 +4,7 @@
   "hardware_authorized": false,
   "controller_access": "authorized_for_preparation; physical_execution_requires_separate_trial",
   "physical_test_ready": false,
-  "prerequisites_document": "docs/S4B_S5_TEST_RUNBOOK.md",
+  "prerequisites_document": "docs/history/S4B_S5_TEST_RUNBOOK.md",
   "acceptance": {
     "P2": {
       "trials": 24,

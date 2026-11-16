@@ -116,7 +116,7 @@ def main(argv=None):
         return 0 if report['passed'] else 1
     if args.command == 'language-server':
         if not args.model.is_file() or not args.binary.is_file():
-            parser.error('install the pinned model/runtime first; see docs/S5_LANGUAGE_REUSE_REVIEW.md')
+            parser.error('install the pinned model/runtime first; see docs/history/S5_LANGUAGE_REUSE_REVIEW.md')
         if not 1 <= args.port <= 65535:
             parser.error('port must be within 1..65535')
         cuda_lib = ROOT/'artifacts/cuda-12.8/lib'

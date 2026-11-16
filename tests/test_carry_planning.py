@@ -379,3 +379,31 @@ def test_attachment_preserves_observed_world_pose_despite_ik_residual(arm):
     resolved=at_actual_contact(c,actual)
     np.testing.assert_allclose(actual@resolved.tcp_from_object,before,atol=1e-12)
     np.testing.assert_allclose(c.base_from_grasp_tcp@c.tcp_from_object,before,atol=1e-12)
+
+
+def test_candidate_evaluation_reused_but_contact_and_next_plan_are_fresh(arm, monkeypatch):
+    from home_robot_tasks import carry_planning as planning
+
+    evaluated = []
+    original = planning.grasp_preferences
+
+    def measure(arm, start, grasp, policy):
+        evaluated.append(grasp)
+        return original(arm, start, grasp, policy)
+
+    monkeypatch.setattr(planning, 'grasp_preferences', measure)
+    grasp = candidate(arm)
+    pose = grasp.base_from_grasp_tcp.copy()
+    pose[0, 3] += .001  # FakePlanner reaches the anchor, leaving an IK residual.
+    grasp = replace(grasp, base_from_grasp_tcp=pose)
+    for run in range(2):
+        plan = plan_pick_carry(arm, FakePlanner(), arm.anchor, [grasp], scene_id='scene-1')
+        assert plan.status == 'OFFLINE_ROUTE_FOUND'
+        assert len(plan.selection['alternatives']) > 1
+        # Ranking and each carry alternative share one evaluation per pose.
+        assert len(evaluated) == 2 * (run + 1)
+        nominal, actual = evaluated[-2:]
+        assert nominal is grasp and actual is plan.resolved_grasp
+        assert actual is not nominal and actual.candidate_id == nominal.candidate_id
+        assert not np.array_equal(actual.tcp_from_object, nominal.tcp_from_object)
+    assert evaluated[1] is not evaluated[3]

@@ -28,7 +28,7 @@ static BimanualTrackingFeedbackState tracking = {0};
 
 static BimanualTrackingFeedbackResult RecordPairFailure(void)
 {
-    #if HOST_S3_STATIONARY_PICK
+#if HOST_S3_STATIONARY_PICK
     S3Platform_Retry(tracking.joint_index);
 #endif
     tracking.snapshot.failed_pairs++;
@@ -55,8 +55,6 @@ HAL_StatusTypeDef BimanualTrackingFeedback_Begin(void)
     memset(&tracking, 0, sizeof(tracking));
 #if HOST_S3_STATIONARY_PICK
     S3Platform_CancelRetry();
-#endif
-#if HOST_S3_STATIONARY_PICK
     /* Own the lifecycle before setup. A partially acquired UART must remain
      * visible until End proves cleanup; never report an idle owner on failure. */
     tracking.snapshot.active = 1U;
@@ -130,7 +128,7 @@ HAL_StatusTypeDef BimanualTrackingFeedback_Start(
         (tracking.snapshot.pending != 0U) || (tracking.faulted != 0U) ||
         (joint_index >= BIMANUAL_TRACKING_ARM_JOINT_COUNT
 #if HOST_S3_STATIONARY_PICK
-         && joint_index >= 10U
+         && joint_index >= S3_PLATFORM_SLOT_COUNT
 #endif
         ) ||
         (left_commanded_raw == NULL) || (right_commanded_raw == NULL))
@@ -169,9 +167,9 @@ HAL_StatusTypeDef BimanualTrackingFeedback_Start(
 #endif
         return HAL_ERROR;
     }
-    #if HOST_S3_STATIONARY_PICK
+#if HOST_S3_STATIONARY_PICK
     S3Platform_Scheduled(joint_index);
-    if(joint_index < 6U)
+    if (joint_index < S3_PLATFORM_FIRST_AUX_SLOT)
 #endif
     tracking.snapshot.requested_pairs++;
     tracking.snapshot.pending = 1U;
@@ -228,11 +226,11 @@ BimanualTrackingFeedbackResult BimanualTrackingFeedback_Poll(
     {
         return RecordPairFailure();
     }
-    #if HOST_S3_STATIONARY_PICK
-    if(tracking.joint_index >= 6U){
-        S3Platform_Update(tracking.joint_index,left->last_position_raw,tracking.started_at_ms);
-        tracking.snapshot.pending=0U;
-        tracking.snapshot.consecutive_failed_pairs=0U;
+#if HOST_S3_STATIONARY_PICK
+    if (tracking.joint_index >= S3_PLATFORM_FIRST_AUX_SLOT) {
+        S3Platform_Update(tracking.joint_index, left->last_position_raw, tracking.started_at_ms);
+        tracking.snapshot.pending = 0U;
+        tracking.snapshot.consecutive_failed_pairs = 0U;
         return BIMANUAL_TRACKING_AUX_READY;
     }
 #endif

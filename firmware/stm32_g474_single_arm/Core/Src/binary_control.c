@@ -1,3 +1,4 @@
+#include "actuator_core/wire_bytes.h"
 #if HOST_DEVICE_INVENTORY_BUILD
 #include "device_inventory.h"
 #endif
@@ -199,41 +200,6 @@ static int32_t
 #elif HOST_PROTOCOL_V2_VALIDATION_ONLY_BUILD
 static actuator_v2_stream_session_t host_v2_stream_session;
 #endif
-
-static void Host_WriteU32Le(uint8_t *destination, uint32_t value)
-{
-    destination[0] = (uint8_t)(value & 0xFFU);
-    destination[1] = (uint8_t)((value >> 8U) & 0xFFU);
-    destination[2] = (uint8_t)((value >> 16U) & 0xFFU);
-    destination[3] = (uint8_t)((value >> 24U) & 0xFFU);
-}
-
-static void Host_WriteU16Le(uint8_t *destination, uint16_t value)
-{
-    destination[0] = (uint8_t)(value & 0xFFU);
-    destination[1] = (uint8_t)((value >> 8U) & 0xFFU);
-}
-
-static uint16_t Host_ReadU16Le(const uint8_t *source)
-{
-    return (uint16_t)(
-        (uint16_t)source[0] |
-        ((uint16_t)source[1] << 8U)
-    );
-}
-
-static uint32_t Host_ReadU32Le(const uint8_t *source)
-{
-    return (uint32_t)source[0] |
-        ((uint32_t)source[1] << 8U) |
-        ((uint32_t)source[2] << 16U) |
-        ((uint32_t)source[3] << 24U);
-}
-
-static int32_t Host_ReadI32Le(const uint8_t *source)
-{
-    return (int32_t)Host_ReadU32Le(source);
-}
 
 static actuator_joint_calibration_t Host_JointCalibration(
     uint8_t joint_index
@@ -454,17 +420,17 @@ static void Host_SendBinaryState(
         servo_joint_count;
 #endif
     response.payload[3] = (uint8_t)ACTUATOR_PROTOCOL_VERSION;
-    Host_WriteU32Le(&response.payload[4], host_binary_heartbeat_count);
-    Host_WriteU32Le(&response.payload[8], host_binary_rejected_frame_count);
-    Host_WriteU32Le(&response.payload[12], Host_CalibrationHash());
+    actuator_write_u32_le(&response.payload[4], host_binary_heartbeat_count);
+    actuator_write_u32_le(&response.payload[8], host_binary_rejected_frame_count);
+    actuator_write_u32_le(&response.payload[12], Host_CalibrationHash());
 #if HOST_PROTOCOL_V2_VALIDATION_ONLY_BUILD
     /* The reviewed right-arm candidate currently has the same packed values,
      * but v2 binds and reports both arm identities independently. */
-    Host_WriteU32Le(&response.payload[16], Host_CalibrationHash());
-    Host_WriteU32Le(
+    actuator_write_u32_le(&response.payload[16], Host_CalibrationHash());
+    actuator_write_u32_le(
         &response.payload[20], host_binary_last_heartbeat_ms);
 #else
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[16], host_binary_last_heartbeat_ms);
 #endif
 
@@ -487,10 +453,10 @@ static void Host_SendBinaryPositionReadFailure(
     response.payload[1] = 2U;
     response.payload[2] = servo_joint_count;
     response.payload[3] = (uint8_t)ACTUATOR_PROTOCOL_VERSION;
-    Host_WriteU32Le(&response.payload[4], host_binary_heartbeat_count);
-    Host_WriteU32Le(&response.payload[8], host_binary_rejected_frame_count);
-    Host_WriteU32Le(&response.payload[12], Host_CalibrationHash());
-    Host_WriteU32Le(
+    actuator_write_u32_le(&response.payload[4], host_binary_heartbeat_count);
+    actuator_write_u32_le(&response.payload[8], host_binary_rejected_frame_count);
+    actuator_write_u32_le(&response.payload[12], Host_CalibrationHash());
+    actuator_write_u32_le(
         &response.payload[16],
         host_binary_last_heartbeat_ms
     );
@@ -500,18 +466,18 @@ static void Host_SendBinaryPositionReadFailure(
     response.payload[23] = (uint8_t)bus->reason;
     response.payload[24] = bus->hal_status;
     response.payload[25] = bus->servo_status;
-    Host_WriteU16Le(
+    actuator_write_u16_le(
         &response.payload[26],
         (uint16_t)bus->recovery_count
     );
-    Host_WriteU16Le(&response.payload[28], bus->discarded_bytes);
+    actuator_write_u16_le(&response.payload[28], bus->discarded_bytes);
     response.payload[30] = 0U;
     response.payload[31] = 0U;
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[32],
         bus->uart_error_code
     );
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[36],
         bus->uart_isr
     );
@@ -573,17 +539,17 @@ static void Host_SendBinaryStateWithPositions(
     response.payload[1] = 0U;
     response.payload[2] = servo_joint_count;
     response.payload[3] = (uint8_t)ACTUATOR_PROTOCOL_VERSION;
-    Host_WriteU32Le(&response.payload[4], host_binary_heartbeat_count);
-    Host_WriteU32Le(&response.payload[8], host_binary_rejected_frame_count);
-    Host_WriteU32Le(&response.payload[12], Host_CalibrationHash());
-    Host_WriteU32Le(
+    actuator_write_u32_le(&response.payload[4], host_binary_heartbeat_count);
+    actuator_write_u32_le(&response.payload[8], host_binary_rejected_frame_count);
+    actuator_write_u32_le(&response.payload[12], Host_CalibrationHash());
+    actuator_write_u32_le(
         &response.payload[16],
         host_binary_last_heartbeat_ms
     );
 
     for (uint8_t joint = 0U; joint < servo_joint_count; joint++)
     {
-        Host_WriteU16Le(
+        actuator_write_u16_le(
             &response.payload[20U + ((uint16_t)joint * 2U)],
             positions[joint]
         );
@@ -728,8 +694,8 @@ static void Host_SendBinaryDiagnostics(
     response.payload[1] = joint_index;
     response.payload[2] = servo_joint_count;
     response.payload[3] = (uint8_t)ACTUATOR_PROTOCOL_VERSION;
-    Host_WriteU32Le(&response.payload[4], Host_CalibrationHash());
-    Host_WriteU32Le(&response.payload[8], HAL_GetTick());
+    actuator_write_u32_le(&response.payload[4], Host_CalibrationHash());
+    actuator_write_u32_le(&response.payload[8], HAL_GetTick());
     response.payload[12] = joint->id;
     response.payload[13] = read_status;
     response.payload[14] = runtime[0];
@@ -738,25 +704,25 @@ static void Host_SendBinaryDiagnostics(
     response.payload[17] = pid[2];
     response.payload[18] = voltage_raw;
     response.payload[19] = temperature_c;
-    Host_WriteU16Le(&response.payload[20], position);
-    Host_WriteU16Le(&response.payload[22], speed_raw);
-    Host_WriteU16Le(&response.payload[24], load_raw);
-    Host_WriteU16Le(&response.payload[26], current_raw);
-    Host_WriteU16Le(
+    actuator_write_u16_le(&response.payload[20], position);
+    actuator_write_u16_le(&response.payload[22], speed_raw);
+    actuator_write_u16_le(&response.payload[24], load_raw);
+    actuator_write_u16_le(&response.payload[26], current_raw);
+    actuator_write_u16_le(
         &response.payload[28],
         (uint16_t)(
             (uint16_t)runtime[8] |
             ((uint16_t)runtime[9] << 8U)
         )
     );
-    Host_WriteU16Le(
+    actuator_write_u16_le(
         &response.payload[30],
         (uint16_t)(
             (uint16_t)runtime[2] |
             ((uint16_t)runtime[3] << 8U)
         )
     );
-    Host_WriteU16Le(
+    actuator_write_u16_le(
         &response.payload[32],
         (uint16_t)(
             (uint16_t)identity[3] |
@@ -765,14 +731,14 @@ static void Host_SendBinaryDiagnostics(
     );
     response.payload[34] = identity[0];
     response.payload[35] = identity[1];
-    Host_WriteU16Le(
+    actuator_write_u16_le(
         &response.payload[36],
         (uint16_t)(
             (uint16_t)protection[3] |
             ((uint16_t)protection[4] << 8U)
         )
     );
-    Host_WriteU16Le(
+    actuator_write_u16_le(
         &response.payload[38],
         (uint16_t)(
             (uint16_t)protection[11] |
@@ -781,7 +747,7 @@ static void Host_SendBinaryDiagnostics(
     );
     response.payload[40] = protection[13];
     response.payload[41] = protection[14];
-    Host_WriteU16Le(
+    actuator_write_u16_le(
         &response.payload[42],
         (uint16_t)(
             (uint16_t)protection[15] |
@@ -807,28 +773,28 @@ static void Host_SendBinaryDiagnostics(
         ? UINT8_MAX
         : (uint8_t)bus->received_bytes;
     response.payload[55] = (uint8_t)health->producer_index;
-    Host_WriteU32Le(&response.payload[56], bus->uart_error_code);
-    Host_WriteU32Le(&response.payload[60], bus->uart_isr);
-    Host_WriteU32Le(&response.payload[64], bus->dma_error_code);
-    Host_WriteU32Le(&response.payload[68], health->transaction_count);
-    Host_WriteU32Le(&response.payload[72], health->success_count);
-    Host_WriteU32Le(&response.payload[76], health->failure_count);
-    Host_WriteU32Le(&response.payload[80], health->recovery_count);
-    Host_WriteU32Le(&response.payload[84], health->discarded_bytes);
-    Host_WriteU32Le(&response.payload[88], health->timeout_count);
-    Host_WriteU32Le(&response.payload[92], health->overflow_count);
-    Host_WriteU32Le(&response.payload[96], health->rx_event_count);
-    Host_WriteU16Le(&response.payload[100], health->pe_count);
-    Host_WriteU16Le(&response.payload[102], health->ne_count);
-    Host_WriteU16Le(&response.payload[104], health->fe_count);
-    Host_WriteU16Le(&response.payload[106], health->ore_count);
-    Host_WriteU16Le(&response.payload[108], health->rto_count);
-    Host_WriteU16Le(&response.payload[110], health->dma_error_count);
-    Host_WriteU32Le(&response.payload[112], health->lazy_arm_count);
-    Host_WriteU32Le(&response.payload[116], health->receiver_resync_count);
-    Host_WriteU16Le(&response.payload[138], host_tx_failure_count);
-    Host_WriteU16Le(&response.payload[140], host_tx_timeout_count);
-    Host_WriteU16Le(&response.payload[142], host_tx_maximum_ms);
+    actuator_write_u32_le(&response.payload[56], bus->uart_error_code);
+    actuator_write_u32_le(&response.payload[60], bus->uart_isr);
+    actuator_write_u32_le(&response.payload[64], bus->dma_error_code);
+    actuator_write_u32_le(&response.payload[68], health->transaction_count);
+    actuator_write_u32_le(&response.payload[72], health->success_count);
+    actuator_write_u32_le(&response.payload[76], health->failure_count);
+    actuator_write_u32_le(&response.payload[80], health->recovery_count);
+    actuator_write_u32_le(&response.payload[84], health->discarded_bytes);
+    actuator_write_u32_le(&response.payload[88], health->timeout_count);
+    actuator_write_u32_le(&response.payload[92], health->overflow_count);
+    actuator_write_u32_le(&response.payload[96], health->rx_event_count);
+    actuator_write_u16_le(&response.payload[100], health->pe_count);
+    actuator_write_u16_le(&response.payload[102], health->ne_count);
+    actuator_write_u16_le(&response.payload[104], health->fe_count);
+    actuator_write_u16_le(&response.payload[106], health->ore_count);
+    actuator_write_u16_le(&response.payload[108], health->rto_count);
+    actuator_write_u16_le(&response.payload[110], health->dma_error_count);
+    actuator_write_u32_le(&response.payload[112], health->lazy_arm_count);
+    actuator_write_u32_le(&response.payload[116], health->receiver_resync_count);
+    actuator_write_u16_le(&response.payload[138], host_tx_failure_count);
+    actuator_write_u16_le(&response.payload[140], host_tx_timeout_count);
+    actuator_write_u16_le(&response.payload[142], host_tx_maximum_ms);
     response.payload[144] = host_tx_last_status;
     response.payload[145] = 0U;
     response.payload[120] = bus->snapshot_length;
@@ -874,8 +840,8 @@ static void Host_SendRightArmDiscovery(uint32_t request_sequence)
             response.payload[2] = snapshot->present_mask;
             memcpy(&response.payload[4], snapshot->positions, 12U);
             memcpy(&response.payload[16], snapshot->statuses, 6U);
-            Host_WriteU32Le(&response.payload[24], snapshot->transaction_count);
-            Host_WriteU32Le(&response.payload[28], snapshot->failure_count);
+            actuator_write_u32_le(&response.payload[24], snapshot->transaction_count);
+            actuator_write_u32_le(&response.payload[28], snapshot->failure_count);
             status_code = (snapshot->present_mask == UINT8_C(0x3F)) ? 0U : 2U;
         }
     }
@@ -925,9 +891,9 @@ static void Host_SendRightArmJogOnce(
     response.payload[1] = servo_id;
     response.payload[2] = (uint8_t)delta_raw;
     response.payload[3] = snapshot.torque_enabled;
-    Host_WriteU16Le(&response.payload[4], snapshot.start_position);
-    Host_WriteU16Le(&response.payload[6], snapshot.target_position);
-    Host_WriteU16Le(&response.payload[8], snapshot.observed_position);
+    actuator_write_u16_le(&response.payload[4], snapshot.start_position);
+    actuator_write_u16_le(&response.payload[6], snapshot.target_position);
+    actuator_write_u16_le(&response.payload[8], snapshot.observed_position);
     (void)Host_SendBinaryFrame(&response);
 }
 
@@ -962,9 +928,9 @@ static void Host_SendRightArmTorqueEnableOnce(
     response.payload[1] = servo_id;
     response.payload[2] = snapshot.torque_enabled;
     response.payload[3] = 0U;
-    Host_WriteU16Le(&response.payload[4], snapshot.present_position);
-    Host_WriteU16Le(&response.payload[6], snapshot.held_goal_position);
-    Host_WriteU16Le(&response.payload[8], snapshot.observed_position);
+    actuator_write_u16_le(&response.payload[4], snapshot.present_position);
+    actuator_write_u16_le(&response.payload[6], snapshot.held_goal_position);
+    actuator_write_u16_le(&response.payload[8], snapshot.observed_position);
     (void)Host_SendBinaryFrame(&response);
 }
 
@@ -1007,10 +973,10 @@ static void Host_SendRightArmConfigureOnce(
     response.payload[5] = snapshot.i_gain;
     response.payload[6] = snapshot.operating_mode;
     response.payload[7] = 0U;
-    Host_WriteU16Le(&response.payload[8], snapshot.present_position);
-    Host_WriteU16Le(&response.payload[10], snapshot.goal_position);
-    Host_WriteU16Le(&response.payload[12], snapshot.goal_speed);
-    Host_WriteU16Le(&response.payload[14], snapshot.torque_limit);
+    actuator_write_u16_le(&response.payload[8], snapshot.present_position);
+    actuator_write_u16_le(&response.payload[10], snapshot.goal_position);
+    actuator_write_u16_le(&response.payload[12], snapshot.goal_speed);
+    actuator_write_u16_le(&response.payload[14], snapshot.torque_limit);
     (void)Host_SendBinaryFrame(&response);
 }
 
@@ -1041,30 +1007,30 @@ static void Host_SendRightArmConfiguration(
     response.payload[1] = snapshot.servo_id;
     response.payload[2] = snapshot.read_status;
     response.payload[3] = snapshot.successful_block_mask;
-    Host_WriteU32Le(&response.payload[4], snapshot.sample_time_ms);
+    actuator_write_u32_le(&response.payload[4], snapshot.sample_time_ms);
     response.payload[8] = snapshot.torque_enabled;
     response.payload[9] = snapshot.p_gain;
     response.payload[10] = snapshot.d_gain;
     response.payload[11] = snapshot.i_gain;
     response.payload[12] = snapshot.voltage_raw;
     response.payload[13] = snapshot.temperature_c;
-    Host_WriteU16Le(&response.payload[14], snapshot.position_raw);
-    Host_WriteU16Le(&response.payload[16], snapshot.speed_raw);
-    Host_WriteU16Le(&response.payload[18], snapshot.load_raw);
-    Host_WriteU16Le(&response.payload[20], snapshot.current_raw);
-    Host_WriteU16Le(
+    actuator_write_u16_le(&response.payload[14], snapshot.position_raw);
+    actuator_write_u16_le(&response.payload[16], snapshot.speed_raw);
+    actuator_write_u16_le(&response.payload[18], snapshot.load_raw);
+    actuator_write_u16_le(&response.payload[20], snapshot.current_raw);
+    actuator_write_u16_le(
         &response.payload[22], snapshot.runtime_torque_limit_raw);
-    Host_WriteU16Le(&response.payload[24], snapshot.goal_position_raw);
-    Host_WriteU16Le(&response.payload[26], snapshot.model_number);
+    actuator_write_u16_le(&response.payload[24], snapshot.goal_position_raw);
+    actuator_write_u16_le(&response.payload[26], snapshot.model_number);
     response.payload[28] = snapshot.firmware_major_version;
     response.payload[29] = snapshot.firmware_minor_version;
-    Host_WriteU16Le(
+    actuator_write_u16_le(
         &response.payload[30], snapshot.maximum_torque_limit_raw);
-    Host_WriteU16Le(
+    actuator_write_u16_le(
         &response.payload[32], snapshot.minimum_startup_force_raw);
     response.payload[34] = snapshot.cw_dead_zone_raw;
     response.payload[35] = snapshot.ccw_dead_zone_raw;
-    Host_WriteU16Le(
+    actuator_write_u16_le(
         &response.payload[36], snapshot.protection_current_raw);
     response.payload[38] = snapshot.operating_mode;
     response.payload[39] = snapshot.protective_torque_raw;
@@ -1136,22 +1102,22 @@ static void Host_SendBinaryHello(uint32_t request_sequence)
 #endif
     response.payload[2] = (host_stop_latched != 0U) ? 1U : 0U;
     response.payload[3] = 0U;
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[4],
         HOST_BINARY_FIRMWARE_VERSION
     );
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[8],
         Host_CalibrationHash()
     );
 #if HOST_PROTOCOL_V2_VALIDATION_ONLY_BUILD
-    Host_WriteU32Le(&response.payload[12], Host_CalibrationHash());
-    Host_WriteU32Le(&response.payload[16], Host_BinaryCapabilities());
-    Host_WriteU32Le(
+    actuator_write_u32_le(&response.payload[12], Host_CalibrationHash());
+    actuator_write_u32_le(&response.payload[16], Host_BinaryCapabilities());
+    actuator_write_u32_le(
         &response.payload[20], host_binary_rejected_frame_count);
 #else
-    Host_WriteU32Le(&response.payload[12], Host_BinaryCapabilities());
-    Host_WriteU32Le(
+    actuator_write_u32_le(&response.payload[12], Host_BinaryCapabilities());
+    actuator_write_u32_le(
         &response.payload[16], host_binary_rejected_frame_count);
 #endif
 
@@ -1174,7 +1140,7 @@ static void Host_SendBinaryArmResponse(
     response.payload[1] = (uint8_t)host_binary_safety.state;
     response.payload[2] = 0U;
     response.payload[3] = 0U;
-    Host_WriteU32Le(&response.payload[4], Host_CalibrationHash());
+    actuator_write_u32_le(&response.payload[4], Host_CalibrationHash());
 
     (void)Host_SendBinaryFrame(&response);
 }
@@ -1198,9 +1164,9 @@ static void Host_SendBinarySetpointStatus(
     response.payload[1] = sample_count;
     response.payload[2] = (uint8_t)host_binary_safety.state;
     response.payload[3] = detail;
-    Host_WriteU32Le(&response.payload[4], request_sequence);
-    Host_WriteU32Le(&response.payload[8], first_apply_tick);
-    Host_WriteU32Le(&response.payload[12], Host_CalibrationHash());
+    actuator_write_u32_le(&response.payload[4], request_sequence);
+    actuator_write_u32_le(&response.payload[8], first_apply_tick);
+    actuator_write_u32_le(&response.payload[12], Host_CalibrationHash());
 
     (void)Host_SendBinaryFrame(&response);
 }
@@ -1262,17 +1228,17 @@ static void Host_SendBinaryBufferedSetpointStatus(
     if (status_code == HOST_BUFFERED_STATUS_TERMINAL)
     {
         F0MetricsSnapshot snapshot = F0Metrics_Snapshot();
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length], snapshot.loop_period_max_us
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length + 4U], snapshot.loop_work_max_us
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length + 8U],
             snapshot.servo_sync_write_max_us
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length + 12U], snapshot.host_tx_max_us
         );
         payload_length += HOST_F0_TERMINAL_METRICS_SIZE;
@@ -1281,40 +1247,40 @@ static void Host_SendBinaryBufferedSetpointStatus(
             Servo_InMotionTelemetryGetSnapshot();
         for (uint8_t joint = 0U; joint < servo_joint_count; joint++)
         {
-            Host_WriteU16Le(
+            actuator_write_u16_le(
                 &response.payload[payload_length + (joint * 2U)],
                 telemetry->maximum_error_raw[joint]
             );
         }
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length + 12U],
             telemetry->requested_samples
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length + 16U],
             telemetry->completed_samples
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length + 20U],
             telemetry->failed_samples
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length + 24U],
             telemetry->maximum_reply_latency_ms
         );
         payload_length += HOST_H2_TERMINAL_TELEMETRY_SIZE;
 
         const ControlTickSnapshot tick = ControlTick_Snapshot();
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length], tick.period_max_us
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length + 4U], tick.jitter_max_us
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length + 8U], tick.work_max_us
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[payload_length + 12U], tick.count
         );
         payload_length += HOST_F3_CONTROL_TICK_METRICS_SIZE;
@@ -1681,7 +1647,7 @@ static void Host_ValidateLegacyBinarySetpointBatch(
 
     if (request->payload_length >= header_size)
     {
-        first_apply_tick = Host_ReadU32Le(&request->payload[0]);
+        first_apply_tick = actuator_read_u32_le(&request->payload[0]);
         sample_count = request->payload[4];
     }
 
@@ -1697,7 +1663,7 @@ static void Host_ValidateLegacyBinarySetpointBatch(
              (sample_count > 9U) ||
              ((request->flags & (uint16_t)(~1U)) != 0U) ||
              (request->payload[5] != 1U) ||
-             (Host_ReadU16Le(&request->payload[6]) != 0U) ||
+             (actuator_read_u16_le(&request->payload[6]) != 0U) ||
              (request->payload_length !=
                  (uint16_t)(header_size +
                      ((uint16_t)sample_count * sample_size))))
@@ -1719,7 +1685,7 @@ static void Host_ValidateLegacyBinarySetpointBatch(
                 ((uint16_t)sample * sample_size)
             );
             uint32_t tick_offset =
-                Host_ReadU32Le(&request->payload[sample_offset]);
+                actuator_read_u32_le(&request->payload[sample_offset]);
             uint32_t apply_tick = first_apply_tick + tick_offset;
             int32_t lead_ms = (int32_t)(apply_tick - now);
 
@@ -1736,7 +1702,7 @@ static void Host_ValidateLegacyBinarySetpointBatch(
                  joint < servo_joint_count;
                  joint++)
             {
-                int32_t position_urad = Host_ReadI32Le(
+                int32_t position_urad = actuator_read_i32_le(
                     &request->payload[
                         sample_offset + 4U +
                         ((uint16_t)joint * 4U)
@@ -1755,7 +1721,7 @@ static void Host_ValidateLegacyBinarySetpointBatch(
                     break;
                 }
 
-                if (Host_ReadI32Le(
+                if (actuator_read_i32_le(
                         &request->payload[
                             sample_offset + 28U +
                             ((uint16_t)joint * 4U)
@@ -1811,7 +1777,7 @@ static void Host_ValidateBufferedCandidate(
 
     if (request->payload_length >= ACTUATOR_BUFFERED_WIRE_HEADER_SIZE)
     {
-        first_apply_tick = Host_ReadU32Le(&request->payload[0]);
+        first_apply_tick = actuator_read_u32_le(&request->payload[0]);
         sample_count = request->payload[4];
     }
 
@@ -2001,7 +1967,7 @@ static void Host_ExecuteBufferedCandidate(
 
     if (request->payload_length >= ACTUATOR_BUFFERED_WIRE_HEADER_SIZE)
     {
-        first_apply_tick = Host_ReadU32Le(&request->payload[0]);
+        first_apply_tick = actuator_read_u32_le(&request->payload[0]);
         sample_count = request->payload[4];
     }
 
@@ -2483,28 +2449,28 @@ static void Host_SendV2StreamStatus(
     response.payload[1] = (uint8_t)result.contract_result;
     response.payload[2] = (uint8_t)host_binary_safety.state;
     response.payload[3] = result.arm_mask;
-    Host_WriteU32Le(&response.payload[4], request->sequence);
-    Host_WriteU32Le(&response.payload[8], request->sender_time_ms);
-    Host_WriteU32Le(&response.payload[12], result.arbiter_epoch);
-    Host_WriteU32Le(&response.payload[16], result.horizon_end_tick);
-    Host_WriteU32Le(&response.payload[20], result.validated_tail_tick);
+    actuator_write_u32_le(&response.payload[4], request->sequence);
+    actuator_write_u32_le(&response.payload[8], request->sender_time_ms);
+    actuator_write_u32_le(&response.payload[12], result.arbiter_epoch);
+    actuator_write_u32_le(&response.payload[16], result.horizon_end_tick);
+    actuator_write_u32_le(&response.payload[20], result.validated_tail_tick);
 #if HOST_PROTOCOL_V2_EXECUTOR_VALIDATION_BUILD
     const actuator_v2_executor_diagnostics_t *diagnostics =
         actuator_v2_stream_executor_diagnostics(&host_v2_stream_executor);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[24],
         (diagnostics == NULL) ? 0U : diagnostics->queued_samples);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[28],
         (diagnostics == NULL) ? 0U : diagnostics->accepted_samples);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[32],
         (diagnostics == NULL) ? 0U : diagnostics->applied_samples);
 #else
     /* The semantic validator is isolated from every executable/output path. */
-    Host_WriteU32Le(&response.payload[24], 0U);
-    Host_WriteU32Le(&response.payload[28], 0U);
-    Host_WriteU32Le(&response.payload[32], 0U);
+    actuator_write_u32_le(&response.payload[24], 0U);
+    actuator_write_u32_le(&response.payload[28], 0U);
+    actuator_write_u32_le(&response.payload[32], 0U);
 #endif
     (void)Host_SendBinaryFrame(&response);
 }
@@ -3417,37 +3383,37 @@ static void Host_SendV2ExecutorDiagnostics(const actuator_frame_t *request)
         diagnostics->safe_stop_required) ? 1U : 0U;
     response.payload[3] = (diagnostics == NULL) ?
         0U : diagnostics->tracking_error_joint;
-    Host_WriteU32Le(&response.payload[4], request->sequence);
-    Host_WriteU32Le(&response.payload[8], request->sender_time_ms);
-    Host_WriteU32Le(&response.payload[12], session->arbiter_epoch);
-    Host_WriteU32Le(&response.payload[16], session->horizon_end_tick);
-    Host_WriteU32Le(&response.payload[20], tail_tick);
-    Host_WriteU32Le(
+    actuator_write_u32_le(&response.payload[4], request->sequence);
+    actuator_write_u32_le(&response.payload[8], request->sender_time_ms);
+    actuator_write_u32_le(&response.payload[12], session->arbiter_epoch);
+    actuator_write_u32_le(&response.payload[16], session->horizon_end_tick);
+    actuator_write_u32_le(&response.payload[20], tail_tick);
+    actuator_write_u32_le(
         &response.payload[24],
         (diagnostics == NULL) ? 0U : diagnostics->queued_samples);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[28],
         (diagnostics == NULL) ? 0U : diagnostics->peak_queued_samples);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[32],
         (diagnostics == NULL) ? 0U : diagnostics->accepted_samples);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[36],
         (diagnostics == NULL) ? 0U : diagnostics->applied_samples);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[40],
         (diagnostics == NULL) ? 0U : diagnostics->control_outputs);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[44],
         (diagnostics == NULL) ? 0U : diagnostics->splice_count);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[48],
         (diagnostics == NULL) ?
             0U : diagnostics->maximum_apply_lateness_ms);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[52],
         (diagnostics == NULL) ? 0U : diagnostics->last_command_tick);
-    Host_WriteU32Le(
+    actuator_write_u32_le(
         &response.payload[56],
         (diagnostics == NULL) ? 0U : diagnostics->terminal_tick);
     (void)Host_SendBinaryFrame(&response);
@@ -3475,23 +3441,23 @@ static void Host_SendV2DispatchDiagnostics(const actuator_frame_t *request)
     response.payload[1] = ((snapshot != NULL) && snapshot->active) ? 1U : 0U;
     response.payload[2] = ((snapshot != NULL) && snapshot->faulted) ? 1U : 0U;
     response.payload[3] = BimanualServoDispatch_Ready();
-    Host_WriteU32Le(&response.payload[4], request->sequence);
-    Host_WriteU32Le(&response.payload[8], request->sender_time_ms);
-    Host_WriteU32Le(&response.payload[12],
+    actuator_write_u32_le(&response.payload[4], request->sequence);
+    actuator_write_u32_le(&response.payload[8], request->sender_time_ms);
+    actuator_write_u32_le(&response.payload[12],
         (snapshot == NULL) ? 0U : snapshot->launch_count);
-    Host_WriteU32Le(&response.payload[16],
+    actuator_write_u32_le(&response.payload[16],
         (snapshot == NULL) ? 0U : snapshot->completed_count);
-    Host_WriteU32Le(&response.payload[20],
+    actuator_write_u32_le(&response.payload[20],
         (snapshot == NULL) ? 0U : snapshot->failure_count);
-    Host_WriteU32Le(&response.payload[24],
+    actuator_write_u32_le(&response.payload[24],
         (snapshot == NULL) ? 0U : snapshot->maximum_start_skew_us);
-    Host_WriteU32Le(&response.payload[28],
+    actuator_write_u32_le(&response.payload[28],
         (snapshot == NULL) ? 0U : snapshot->maximum_launch_lateness_us);
-    Host_WriteU32Le(&response.payload[32],
+    actuator_write_u32_le(&response.payload[32],
         (snapshot == NULL) ? 0U : snapshot->last_control_tick_ms);
-    Host_WriteU32Le(&response.payload[36],
+    actuator_write_u32_le(&response.payload[36],
         (snapshot == NULL) ? 0U : snapshot->last_left_start_us);
-    Host_WriteU32Le(&response.payload[40],
+    actuator_write_u32_le(&response.payload[40],
         (snapshot == NULL) ? 0U : snapshot->last_right_start_us);
     (void)Host_SendBinaryFrame(&response);
 }
@@ -3516,21 +3482,21 @@ static void Host_SendV2TrackingDiagnostics(const actuator_frame_t *request)
     response.payload[2] = ((tracking != NULL) &&
         (tracking->pending != 0U)) ? 1U : 0U;
     response.payload[3] = host_v2_tracking_next_joint;
-    Host_WriteU32Le(&response.payload[4], request->sequence);
-    Host_WriteU32Le(&response.payload[8], request->sender_time_ms);
-    Host_WriteU32Le(&response.payload[12],
+    actuator_write_u32_le(&response.payload[4], request->sequence);
+    actuator_write_u32_le(&response.payload[8], request->sender_time_ms);
+    actuator_write_u32_le(&response.payload[12],
         (tracking == NULL) ? 0U : tracking->requested_pairs);
-    Host_WriteU32Le(&response.payload[16],
+    actuator_write_u32_le(&response.payload[16],
         (tracking == NULL) ? 0U : tracking->completed_pairs);
-    Host_WriteU32Le(&response.payload[20],
+    actuator_write_u32_le(&response.payload[20],
         (tracking == NULL) ? 0U : tracking->failed_pairs);
-    Host_WriteU32Le(&response.payload[24],
+    actuator_write_u32_le(&response.payload[24],
         (tracking == NULL) ? 0U : tracking->maximum_reply_latency_ms);
     for (uint8_t joint = 0U;
          joint < ACTUATOR_V2_JOINT_COUNT;
          joint++)
     {
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[28U + ((uint16_t)joint * 4U)],
             (executor == NULL) ? 0U :
                 executor->maximum_tracking_error_urad[joint]);
@@ -3554,20 +3520,20 @@ static void Host_SendV2FeedbackSnapshot(const actuator_frame_t *request)
     response.payload[0] =
         (snapshot.present_mask == HOST_FEEDBACK_PRESENT_MASK) ? 0U : 1U;
     response.payload[1] = HOST_PHYSICAL_JOINT_COUNT;
-    Host_WriteU16Le(&response.payload[2], snapshot.present_mask);
-    Host_WriteU32Le(&response.payload[4], request->sequence);
-    Host_WriteU32Le(&response.payload[8], request->sender_time_ms);
-    Host_WriteU32Le(&response.payload[12], snapshot.firmware_tick_ms);
-    Host_WriteU32Le(&response.payload[16], snapshot.completed_pairs);
+    actuator_write_u16_le(&response.payload[2], snapshot.present_mask);
+    actuator_write_u32_le(&response.payload[4], request->sequence);
+    actuator_write_u32_le(&response.payload[8], request->sender_time_ms);
+    actuator_write_u32_le(&response.payload[12], snapshot.firmware_tick_ms);
+    actuator_write_u32_le(&response.payload[16], snapshot.completed_pairs);
     for (uint8_t joint = 0U;
          joint < ACTUATOR_V2_JOINT_COUNT;
          joint++)
     {
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[20U + ((uint16_t)joint * 4U)],
             (uint32_t)snapshot.positions_urad[joint]
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[68U + ((uint16_t)joint * 4U)],
             snapshot.sample_age_ms[joint]
         );
@@ -3684,8 +3650,8 @@ static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
     }
     else if (reference_bind_request != 0U)
     {
-        maximum_reference_delta_raw = Host_ReadU16Le(&request->payload[0]);
-        if ((Host_ReadU16Le(&request->payload[2]) != 0U) ||
+        maximum_reference_delta_raw = actuator_read_u16_le(&request->payload[0]);
+        if ((actuator_read_u16_le(&request->payload[2]) != 0U) ||
             (maximum_reference_delta_raw == 0U) ||
             (maximum_reference_delta_raw >=
              ACTUATOR_UNWRAP_HALF_TURN_RAW))
@@ -3698,7 +3664,7 @@ static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
                  joint < ACTUATOR_V2_JOINT_COUNT;
                  joint++)
             {
-                reference_unwrapped_raw[joint] = Host_ReadI32Le(
+                reference_unwrapped_raw[joint] = actuator_read_i32_le(
                     &request->payload[4U + (uint16_t)joint * 4U]
                 );
             }
@@ -3911,21 +3877,21 @@ static void Host_SendV2ShadowSnapshot(const actuator_frame_t *request)
     response.payload[3] = right_mask;
     for (uint8_t joint = 0U; joint < ACTUATOR_V2_JOINT_COUNT; joint++)
     {
-        Host_WriteU16Le(
+        actuator_write_u16_le(
             &response.payload[4U + (uint16_t)joint * 2U],
             host_v2_shadow_raw[joint]
         );
 #if HOST_PROTOCOL_V2_UNWRAP_SHADOW_VALIDATION_BUILD
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[28U + (uint16_t)joint * 4U],
             (uint32_t)host_v2_shadow_unwrapped_raw[joint]
         );
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[76U + (uint16_t)joint * 4U],
             (uint32_t)host_v2_shadow_anchor_urad[joint]
         );
 #else
-        Host_WriteU32Le(
+        actuator_write_u32_le(
             &response.payload[28U + (uint16_t)joint * 4U],
             (uint32_t)host_v2_shadow_anchor_urad[joint]
         );
@@ -4389,7 +4355,7 @@ static void Host_HandleBinaryFrame(
             if (request->payload_length == 4U)
             {
                 uint32_t expected_hash =
-                    Host_ReadU32Le(&request->payload[0]);
+                    actuator_read_u32_le(&request->payload[0]);
                 uint8_t health_ok = 1U;
 
                 if ((expected_hash == Host_CalibrationHash()) &&

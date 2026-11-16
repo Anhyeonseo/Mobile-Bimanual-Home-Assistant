@@ -17,10 +17,13 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path[:0]=[str(ROOT),str(ROOT/'ros2_ws/src/home_robot_tasks'),str(ROOT/'ros2_ws/src/so101_arm_bridge')]
 from home_robot_tasks.navigation_trial import NearGoal,TurnDriveTrial,swept_path_obstacle,swept_obstacle,angle,voxel_centers,validate_navigation_body
 from home_robot_tasks.nav2_trial import Nav2Trial,Nav2SensorBridge
-from home_robot_tasks.stationary_localization import StationaryScanWindow,fresh_stationary
+from home_robot_tasks.stationary_localization import StationaryScanWindow,StationaryWheelInventory,fresh_stationary
 from home_robot_tasks.s4_recorded_mapping import align,transform,scan_points
 from base_teleop_web import SessionRecord
 import prepare_unified_controller as commissioning
+from home_robot_tasks.platform_preparation import (
+    reference_supported_bottom, arm_observed_stationary, enter_base_transport,
+)
 
 
 def registered_lidar_sweep(scan,pose,mount):
@@ -51,6 +54,37 @@ class State:
         self.navigation_update=None;self.navigation_revision=None;self.scan_history=[]
         self.navigation_required=False
         self.stationary_window=StationaryScanWindow();self.stationary_localization=None
+        self.relative_target_binding=None
+
+    def bind_relative_target(self,delta,now):
+        """Freeze an approved body-relative correction after posture preparation.
+
+        A pre-power map estimate is not the origin of a centimetre correction.
+        Binding only previews a goal; normal map, sensor and Start checks apply.
+        """
+        with self.lock:
+            t=self.trial
+            if (not isinstance(t,Nav2Trial) or not t.fine_alignment or
+                    t.state not in ('PREVIEW','READY') or self.relative_target_binding is not None or
+                    self.nonzero or self.request is not None or not self.controller_ready or self.finished):
+                raise ValueError('relative correction requires unused prepared fine-alignment trial')
+            if (not isinstance(delta,(list,tuple)) or len(delta)!=3 or
+                    any(type(v) not in (float,int) or not math.isfinite(v) for v in delta) or
+                    math.hypot(*delta[:2])>.15 or abs(delta[2])>math.radians(10)):
+                raise ValueError('relative correction exceeds fine-alignment bounds')
+            if (not self.sensors_ready(now) or
+                    (self.navigation_required and self.navigation_revision is None) or
+                    not fresh_stationary(self.stationary_localization,now,revision=t.required_map_revision)):
+                raise ValueError('fresh stopped localization after preparation required')
+            origin=self.stationary_localization['pose'];c,s=math.cos(origin[2]),math.sin(origin[2])
+            goal=(origin[0]+c*delta[0]-s*delta[1],origin[1]+s*delta[0]+c*delta[1],angle(origin[2]+delta[2]))
+            # Freeze even a blocked proposal: later pose fluctuations must not
+            # keep sliding the goal until a different cell happens to pass.
+            t.target_pose=goal
+            self.relative_target_binding=dict(origin=list(origin),delta=list(delta),goal=list(goal),
+                observed_s=self.stationary_localization['observed_s'],map_revision=t.required_map_revision)
+            if self.record:self.record.write('relative_target_bound',**self.relative_target_binding)
+            self.path=t.plan(origin)
 
     def apply_navigation_update(self,update):
         if update is None or update['revision']==self.navigation_revision:return
@@ -98,7 +132,7 @@ class State:
         # At acquisition, demand several agreeing map matches near that seed
         # when a foreground object already obscures some of the saved walls.
         wheel=self.wheel_observation
-        parked=(self.nav2_control.get('execute') is False and wheel is not None
+        parked=(self.nav2_control.get('motion_active',self.nav2_control.get('execute')) is False and wheel is not None
             and 0<=stamp-wheel['observed_s']<=.35
             and all(abs(v)<.001 for v in wheel['twist']))
         reacquire=self.pose is not None and stamp-self.pose_stamp>.5 and parked
@@ -132,6 +166,18 @@ class State:
         # 350 ms collision-scan or 500 ms accepted-localization lifetime.
         with self.lock:self.scan_warning=str(error)
 
+    def sensor_control(self):
+        return dict(goal=None if self.trial.goal is None else list(self.trial.goal),
+            execute=self.trial.state=='RUNNING' and not getattr(self.trial,'fine_alignment',False),
+            motion_active=self.trial.state=='RUNNING',
+            fine_twist=list(getattr(self.trial,'fine_twist',(0.,0.,0.))),
+            wheel=self.wheel_observation,navigation_revision=self.navigation_revision)
+
+    def collision_twist(self):
+        if getattr(self.trial,'fine_alignment',False):
+            return list(self.nav2_control.get('fine_twist',self.trial.fine_twist))
+        return self.nav2_feedback.get('collision_twist',self.nav2_feedback.get('twist',[0.,0.,0.]))
+
     def corridor_hits(self):
         if not self.async_corridor:
             return self.compute_corridor_hits(self.pose,self.trial.goal,self.scan_points,self.depth_points)
@@ -143,14 +189,14 @@ class State:
                 result['pose_stamp']!=self.pose_stamp or result['scan_stamp']!=self.scan_stamp or
                 result['depth_stamp']!=self.depth_stamp or not self.sensors_ready(time.monotonic())):
             return None
-        if isinstance(self.trial,Nav2Trial) and result.get('nav_twist')!=self.nav2_feedback.get('collision_twist',self.nav2_feedback.get('twist',[0.,0.,0.])):
+        if isinstance(self.trial,Nav2Trial) and result.get('nav_twist')!=self.collision_twist():
             return None
         return result['hits']
 
     def compute_corridor_hits(self,pose,goal,scan_points,depth_points,nav_twist=None):
         if pose is None or goal is None:return None
         if isinstance(self.trial,Nav2Trial):
-            twist=self.nav2_feedback.get('collision_twist',self.nav2_feedback.get('twist',(0.,0.,0.))) if nav_twist is None else nav_twist
+            twist=self.collision_twist() if nav_twist is None else nav_twist
             path=self.trial.obstacle_sweep(twist)
             options=dict(footprint=self.trial.navigation_body['footprint_xy_m'],margin=self.trial.navigation_body['clearance_m'],return_hits=True)
             return dict(lidar=swept_path_obstacle(scan_points,path,**options),depth=swept_path_obstacle(depth_points,path,**options))
@@ -180,12 +226,13 @@ class State:
             return dict(state=self.trial.state,pose=self.pose,goal=self.trial.goal,path=self.path,
                 ready=self.controller_ready and (not self.navigation_required or self.navigation_revision is not None) and sensors and bool(self.path) and (not isinstance(self.trial,Nav2Trial) or self.trial.backend_ready()) and (clear or (hits is not None and getattr(self.trial,'allow_blocked_start',False))) and not self.finished
                     and self.trial.state=='READY' and self.request is None
-                    and (not getattr(self.trial,'fine_alignment',False) or fresh_stationary(self.stationary_localization,now)),
+                    and (not getattr(self.trial,'fine_alignment',False) or fresh_stationary(self.stationary_localization,now,revision=self.trial.required_map_revision)),
                 resume_ready=self.controller_ready and sensors and clear and not self.finished
                     and self.trial.state in NearGoal.WAITING and self.trial.recovery_ready and self.request is None,
                 stationary_localization=self.stationary_localization,
                 fine_alignment=getattr(self.trial,'fine_alignment',False),
                 fine_alignment_result=getattr(self.trial,'verification_result',None),
+                relative_target_binding=self.relative_target_binding,
                 resume_required=self.trial.resume_required,navigation_body=self.trial.navigation_body,
                 controller=self.controller,scan=self.scan_error or ('라이다 갱신 대기' if
                     now-self.pose_stamp>.5 or now-self.scan_stamp>.35 else
@@ -197,7 +244,8 @@ class State:
                 obstacles_base=(self.scan_points+ [p[:2] for p in self.depth_points[::max(1,len(self.depth_points)//300)]]) if sensors else [],
                 depth_floor=self.depth_floor,
                 nonzero_commands=self.nonzero,stop_confirmed=self.stop_confirmed,error=self.error or self.nav2_feedback.get('error'),
-                navigation_backend='Nav2 planner/DWB' if isinstance(self.trial,Nav2Trial) else 'bounded trial',
+                navigation_backend=('Nav2 planner / stationary fine alignment' if getattr(self.trial,'fine_alignment',False)
+                    else 'Nav2 planner/DWB') if isinstance(self.trial,Nav2Trial) else 'bounded trial',
                 nav2=self.nav2_feedback if isinstance(self.trial,Nav2Trial) else None,
                 phase=getattr(self.trial,'phase',None),
                 corridor_calculation_ms=(self.corridor_observation or {}).get('calculation_ms'),
@@ -415,7 +463,7 @@ def sensor_worker(state,args):
                     points=scan_points(s,mount,None)
                     state.observe_scan(points,last)
                     registration_scan,registration_seed=state.stationary_window.prepare(s,seed,state.wheel_observation,
-                        execute=state.nav2_control.get('execute',False),now=now)
+                        execute=state.nav2_control.get('motion_active',state.nav2_control.get('execute',False)),now=now)
                     registration_points=scan_points(registration_scan,mount,None)
                     matrix,quality=align(registration_points,target,transform(registration_seed));candidate=np.array([matrix[0,2],matrix[1,2],math.atan2(matrix[1,0],matrix[0,0])])
                     world=points@matrix[:2,:2].T+matrix[:2,2];distances=tree.query(world)[0];matched=distances<=.1;fit=float(np.mean(matched))
@@ -430,7 +478,7 @@ def sensor_worker(state,args):
                             sweep=registered_lidar_sweep(s,state.pose,review)
                             state.scan_history.append(sweep);state.scan_history=state.scan_history[-20:]
                         if state.trial.state=='PREVIEW':
-                            try:state.path=state.trial.plan(state.pose)
+                            try:state.path=state.trial.plan(state.pose);state.error=None
                             except ValueError as e:state.error=str(e)
                     state.record.write('localization',pose=state.pose,raw_pose=candidate.tolist(),stationary=state.stationary_localization,observed_s=last,fit=fit,quality=quality,tracking_support=support)
                 except Exception as e:
@@ -464,7 +512,8 @@ def make_trial(args,geometry,area,body):
         policy=json.loads((ROOT/'config/home_assistant/s4_unified.policy.json').read_text())
         return Nav2Trial(geometry,area,patterns=PATTERNS,navigation_body=body,command_profile=profile,
                          controller_maximum_raw=policy['maximum_wheel_speed_raw'],
-                         distance=getattr(args,'nav2_distance',.4),target_pose=getattr(args,'nav2_goal',None),
+                         distance=getattr(args,'nav2_distance',.4),target_pose=(getattr(args,'nav2_goal',None)
+                             if getattr(args,'fine_relative_goal',None) is None else args.initial_pose),
                          manipulation_alignment=getattr(args,'manipulation_alignment',False),fine_alignment=getattr(args,'fine_alignment',False))
     return TurnDriveTrial(geometry,area,patterns=PATTERNS,navigation_body=body) if args.turn_drive else NearGoal(geometry,area,forward_pattern=PATTERNS['forward'][1],navigation_body=body)
 
@@ -493,13 +542,13 @@ def sensor_process_main(options,outbox,goals,closed):
             if sample['navigation_update'] is not None and sample['navigation_update']['revision']==navigation_ack:
                 sample['navigation_update']=None
             key=(None if goal is None else tuple(goal),sample['pose_stamp'],sample['scan_stamp'],sample['depth_stamp'],
-                 tuple(sample['nav2_feedback'].get('collision_twist',sample['nav2_feedback'].get('twist',()))))
+                 tuple(local.collision_twist()))
             if key!=last_key:
                 cached=None
                 if goal is not None and sample['pose'] is not None:
                     at=time.monotonic()
                     try:
-                        twist=sample['nav2_feedback'].get('collision_twist',sample['nav2_feedback'].get('twist',[0.,0.,0.]))
+                        twist=local.collision_twist()
                         hits=local.compute_corridor_hits(sample['pose'],goal,sample['scan_points'],sample['depth_points'],nav_twist=twist)
                         cached=dict(goal=goal,hits=hits,pose_stamp=sample['pose_stamp'],
                             scan_stamp=sample['scan_stamp'],depth_stamp=sample['depth_stamp'],
@@ -529,7 +578,7 @@ def sensor_bridge_worker(state,args):
         while not state.closed.is_set():
             with state.lock:
                 goal=state.trial.goal
-                payload=dict(goal=None if goal is None else list(goal),execute=state.trial.state=='RUNNING',wheel=state.wheel_observation,navigation_revision=state.navigation_revision)
+                payload=state.sensor_control()
             try:goals.put_nowait(payload);sent_goal=None if goal is None else tuple(goal)
             except queue.Full:pass
             try:sample=outbox.get(timeout=.2)
@@ -546,7 +595,11 @@ def sensor_bridge_worker(state,args):
                     if state.nav2_feedback.get('goal')==list(state.trial.goal or ()) and state.nav2_feedback.get('path'):
                         state.path=state.nav2_feedback['path']
                 if state.trial.state=='PREVIEW' and state.sensors_ready(time.monotonic()):
-                    try:state.path=state.trial.plan(state.pose)
+                    try:
+                        if getattr(args,'fine_relative_goal',None) is not None and state.relative_target_binding is None:
+                            state.bind_relative_target(args.fine_relative_goal,time.monotonic())
+                        else:state.path=state.trial.plan(state.pose)
+                        state.error=None
                     except ValueError as e:state.error=str(e)
     finally:
         closed.set();process.join(timeout=7)
@@ -591,94 +644,11 @@ def observe_stopped(state, observe, stop, transport):
         state.closed.wait(.05)
 
 
-def reference_supported_bottom(observe,mobile,lift,*,clock=time.monotonic,sleep=time.sleep):
-    """Wait for fresh stopped feedback, then renew ownership until hold settles.
-
-    The 200 ms lift command lease must remain alive during HOLD_PENDING.
-    No downward homing or position move is sent here.
-    """
-    deadline=clock()+3;stable_since=None
-    while True:
-        ls=observe();feedback=mobile.status()
-        # The aggregate feedback timestamp is the oldest axis in the sweep.
-        # A healthy parked sweep can be 100..120 ms old while the independently
-        # checked lift sample is current. Use the existing 250 ms observation
-        # budget; keep the zero-speed window and MCU reference admission intact.
-        if ls.flags&4 and feedback.feedback_is_fresh(250) and feedback.velocity_raw[3]==0:
-            # The MCU's initial wheel-zero position proof needs >=400 ms.
-            # Do not enter HOLD_PENDING on a lone quiet speed byte before that
-            # existing proof has had time to become authoritative. Keep fresh
-            # observations flowing; no motor command is sent during this wait.
-            if stable_since is None:stable_since=clock()
-            if clock()-stable_since>=.45:break
-        else:stable_since=None
-        if clock()>deadline:raise TimeoutError('리프트 원점 등록 전 정지 관측 대기')
-        sleep(.02)
-    lift.reference_bottom(1,operator_confirmed=True)
-    deadline=clock()+3
-    while True:
-        ls=observe()
-        if commissioning.supported_lift_is_holding(ls):return
-        if clock()>deadline:raise TimeoutError('리프트 유지 확인 시간 초과')
-        if ls.flags&2:lift.keepalive()
-        sleep(.02)
-
-
-def arm_observed_stationary(observe,mobile,*,clock=time.monotonic,sleep=time.sleep,on_deferred=None,transport_only=False):
-    """Wait parked, including a correlated rejection before any session exists.
-
-    Feedback may change between STATUS and ARM. Only a healthy, same-boot
-    rejection proving the session was never armed can return to this wait.
-    Never retry ambiguous responses, accepted sessions or motion commands.
-    """
-    from so101_arm_bridge.mobile_client import MobileReplyError
-    from so101_arm_bridge.mobile_wire import MobileStatus
-    deadline=clock()+3
-    quiet_since=None;last_tick=None;samples=0
-    while True:
-        if clock()>=deadline:raise TimeoutError('출발 전 정지 관측 대기 시간 초과')
-        observation=observe()
-        if not transport_only and not commissioning.supported_lift_is_holding(observation):
-            raise RuntimeError('리프트 유지 상태 확인 실패')
-        feedback=mobile.status()
-        if feedback.feedback_is_fresh(100) and not any(feedback.velocity_raw):
-            if quiet_since is None:quiet_since=clock()
-            if feedback.feedback_tick_ms!=last_tick:
-                last_tick=feedback.feedback_tick_ms;samples+=1
-            if samples>=3 and clock()-quiet_since>=.1:
-                if clock()>=deadline:raise TimeoutError('출발 전 정지 관측 대기 시간 초과')
-                try:
-                    mobile.arm(1)
-                    return
-                except MobileReplyError as exc:
-                    d=exc.diagnostics;r=MobileStatus(**d['response']);c=d.get('command',{})
-                    remaining=(c.get('valid_until_ms',r.mcu_tick_ms)-r.mcu_tick_ms)&0xffffffff
-                    unarmed_speed_race=(
-                        d['expected_kind']==1 and d['expected_sequence']==0
-                        and r.kind==129 and r.request_sequence==0
-                        and mobile.boot_id is not None and r.boot_id==mobile.boot_id
-                        and r.state==0 and r.session==0 and r.sequence==0 and r.reason==0
-                        and r.flags==(51 if transport_only else 23) and r.capabilities&7==7 and r.feedback_is_fresh(100)
-                        and any(r.velocity_raw) and c.get('opcode')==1
-                        and c.get('session')==1 and c.get('sequence')==0
-                        and tuple(c.get('velocity_raw',()))==(0,0,0,0) and 0<remaining<=200)
-                    if not unarmed_speed_race:raise
-                    if on_deferred is not None:on_deferred(d)
-                    quiet_since=None;last_tick=None;samples=0
-        else:quiet_since=None;last_tick=None;samples=0
-        sleep(.02)
-
-
-def enter_base_transport(observe,evidence,*,clock=time.monotonic,sleep=time.sleep):
-    """Initial posture is real; busy read slots may defer admission while parked."""
-    deadline=clock()+2
-    while clock()<deadline:
-        status=observe()
-        if not commissioning.supported_lift_is_holding(status):
-            raise RuntimeError('출발 전 리프트 유지 확인 실패')
-        if evidence.enter_transport():return
-        sleep(.005)
-    raise TimeoutError('이동 모드 전환 대기 시간 초과')
+def inspection_wheel_observation(transport, geometry, window, *, clock=time.monotonic):
+    """Maintenance inventory is available before motion-endpoint registration."""
+    started=clock()
+    rows=[transport.read_device_inventory(0,motor) for motor in (7,8,9)]
+    return window.observe(rows,started,clock(),geometry),rows
 
 
 def controller_worker(state,args):
@@ -707,10 +677,32 @@ def controller_worker(state,args):
             hello=t.enter_binary_mode()
             if hello.firmware_version!=FIRMWARE:raise ValueError('제어기 버전 불일치')
             if any(getattr(hello,k)!=baseline['hello'][k] for k in ('left_calibration_hash','right_calibration_hash')):raise ValueError('보정값 불일치')
+            wheel_scales=None;last_wheel_query=-1.
+            if isinstance(state.trial,Nav2Trial):
+                pending=json.loads((ROOT/'config/home_assistant/s4_commissioning.pending.json').read_text())
+                wheel_scales=pending['measurement_inputs']['wheel_geometry_and_raw_speed_scale']['candidate_raw_per_encoder_rad_s']
+                if len(wheel_scales)!=3 or not all(math.isfinite(v) and v>0 for v in wheel_scales):raise ValueError('wheel feedback scale missing')
+            command_zero_since=[None]
+            def wheel_observed(result,sent,command=None):
+                if wheel_scales is None:return
+                age=((result.mcu_tick_ms-result.feedback_tick_ms)&0xffffffff)/1000
+                if not result.feedback_is_fresh(250):return
+                twist=state.trial.geometry.body_twist(tuple(v/s for v,s in zip(result.velocity_raw[:3],wheel_scales)))
+                if command is None or any(command) or not result.ready_for_motion(mobile.session,250):
+                    command_zero_since[0]=None
+                elif command_zero_since[0] is None:command_zero_since[0]=sent
+                with state.lock:state.wheel_observation=dict(observed_s=sent-age,twist=twist,
+                    zero_command_elapsed_s=0 if command_zero_since[0] is None else sent-command_zero_since[0],
+                    feedback_tick_ms=result.feedback_tick_ms,boot_id=result.boot_id)
             if not args.prepare_supported:
                 with state.lock:state.controller='조회 연결 확인 · 자세 유지 준비 필요';state.boot=CommissionClient(t).query().boot_id
                 state.record.write('inspection',hello=asdict(hello),motion_commands=0)
-                while not state.closed.wait(.25):
+                inspection_window=StationaryWheelInventory()
+                while not state.closed.wait(.1):
+                    if wheel_scales is not None:
+                        wheel,rows=inspection_wheel_observation(t,state.trial.geometry,inspection_window)
+                        with state.lock:state.wheel_observation=wheel
+                        state.record.write('inspection_wheels',devices=rows,observation=wheel)
                     with state.lock:
                         if state.request:state.request=None;state.error='현재는 조회 준비 화면입니다'
                 return
@@ -725,7 +717,7 @@ def controller_worker(state,args):
                 prepared=commissioning.inspect(t,prepare=True,supported=True,empty=True,baseline=baseline)
             state.record.write('registered',result=prepared)
             preview=UnifiedArmAdapter(t,ROOT/'config/home_assistant/arm_ranges.development.json')
-            adapter=UnifiedArmAdapter(t,ROOT/'config/home_assistant/arm_ranges.development.json',authorized_limits=replace(preview._limits,hardware_authorized=True),motion_authorized=True)
+            adapter=UnifiedArmAdapter(t,ROOT/'config/home_assistant/arm_ranges.development.json',authorized_limits=replace(preview.motion_limits,hardware_authorized=True),motion_authorized=True)
             adapter.prepare();mobile=MobileClient(MobileV2Exchange(t),lambda:int(time.monotonic()*1000));mobile.synchronize()
             lift=LiftClient(mobile);stop=SystemStopClient(t,mobile.boot_id,time.monotonic)
             evidence=RobotEvidenceClient(t,mobile,time.monotonic,maximum_age_ms=250)
@@ -747,7 +739,7 @@ def controller_worker(state,args):
                 sent=time.monotonic();snapshot=t.get_feedback_snapshot();received=time.monotonic()
                 arm_queries.append(dict(sent_s=sent,received_s=received,snapshot=asdict(snapshot)))
                 del arm_queries[:-16]
-                commissioning.measured_hold_source(snapshot,anchor,adapter._limits,sent,received)
+                commissioning.measured_hold_source(snapshot,anchor,adapter.motion_limits,sent,received)
                 evidence.publish_mcu_snapshot(snapshot,sent,received,arms_safe=True,lift_hold=False,payload_safe=True)
                 ls=lift.status()
                 observed=time.monotonic();signature=(ls.state,ls.fault,ls.height_um,ls.flags)
@@ -763,18 +755,6 @@ def controller_worker(state,args):
                 posture_monitoring='initial_only',post_arrival='fresh_recommission_required')
             with state.lock:state.controller_ready=True;state.controller='현재 자세 유지 · 시작 대기'
             state.record.write('parked_ready',boot=mobile.boot_id,nonzero_commands=0,arm_anchor=list(anchor))
-            wheel_scales=None;last_wheel_query=-1.
-            if isinstance(state.trial,Nav2Trial):
-                pending=json.loads((ROOT/'config/home_assistant/s4_commissioning.pending.json').read_text())
-                wheel_scales=pending['measurement_inputs']['wheel_geometry_and_raw_speed_scale']['candidate_raw_per_encoder_rad_s']
-                if len(wheel_scales)!=3 or not all(math.isfinite(v) and v>0 for v in wheel_scales):raise ValueError('wheel feedback scale missing')
-            def wheel_observed(result,sent):
-                if wheel_scales is None:return
-                age=((result.mcu_tick_ms-result.feedback_tick_ms)&0xffffffff)/1000
-                if not result.feedback_is_fresh(250):return
-                twist=state.trial.geometry.body_twist(tuple(v/s for v,s in zip(result.velocity_raw[:3],wheel_scales)))
-                with state.lock:state.wheel_observation=dict(observed_s=sent-age,twist=twist,
-                    feedback_tick_ms=result.feedback_tick_ms,boot_id=result.boot_id)
             zero_since=None;previous=time.monotonic();stop_until=None
             while not state.closed.is_set():
                 if time.monotonic()-previous>.2:raise RuntimeError('제어 통신 주기 지연')
@@ -837,7 +817,7 @@ def controller_worker(state,args):
                 if mobile.session is not None and not stopped:
                     sent=time.monotonic()
                     result=mobile.velocity(values,lifetime_ms=150)
-                    wheel_observed(result,sent)
+                    wheel_observed(result,sent,values)
                     if not result.ready_for_motion(mobile.session,250):raise RuntimeError('바퀴 명령 상태 확인 실패')
                     with state.lock:
                         state.nonzero+=bool(any(values));trial_state=state.trial.state
@@ -943,6 +923,8 @@ def main():
     p.add_argument('--manipulation-alignment',action='store_true',help='explicit map goal: up to 90deg final turn and 3cm/0.1rad arrival verification; no speed or collision changes')
     p.add_argument('--camera-mode',choices=('wide','legacy'),default='wide',help='measured RGB profile; native depth/extrinsics preserved')
     p.add_argument('--fine-alignment',action='store_true',help='separate <=15cm/10deg final alignment; stationary verification, no automatic start')
+    p.add_argument('--fine-relative-goal',type=float,nargs=3,metavar=('FORWARD_M','LEFT_M','YAW_RAD'),
+                   help='approved body correction bound once to stopped localization after posture preparation; explicit Start remains required')
     p.add_argument('--prepare-supported',action='store_true',help='explicit supported-empty actual-bottom preparation; no base travel')
     p.add_argument('--resume-prepared',action='store_true',help='explicit prepared torque-OFF admission after a separately verified supported release; no reset or retry')
     p.add_argument('--furniture-reference',type=Path,help='immutable original SLAM appearance/geometry reference; no manual after-location')
@@ -953,7 +935,12 @@ def main():
     if a.furniture_navigation and not a.furniture_reference:p.error('furniture navigation requires registered reference and memory')
     if a.nav2 and a.turn_drive:p.error('select one navigation backend')
     if a.nav2_goal is not None and not a.nav2:p.error('map target requires Nav2')
-    if a.manipulation_alignment and a.nav2_goal is None:p.error('alignment requires an explicit map goal')
+    if a.fine_relative_goal is not None:
+        if not (a.nav2 and a.fine_alignment and a.prepare_supported) or a.nav2_goal is not None:
+            p.error('relative goal requires supported Nav2 fine alignment and no map goal')
+        if (not all(math.isfinite(v) for v in a.fine_relative_goal) or math.hypot(*a.fine_relative_goal[:2])>.15
+                or abs(a.fine_relative_goal[2])>math.radians(10)):p.error('relative goal exceeds 15cm/10deg')
+    if a.manipulation_alignment and a.nav2_goal is None and a.fine_relative_goal is None:p.error('alignment requires an explicit goal')
     if a.fine_alignment and not a.manipulation_alignment:p.error('fine alignment requires manipulation alignment')
     if a.resume_prepared and not a.prepare_supported:p.error('resume requires explicit supported preparation')
     if os.environ.get('ROS_AUTOMATIC_DISCOVERY_RANGE')!='LOCALHOST':p.error('localhost ROS required')

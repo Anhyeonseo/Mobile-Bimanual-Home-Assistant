@@ -51,6 +51,11 @@ class Nav2Trial(TurnDriveTrial):
         self.fine_alignment=fine_alignment
         self.stationary_report=None;self.fine_verified=False;self.verification_started=None
         self.verification_result=None
+        self.fine_twist=(0.,0.,0.);self.fine_raw=(0,0,0,0)
+        self.fine_until=None;self.fine_candidate_at=None;self.fine_duration=0.
+        self.fine_steps=0;self.fine_best=math.inf;self.fine_stalled=0
+        self.fine_history=[]
+        if fine_alignment:self.active_timeout_s=90
         self.maximum_turn=math.radians(90 if manipulation_alignment else 45)
         self.arrival_xy=.01 if fine_alignment else .03 if manipulation_alignment else .12
         self.arrival_yaw=math.radians(1) if fine_alignment else .1 if manipulation_alignment else .2
@@ -86,19 +91,29 @@ class Nav2Trial(TurnDriveTrial):
         return self.path(pose,goal)
 
     def start(self,now,pose,*,operator_confirmed):
-        if self.fine_alignment and not fresh_stationary(self.stationary_report,now):
+        if self.fine_alignment and not fresh_stationary(self.stationary_report,now,revision=self.required_map_revision):
             raise InvalidTask('정지 위치 관측을 모으는 중입니다')
         super().start(now,pose,operator_confirmed=operator_confirmed)
         self.motion_since=now;self.phase='NAV2'
+        if self.fine_alignment:self._fine_observe(now)
 
     def finish(self, stop_confirmed):
         super().finish(stop_confirmed)
         if self.fine_alignment and not self.fine_verified:
             self.state='ALIGNMENT_REVIEW'
 
+    def pause(self,now,reason):
+        if self.fine_alignment and self.state=='VERIFYING_ALIGNMENT':
+            # An observation phase must not start another step after browser loss.
+            self.state='RUNNING'
+        super().pause(now,reason)
+        if self.fine_alignment and self.state in self.WAITING:
+            self.fine_twist=(0.,0.,0.);self.fine_raw=(0,0,0,0);self.fine_until=None
+
     def resume(self,now,*args,**kwargs):
         super().resume(now,*args,**kwargs);self.motion_since=now
         self.collision_hold=False;self.phase='NAV2'
+        if self.fine_alignment:self._fine_observe(now)
 
     def backend_ready(self):
         return (self.nav.get('ready') is True and self.nav.get('goal')==list(self.goal or ())
@@ -108,6 +123,10 @@ class Nav2Trial(TurnDriveTrial):
                 and 0<=time.monotonic()-self.nav.get('depth_s',-1)<=.8)
 
     def route_valid(self,pose):
+        if self.fine_alignment:
+            return (pose is not None and self.start_pose is not None
+                and math.dist(pose[:2],self.start_pose[:2])<=.16
+                and all(self.map_free(p) for p in NearGoal.path(self,pose,self.goal)))
         # Nav2 is allowed to steer around an obstacle rather than being forced
         # onto the original straight preview. Keep the bounded trial envelope.
         # Navigation collision authority is DWB's full fixed-body footprint on
@@ -135,22 +154,86 @@ class Nav2Trial(TurnDriveTrial):
         scale=max(1.,.15/distance) if distance>1e-5 else 1.
         return [(x*scale,y*scale,yaw) for x,y,yaw in path]
 
+    def _fine_observe(self,now):
+        self.state='VERIFYING_ALIGNMENT';self.phase='FINE_OBSERVE'
+        self.verification_started=now;self.fine_until=None
+        self.fine_twist=(0.,0.,0.);self.fine_raw=(0,0,0,0)
+
+    def _fine_review(self,reason):
+        self.fine_twist=(0.,0.,0.);self.fine_raw=(0,0,0,0)
+        self.verification_result=dict(within_fine_tolerance=False,reason=reason,steps=self.fine_history)
+        self.state='SETTLING'
+
+    def _fine_command(self,now,pose,pose_stamp,*,sensors_fresh,corridor_clear):
+        zero=(0,0,0,0)
+        if self.state not in ('RUNNING','VERIFYING_ALIGNMENT',*self.WAITING):return zero
+        nav=self.nav
+        current=(nav.get('goal')==list(self.goal or ()) and nav.get('ready') is True
+            and not nav.get('error') and 0<=now-nav.get('observed_s',-1)<=.5
+            and 0<=now-nav.get('odom_s',-1)<=.5 and 0<=now-nav.get('depth_s',-1)<=.8
+            and (self.required_map_revision is None or nav.get('map_revision')==self.required_map_revision))
+        fresh=sensors_fresh and current and 0<=now-pose_stamp<=.5
+        if self.started is not None and now-self.started>90:
+            self._fine_review('fine alignment observation/motion budget exhausted');return zero
+        if self.state=='VERIFYING_ALIGNMENT':
+            report=self.stationary_report
+            if (fresh and fresh_stationary(report,now,revision=self.required_map_revision)
+                    and report['observed_s']-report.get('span_s',0)>=self.verification_started):
+                measured=report['pose'];dx=self.goal[0]-measured[0];dy=self.goal[1]-measured[1]
+                yaw=angle(self.goal[2]-measured[2]);xy=math.hypot(dx,dy)
+                item=dict(report,goal=list(self.goal),xy_error_m=xy,yaw_error_rad=abs(yaw),step=self.fine_steps)
+                self.fine_history.append(item)
+                if xy<=self.arrival_xy and abs(yaw)<=self.arrival_yaw:
+                    self.fine_verified=True;self.verification_result=dict(item,within_fine_tolerance=True,steps=self.fine_history.copy())
+                    self.state='SETTLING';return zero
+                score=xy/self.arrival_xy+abs(yaw)/self.arrival_yaw
+                if score<self.fine_best-.15:self.fine_best=score;self.fine_stalled=0
+                else:self.fine_stalled+=1
+                if self.fine_steps>=12 or self.fine_stalled>=3:
+                    self._fine_review('repeated stationary measurements show insufficient progress');return zero
+                if not self.route_valid(measured):
+                    self._fine_review('direct fine correction is outside the reviewed body/map corridor');return zero
+                c,s=math.cos(measured[2]),math.sin(measured[2])
+                errors=(c*dx+s*dy,-s*dx+c*dy,yaw)
+                axis=2 if abs(yaw)>self.arrival_yaw else max(range(2),key=lambda i:abs(errors[i]))
+                unit=[0.,0.,0.];unit[axis]=math.copysign(1.,errors[axis])
+                raw=self.model.raw_command(tuple(unit))
+                self.fine_raw=tuple(round(v) for v in raw)+(0,)
+                self.fine_twist=self.model.expected_twist(self.fine_raw[:3])
+                # Correct at most half the observed component, bounded to 0.8s.
+                # Use established wheel ratios/output limit; no diagonal yaw mix.
+                self.fine_duration=min(.8,.5*abs(errors[axis])/abs(self.fine_twist[axis]))
+                self.fine_candidate_at=now;self.fine_until=None
+                self.state='RUNNING';self.phase='FINE_CHECK';return zero
+            if now-self.verification_started>=8:
+                self._fine_review('stationary localization not stable within 8s')
+            return zero
+        if self.state in self.WAITING:
+            self.admit_command(now,pose,pose_stamp,sensors_fresh=fresh,corridor_clear=corridor_clear)
+            return zero  # resume always returns to stationary observation
+        if self.fine_until is None:
+            # A new exact twist must travel to the existing sensor worker and
+            # receive its fresh LiDAR/depth swept-body check before first output.
+            if not fresh or not corridor_clear:
+                if now-self.fine_candidate_at>2:
+                    self._fine_review('fine correction corridor/sensors not ready')
+                return zero
+            if not self.route_valid(pose):
+                self._fine_review('fine correction map corridor changed');return zero
+            self.fine_until=now+self.fine_duration;self.fine_steps+=1;self.phase='FINE_MOVE'
+        if now>=self.fine_until:
+            self._fine_observe(now);return zero
+        if not self.admit_command(now,pose,pose_stamp,sensors_fresh=fresh,corridor_clear=corridor_clear):
+            if not corridor_clear:
+                self.collision_hold=True;self.resume_required=True
+            self.fine_twist=(0.,0.,0.);self.fine_raw=zero
+            return zero
+        return self.fine_raw
+
     def command(self,now,pose,pose_stamp,*,sensors_fresh,corridor_clear):
         nav=self.nav
-        if self.fine_alignment and self.state=='VERIFYING_ALIGNMENT':
-            report=self.stationary_report
-            if (sensors_fresh and fresh_stationary(report,now)
-                    and report['observed_s']-report.get('span_s',0)>=self.verification_started):
-                measured=report['pose']
-                xy=math.dist(measured[:2],self.goal[:2]);yaw=abs(angle(measured[2]-self.goal[2]))
-                self.fine_verified=xy<=self.arrival_xy and yaw<=self.arrival_yaw
-                self.verification_result=dict(report,goal=list(self.goal),xy_error_m=xy,yaw_error_rad=yaw,
-                    within_fine_tolerance=self.fine_verified)
-                self.state='SETTLING'
-            elif now-self.verification_started>=8:
-                self.verification_result=dict(within_fine_tolerance=False,reason='stationary localization not stable within 8s')
-                self.state='SETTLING'
-            return (0,0,0,0)
+        if self.fine_alignment:
+            return self._fine_command(now,pose,pose_stamp,sensors_fresh=sensors_fresh,corridor_clear=corridor_clear)
         current=(nav.get('goal')==list(self.goal or ()) and 0<=now-nav.get('observed_s',-1)<=.5
                  and (self.required_map_revision is None or nav.get('map_revision')==self.required_map_revision))
         sensors_fresh=(sensors_fresh and current and 0<=now-nav.get('odom_s',-1)<=.5
@@ -164,9 +247,6 @@ class Nav2Trial(TurnDriveTrial):
         if (self.state in ('RUNNING',*self.WAITING) and sensors_fresh and 0<=now-pose_stamp<=.5
                 and nav.get('goal')==list(self.goal) and 0<=now-nav.get('observed_s',-1)<=.5
                 and nav.get('result')=='SUCCEEDED'):
-            if self.fine_alignment:
-                self.state='VERIFYING_ALIGNMENT';self.verification_started=now
-                return (0,0,0,0)
             if math.dist(pose[:2],self.goal[:2])>self.arrival_xy or abs(angle(pose[2]-self.goal[2]))>self.arrival_yaw:
                 raise InvalidTask('Nav2 result disagrees with measured destination')
             self.state='SETTLING';return (0,0,0,0)

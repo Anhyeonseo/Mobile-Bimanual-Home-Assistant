@@ -63,6 +63,8 @@ def load_bundle(folder,*,for_execution=False):
     if for_execution and (program.hypothetical_lift or proof['native_geometry'].get('status')!='PASSED'
                           or proof.get('simulation_passed') is not True):
         raise ValueError('actual-height native-checked plan required; preview cannot execute')
+    if for_execution and proof['native_geometry'].get('fixed_finger_contact',{}).get('accepted') is not True:
+        raise ValueError('observed fixed-finger contact proof required; rebuild old centre-only bundle')
     if program.calibration_id!=model['profile']['calibration_id']:raise ValueError('model profile changed')
     validate_program_winding(program.stages,model['profile'])
     for name,checksum in program.source_sha256.items():

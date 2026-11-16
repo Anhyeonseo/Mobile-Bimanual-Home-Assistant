@@ -277,11 +277,11 @@ def run_suite(output, *, stage='all', language_url=None, with_ros=False):
     report['controller_snapshot_note']='Read-only comparison; external developer changes are not reverted.'
     report.update(complete=True, passed=report['assets']['passed'] and
         all(c['status']=='PASS' for c in report['checks']))
-    report['hardware_handoff'] = 'docs/S4B_S5_TEST_RUNBOOK.md'
+    report['hardware_handoff'] = 'docs/history/S4B_S5_TEST_RUNBOOK.md'
     write_json(report_path, report)
     lines = ['# 로컬 시험 결과', '',
         f"범위: {stage} · {'통과' if report['passed'] else '실패 항목 확인 필요'}", '',
-        '실물 명령 0 · 실물 전체 완료 아님 · 상세 기준은 docs/S4B_S5_TEST_RUNBOOK.md 참조.', '',
+        '실물 명령 0 · 실물 전체 완료 아님 · 상세 기준은 docs/history/S4B_S5_TEST_RUNBOOK.md 참조.', '',
         '| 검사 | 결과 |', '|---|---|']
     lines += [f"| {c['name']} | {c['status']} |" for c in report['checks']]
     lines += ['',f"언어 모델: {report['language_model']}", '',

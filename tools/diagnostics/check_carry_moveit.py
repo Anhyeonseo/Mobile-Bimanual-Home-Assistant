@@ -6,6 +6,7 @@ No device/SSH/controller is opened. Source ROS Jazzy before running.
 """
 import argparse
 from dataclasses import asdict, replace
+from itertools import product
 import json
 from pathlib import Path
 import sys
@@ -22,13 +23,48 @@ from home_robot_tasks.carry_posture import ObjectAxisConstraint,CarryPolicy
 from home_robot_tasks.carry_moveit import MoveItCarryPlanner
 from home_robot_tasks.stationary_pick_sim import StationaryArm
 from home_robot_tasks.so101_jaw import load_stock_jaw
-from carry_moveit_session import session
+from tools.diagnostics.carry_moveit_session import session
 
 
 def serial(value):
     if isinstance(value, np.ndarray): return value.tolist()
     if isinstance(value, np.generic): return value.item()
     raise TypeError(type(value).__name__)
+
+
+def synthetic_grasp(arm, roll, *, upright=False):
+    """Place a synthetic box against the stock fixed finger at a reachable pose.
+
+    The object is constructed for this offline test; no observed object or
+    robot target is moved to hide a contact residual. Apertures follow the
+    actual closing-line section, including the rotated upright fixture.
+    """
+    pre = np.deg2rad([0., -45., 45., 60., 90. + roll])
+    pose = arm.fk(pre)[0]
+    pose[:3, 3] += .006 * pose[:3, 2]
+    size = (.01, .012, .012)
+    attachment = arm.tcp_from_stock.copy()
+    attachment[:3, 3] += attachment[:3, :3] @ [-arm.jaw.center_from_fixed_m(size[0]), 0., 0.]
+    if upright:
+        attachment[:3, :3] = pose[:3, :3].T
+    object_pose = pose @ attachment
+    vertices = np.array(list(product(*[(-v / 2, v / 2) for v in size])))
+    world = vertices @ object_pose[:3, :3].T + object_pose[:3, 3]
+    section = arm.jaw.contact_section(pose @ arm.tcp_from_stock, world)
+    attachment[:3, 3] -= pose[:3, :3].T @ np.asarray(section['tcp_correction_base_m'])
+    held_gap = section['width_m']
+    open_gap = held_gap + .004
+    if not arm.jaw.accepts(held_gap) or not arm.jaw.accepts(open_gap):
+        raise ValueError('synthetic fixture exceeds stock jaw aperture')
+    constraint = (ObjectAxisConstraint(attachment, maximum_tilt_rad=np.deg2rad(10),
+                                      evidence='synthetic upright task requirement')
+                  if upright else None)
+    return GraspRouteCandidate(
+        'upright-fixture' if upright else 'fixture-roll-' + str(roll),
+        arm.profile['calibration_id'], 'fixture-scene', pre, pose, attachment, size,
+        float(np.interp(open_gap, arm.jaw.gaps, arm.jaw.angles)),
+        float(np.interp(held_gap, arm.jaw.gaps, arm.jaw.angles)), constraint,
+    )
 
 
 def main():
@@ -101,12 +137,8 @@ def main():
             # Absolute official model angles keep these synthetic fixtures
             # independent of the installation's recalibrated Home reference.
             for roll in (0., 30.):
-                pre=np.deg2rad([0.,-45.,45.,60.,90.+roll])
-                pose=arm.fk(pre)[0]
-                pose[:3,3] += .006*pose[:3,2]
-                attachment=np.eye(4); attachment[:3,3]=[-.018,0.,0.]
-                candidate=GraspRouteCandidate('fixture-roll-'+str(roll),profile['calibration_id'],'fixture-scene',pre,
-                    pose,attachment,(.01,.012,.012),.5,.3)
+                candidate = synthetic_grasp(arm, roll)
+                pre = candidate.pregrasp_model_rad
                 plan=plan_pick_carry(arm,backend,arm.anchor,[candidate],scene_id='fixture-scene')
                 report['routes'].append(asdict(plan))
             if args.include_place:
@@ -117,7 +149,6 @@ def main():
                 object_pose = held.base_from_grasp_tcp@held.tcp_from_object
                 # A synthetic narrow support beneath the payload leaves the
                 # stock fingertip sweep visible to the real collision checker.
-                from itertools import product
                 vertices = np.array(list(product(*[(-v/2,v/2) for v in held.object_size_m])))
                 world = vertices@object_pose[:3,:3].T+object_pose[:3,3]
                 top = float(world[:,2].min()-.0015)
@@ -202,11 +233,7 @@ def main():
                 scene.scene.world.collision_objects=[support]
                 if not call('apply_planning_scene',scene).success: raise RuntimeError('support cleanup failed')
             # Explicit upright task: the object stays upright although the TCP is tilted.
-            upright_attachment=attachment.copy()
-            upright_attachment[:3,:3]=pose[:3,:3].T
-            upright=replace(candidate,candidate_id='upright-fixture',tcp_from_object=upright_attachment,
-                object_constraint=ObjectAxisConstraint(upright_attachment,maximum_tilt_rad=np.deg2rad(10),
-                                                       evidence='synthetic upright task requirement'))
+            upright = synthetic_grasp(arm, 30., upright=True)
             result=plan_pick_carry(arm,backend,arm.anchor,[upright],scene_id='fixture-scene')
             report['routes'].append(asdict(result))
             # Same carry pose with an oversized attached object must fail, even

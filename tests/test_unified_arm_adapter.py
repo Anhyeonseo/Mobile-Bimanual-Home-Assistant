@@ -35,7 +35,7 @@ def make_adapter(monkeypatch,authorized=True):
     clock=SimClock();monkeypatch.setattr(bridge,'time',NS(monotonic=clock,sleep=clock.advance))
     t=Transport(clock);path=ROOT/'config/home_assistant/arm_ranges.development.json'
     preview=UnifiedArmAdapter(t,path)
-    a=UnifiedArmAdapter(t,path,authorized_limits=replace(preview._limits,hardware_authorized=authorized),
+    a=UnifiedArmAdapter(t,path,authorized_limits=replace(preview.motion_limits,hardware_authorized=authorized),
                         motion_authorized=authorized)
     t.calibration=a.calibration_hash
     return a,t,clock

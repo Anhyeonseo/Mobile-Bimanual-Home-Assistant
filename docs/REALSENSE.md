@@ -1,5 +1,20 @@
 # D415 RGB-D 뷰어
 
+카메라 설치·영상 확인·탐지·마스킹 도구 안내다. 필요한 실행 환경의 절만 선택해서 읽는다.
+
+<details>
+<summary>목차 펼치기</summary>
+
+- [설치 및 실행](#설치-및-실행)
+- [해석 및 다음 단계](#해석-및-다음-단계)
+- [Grounding DINO: 물체 탐지 → 카메라 XYZ](#grounding-dino-물체-탐지--카메라-xyz)
+- [깊이 품질과 표시 조정](#깊이-품질과-표시-조정)
+- [Jetson 배포 및 터미널 키워드 검색](#jetson-배포-및-터미널-키워드-검색)
+- [이 컴퓨터에서 Jetson 영상 보기](#이-컴퓨터에서-jetson-영상-보기)
+- [SAM 물체 마스킹](#sam-물체-마스킹)
+
+</details>
+
 로봇 연결 없이 D415의 RGB, RGB에 정렬한 깊이, 클릭한 픽셀의 카메라 기준
 3D 좌표를 확인한다. 공장 보정값을 SDK에서 읽으며 장치 보정값을 변경하지 않는다.
 기존 Top/wrist 카메라 보정 파일을 사용하지 않는다.
@@ -124,11 +139,10 @@ SDK의 정렬된 intrinsics와 `rs2_deproject_pixel_to_point`로 변환한다.
 
 ## 깊이 품질과 표시 조정
 
-기본 깊이 해상도를 D415 권장 1280×720으로 올렸다. RGB는 기존 크기로 유지한다.
-높은 해상도에서는 최소 측정 거리가 늘어난다. D415 데이터시트의 Min-Z는
-1280×720에서 약 45cm, 640×480에서 31cm, 640×360에서 24cm다.
-작업 거리는 각각 50cm, 35cm, 30cm 이상에서 우선 확인한다. 이는 정확도 보장이
+기본 깊이 해상도를 D415 권장 1280×720으로 올렸다. RGB는 기존 크기로 유지한다. 높은 해상도에서는 최소 측정 거리가 늘어난다. D415 데이터시트의 Min-Z는
+1280×720에서 약 45cm, 640×480에서 31cm, 640×360에서 24cm다. 작업 거리는 각각 50cm, 35cm, 30cm 이상에서 우선 확인한다. 이는 정확도 보장이
 아니며 검은 재질, 광택, 각도와 가림에 따라 더 먼 거리에서도 누락될 수 있다.
+
 가까운 작업에는 `--depth-width 640 --depth-height 360`을 사용할 수 있다.
 [D400 데이터시트](https://www.realsenseai.com/wp-content/uploads/2022/04/Intel-RealSense-D400-Series-Datasheet-April-2022.pdf),
 [공식 튜닝 가이드](https://dev.realsenseai.com/docs/tuning-depth-cameras-for-best-performance/)
@@ -288,10 +302,11 @@ Jetson HTTP 서버는 `127.0.0.1:8765`, PC 터널은 `127.0.0.1:18765`에만 바
 ## SAM 물체 마스킹
 
 브라우저의 **찾고 마스킹**은 Grounding DINO 탐지 박스를
-[SAM 2.1 Tiny](https://huggingface.co/facebook/sam2.1-hiera-tiny)에 전달한다.
-동일 촬영본의 RGB에서 후보별 마스크를 구해 색 채움·윤곽으로 표시한다.
+[SAM 2.1 Tiny](https://huggingface.co/facebook/sam2.1-hiera-tiny)에 전달한다. 동일 촬영본의 RGB에서 후보별 마스크를 구해 색 채움·윤곽으로 표시한다.
+
 모델은 기존 Transformers 4.57.6의 `Sam2Model`/`Sam2Processor`를 사용하며,
 리비전 `de431c4043854a71d8101e17995dfe596bf101a5`로 고정한다.
+
 추가 pip 패키지 없이 SAM 모델 캐시와 `tools/lib/sam_rgbd.py`를 함께 배포한다.
 [박스 프롬프트 사용법](https://huggingface.co/docs/transformers/v4.57.1/en/model_doc/sam2#bounding-box-input)
 

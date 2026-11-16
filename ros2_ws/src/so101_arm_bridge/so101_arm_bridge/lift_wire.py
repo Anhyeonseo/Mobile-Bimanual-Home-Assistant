@@ -1,6 +1,6 @@
 """Lift AL/LS v1 codec. Uses the resident arm/mobile transport's existing lock."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import struct
 from .mobile_wire import crc32c
 
@@ -155,7 +155,9 @@ class LiftClient:
                 or (reply.kind != kind and not completed_renewal)
                 or reply.request_sequence != self.sequence
             ):
-                raise RuntimeError("lift rejected or MCU restarted")
+                error=RuntimeError("lift rejected or MCU restarted")
+                error.diagnostics=dict(command=asdict(LiftCommand.decode(packet)),response=asdict(reply))
+                raise error
             if kind != 4 and reply.session != session:
                 raise RuntimeError("lift ownership mismatch")
             if completed_renewal:self.session=None

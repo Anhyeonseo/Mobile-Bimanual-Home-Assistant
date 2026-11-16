@@ -10,9 +10,16 @@ import math
 from .skill_ports import PortResult
 
 
+class HandoffRecheck(ValueError):
+    """No route was dispatched; measured settling needs a route recheck."""
+    def __init__(self, diagnostics):
+        self.diagnostics=diagnostics
+        super().__init__('measured anchor changed after planning: '+str(diagnostics))
+
+
 def build_carry_session(program, *, adapter, coordinated_stop, observe, clock,
                        validate_current_scene, simulation=False, observation_policy='continuous_patch',
-                       ready_for_route=None, pause_before_descent=False):
+                       ready_for_route=None, pause_before_descent=False, recoverable_handoffs=False):
     """Compose over prepared clients; never open a port, flash or auto-home.
 
     observe reads bounded MCU feedback; validate_current_scene uses the cached
@@ -25,7 +32,7 @@ def build_carry_session(program, *, adapter, coordinated_stop, observe, clock,
                              transport_owner='stationary-pick')
     return CarrySession(program, motion, coordinated_stop, observe, clock, simulation=simulation,
                         observation_policy=observation_policy,ready_for_route=ready_for_route,
-                        pause_before_descent=pause_before_descent)
+                        pause_before_descent=pause_before_descent,recoverable_handoffs=recoverable_handoffs)
 
 
 @dataclass(frozen=True)
@@ -97,6 +104,7 @@ class CarryRouteBuilder:
         measured = tuple(v/1e6 for v in raw)
         stage = self.program.stages[index]
         start = stage.points[0].positions_rad
+        errors=[]
         for i, (a, b) in enumerate(zip(measured, start)):
             if i == 5 and index >= 4:
                 lo, hi = self.program.contact_control_interval
@@ -105,7 +113,17 @@ class CarryRouteBuilder:
                 if abs(b-self.program.close_control_rad) > 1e-10:
                     raise ValueError('held gripper command changed')
             elif abs(a-b) > .02:
-                raise ValueError('measured anchor changed after planning')
+                errors.append(dict(joint_index=i,measured_rad=a,planned_rad=b,error_rad=a-b))
+        if errors:
+            from so101_arm_bridge.bimanual_stream_adapter import DEFAULT_TERMINAL_SETTLE_TOLERANCE_URAD
+            diagnostics=dict(stage=stage.name,errors=errors,limit_rad=.02,
+                measured_positions_rad=measured,route_dispatched=False)
+            # The resident controller already accepted this completed endpoint.
+            # Preserve the stricter geometry admission, but do not turn its
+            # recheck into a global fault for a small terminal tracking offset.
+            if index>0 and max(abs(e['error_rad']) for e in errors)<=DEFAULT_TERMINAL_SETTLE_TOLERANCE_URAD/1e6:
+                raise HandoffRecheck(diagnostics)
+            raise ValueError('measured anchor changed after planning: '+str(diagnostics))
         if self.validate(stage, snapshot) is not True:
             raise ValueError('current-scene route validation failed')
         self.last_index = index
@@ -121,7 +139,8 @@ class CarrySession:
     never opens the fingers or resets a latched fault automatically.
     """
     def __init__(self, program, motion, stop, observe, clock, *, simulation=False,
-                 observation_policy='continuous_patch',ready_for_route=None,pause_before_descent=False):
+                 observation_policy='continuous_patch',ready_for_route=None,pause_before_descent=False,
+                 recoverable_handoffs=False):
         if observation_policy not in ('continuous_patch', 'snapshot_then_verify'):
             raise ValueError('explicit supported observation policy required')
         if type(simulation) is not bool or (simulation and
@@ -148,6 +167,24 @@ class CarrySession:
         self.pause_before_descent=pause_before_descent
         self.descent_released=False
         self.pregrasp_hold_cycle=0
+        self.recoverable_handoffs=recoverable_handoffs
+        self.handoff_started=None
+        self.handoff_diagnostics=None
+
+    def _start_route(self, child, parameters):
+        try:self.motion.start(child,parameters)
+        except HandoffRecheck as error:
+            if not self.recoverable_handoffs:raise
+            now=self.clock()
+            if self.handoff_started is None:self.handoff_started=now
+            self.handoff_diagnostics=error.diagnostics
+            self.state=('RECHECKING_HANDOFF' if now-self.handoff_started<1.
+                        else 'AWAITING_ROUTE_REPLAN')
+            return False
+        if self.handoff_started is not None:
+            self.phase_s=self.clock();self.state='RUNNING'
+        self.handoff_started=None
+        return True
 
     def resume_descent(self):
         # Early input cannot pre-authorize a later checkpoint.
@@ -260,6 +297,13 @@ class CarrySession:
                 now = self.clock()
                 if now < self.started_s:
                     raise ValueError('clock moved backwards')
+                if self.state=='AWAITING_ROUTE_REPLAN':
+                    # Existing servo goals and heartbeat remain active. A new
+                    # checked route is required; no blind reverse, jaw opening,
+                    # controller reset or automatic retry after this boundary.
+                    if self.program.stages[self.index].attached and not self._retention_allowed(f):
+                        raise ValueError('contact lost while awaiting route replan')
+                    return PortResult('RUNNING','HOLDING_FOR_CHECKED_REPLAN')
                 if self.state=='AWAITING_DESCENT_CONFIRMATION':
                     child=self.goal+'/pregrasp_hold/'+str(self.pregrasp_hold_cycle)
                     if not self.active:
@@ -306,7 +350,8 @@ class CarrySession:
                 if not self.active:
                     if not self.ready_for_route():
                         return PortResult('RUNNING','WAIT_FRESH_PLATFORM')
-                    self.motion.start(child, {'carry_stage': self.index})
+                    if not self._start_route(child, {'carry_stage': self.index}):
+                        return PortResult('RUNNING',self.state)
                     self.active = True
                 result = self.motion.poll(child)
                 pending = getattr(self.motion, 'pending_stop_reason', lambda: None)()

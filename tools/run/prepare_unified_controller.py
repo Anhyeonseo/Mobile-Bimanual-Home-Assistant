@@ -17,7 +17,12 @@ from pathlib import Path
 import sys
 import time
 ROOT=Path(__file__).resolve().parents[2]
-sys.path.insert(0,str(ROOT/'ros2_ws/src/so101_arm_bridge'))
+sys.path[:0] = [str(ROOT/'ros2_ws/src/so101_arm_bridge'),
+                str(ROOT/'ros2_ws/src/home_robot_tasks')]
+from home_robot_tasks.platform_preparation import (
+    measured_hold_source, supported_lift_is_holding, move_observed_lift,
+    reference_supported_bottom,
+)
 from so101_arm_bridge.backend_lease import acquire_backend_lease
 from so101_arm_bridge.serial_port import open_exclusive_serial
 from so101_arm_bridge.stream_transport_v2 import StreamValidationTransportV2
@@ -26,38 +31,6 @@ from so101_arm_bridge.unified_commissioning import CommissionClient,FIRMWARE
 from so101_arm_bridge.mobile_inspection import inspect_mobile
 from so101_arm_bridge.lift_wire import LiftCommand,LiftStatus
 
-def measured_hold_source(snapshot,anchor,limits,sent_s,received_s):
-    """Fresh measured joints for this supported, empty, constant-pose test.
-
-    Does not establish a collision envelope for moving the lift or carrying.
-    Subtract round-trip uncertainty and preserve the oldest joint sample age.
-    """
-    import math
-    if (snapshot.status_code or snapshot.joint_count!=12 or snapshot.present_mask!=4095 or
-        len(snapshot.positions_urad)!=12 or len(snapshot.sample_age_ms)!=12 or
-        len(anchor)!=12 or not all(math.isfinite(v) for v in (sent_s,received_s)) or
-        not 0<=received_s-sent_s<.1 or
-        any(type(age) is not int or not 0<=age<250 for age in snapshot.sample_age_ms)):
-        raise ValueError('fresh complete measured arm snapshot required')
-    for i,q in enumerate(snapshot.positions_urad):
-        if (not limits.minimum_urad[i]<=q<=limits.maximum_urad[i] or
-            abs(q-anchor[i])>49088): # existing profile: 32 encoder counts
-            raise ValueError('measured arm left supported current-pose envelope')
-    stamp=sent_s-max(snapshot.sample_age_ms)/1000
-    if received_s-stamp>=.25:raise ValueError('arm evidence expired in transit')
-    return stamp
-
-def supported_lift_is_holding(status):
-    """Measured hold only, not permission to start a new lift movement.
-
-    LS bit 4 is the movement interlock. Losing it must inhibit movement,
-    but is not loss of the independent hold proof (LS bits 1/8/16).
-    Existing runtime LiftStatus.holding() admission remains unchanged.
-    """
-    return (status.state==5 and status.fault==0 and status.flags&25==25
-            and not status.flags&2 and status.command_raw==0
-            and abs(status.height_um-status.target_um)<=2000
-            and ((status.mcu_tick_ms-status.observed_ms)&0xffffffff)<250)
 
 def supported_base_pulse(mobile,observe,result):
     """First forward pulse only: raw +/-50, <=200 ms, then zero and STOP.
@@ -98,33 +71,6 @@ def supported_base_pulse(mobile,observe,result):
         time.sleep(.01)
     raise TimeoutError('base pulse stop feedback unconfirmed')
 
-def move_observed_lift(lift, observe, stop, height_um, *, clock=time.monotonic, sleep=time.sleep):
-    """Explicit <=1cm bottom-origin rise; existing LiftPort owns lease and faults."""
-    from home_robot_tasks.device_ports import LiftPort
-    from home_robot_tasks.system_stop_backend import SystemStopBackend
-    if type(height_um) is not int or not 0 < height_um <= 10000:
-        raise ValueError('explicit bottom-origin lift target up to 1cm required')
-    initial=observe()
-    if not supported_lift_is_holding(initial) or abs(initial.height_um)>3000:
-        raise RuntimeError('fresh held bottom reference required before rise')
-    port=LiftPort(lift,clock,SystemStopBackend(stop))
-    port.start('supported-lift-rise',{'height_um':height_um})
-    deadline=clock()+30
-    while True:
-        current=observe()
-        result=port.poll('supported-lift-rise')
-        if result.state=='SUCCEEDED':
-            final=observe()
-            if not supported_lift_is_holding(final) or abs(final.height_um-height_um)>3000:
-                raise RuntimeError('lift arrival evidence disagrees with target')
-            return {'initial':asdict(initial),'final':asdict(final),'target_um':height_um}
-        if result.state in ('FAILED','CANCELLED'):
-            raise RuntimeError('lift rise failed: '+result.reason)
-        if clock()>=deadline:
-            port.cancel('supported-lift-rise')
-            raise TimeoutError('lift rise deadline exceeded')
-        sleep(.02)
-
 
 def check_hold_stop(transport,*,baseline,supported_empty,bottom_confirmed,report=None,
                     base_pulse=False,base_clearance=False,lift_target_mm=None):
@@ -151,7 +97,7 @@ def check_hold_stop(transport,*,baseline,supported_empty,bottom_confirmed,report
     if result['commission_final']['flags']!=17:raise ValueError('prepared torque-off state required')
     ranges=ROOT/'config/home_assistant/arm_ranges.development.json'
     preview=UnifiedArmAdapter(transport,ranges)
-    adapter=UnifiedArmAdapter(transport,ranges,authorized_limits=replace(preview._limits,hardware_authorized=True),motion_authorized=True)
+    adapter=UnifiedArmAdapter(transport,ranges,authorized_limits=replace(preview.motion_limits,hardware_authorized=True),motion_authorized=True)
     prepared=adapter.prepare()
     result.update(status='HOLD_STOP_IN_PROGRESS',initial_arm_pose=asdict(prepared),
         nonzero_mobile_velocity_commands=0,lift_move_commands=0,torque_release_requested=False,
@@ -169,7 +115,7 @@ def check_hold_stop(transport,*,baseline,supported_empty,bottom_confirmed,report
         if not stopped and (heartbeat.stop_latched or heartbeat.status_code):
             raise RuntimeError('runtime stopped before requested test STOP')
         sent=time.monotonic();snapshot=transport.get_feedback_snapshot();received=time.monotonic()
-        measured_hold_source(snapshot,prepared.positions_urad,adapter._limits,sent,received)
+        measured_hold_source(snapshot,prepared.positions_urad,adapter.motion_limits,sent,received)
         # Empty payload invariant + measured unchanged grippers, for this
         # test only. Firmware independently proves lift holding from drive
         # readback; never substitute an asserted lift_hold=True.
@@ -205,7 +151,6 @@ def check_hold_stop(transport,*,baseline,supported_empty,bottom_confirmed,report
                 if time.monotonic()>=deadline:raise TimeoutError('independent lift hold not established')
                 time.sleep(.02)
         else:
-            from navigation_trial_web import reference_supported_bottom
             reference_supported_bottom(observe,mobile,lift,clock=time.monotonic,sleep=time.sleep)
             result['lift_reference']=asdict(lift.status())
         result['lift_hold_verified']=True

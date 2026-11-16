@@ -57,6 +57,7 @@ int main(void){
 '''
     path=tmp_path/'platform-resume.c';path.write_text(code);exe=tmp_path/'platform-resume'
     subprocess.run(['gcc','-std=c11','-Wall','-Wextra','-Werror','-I',str(BOARD/'Inc'),
+                    '-I',str(ROOT/'firmware/stm32_actuator/include'),
                     str(path),str(BOARD/'Src/s3_platform_snapshot.c'),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)
 

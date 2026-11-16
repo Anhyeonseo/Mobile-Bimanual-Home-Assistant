@@ -417,27 +417,67 @@ def test_fine_alignment_requires_stationary_start_and_bounded_goal():
     with pytest.raises(ValueError,match='15cm'):t.plan((0,0,0))
 
 
+def fine_window(t,now,pose,span=1.5):
+    t.nav=feedback(t,now,executing=False)
+    t.stationary_report=dict(ready=True,observed_s=now,span_s=span,pose=list(pose))
+
+
 def test_fine_alignment_requires_post_motion_window_not_single_nav2_success():
-    t=fine_trial();t.state='RUNNING';t.nav=feedback(t,2,result='SUCCEEDED')
+    t=fine_trial();t._fine_observe(2);t.nav=feedback(t,2,result='SUCCEEDED')
     assert not any(t.command(2,(.05,0,0),2,sensors_fresh=True,corridor_clear=True))
     assert t.state=='VERIFYING_ALIGNMENT'
-    t.stationary_report=dict(ready=True,observed_s=2.1,span_s=1.5,pose=[.05,0,0])
+    fine_window(t,2.1,(.05,0,0))
     t.command(2.1,(.05,0,0),2.1,sensors_fresh=True,corridor_clear=True)
-    assert t.state=='VERIFYING_ALIGNMENT'  # old/pre-motion window not evidence
-    t.stationary_report=dict(ready=True,observed_s=4,span_s=1.5,pose=[.055,0,.01])
+    assert t.state=='VERIFYING_ALIGNMENT'
+    fine_window(t,4,(.055,0,.01))
     t.command(4,(.055,0,.01),4,sensors_fresh=True,corridor_clear=True)
     assert t.state=='SETTLING' and t.fine_verified
     t.finish(True);assert t.state=='SUCCEEDED'
 
 
-def test_fine_alignment_unstable_or_outside_stops_for_review_not_false_success():
+def test_fine_alignment_unstable_or_no_progress_stops_for_review():
     for unstable in (True,False):
-        t=fine_trial();t.state='VERIFYING_ALIGNMENT';t.verification_started=1
-        if not unstable:t.stationary_report=dict(ready=True,observed_s=4,span_s=1.5,pose=[.075,0,0])
+        t=fine_trial();t._fine_observe(1);t.fine_steps=12
+        if not unstable:fine_window(t,4,(.075,0,0))
         now=10 if unstable else 4
         assert not any(t.command(now,(.075,0,0),now,sensors_fresh=True,corridor_clear=True))
         assert t.state=='SETTLING' and not t.fine_verified
         t.finish(True);assert t.state=='ALIGNMENT_REVIEW'
+
+
+@pytest.mark.parametrize('pose,axis,sign',[( (.0,0,0),0,1),((.08,0,0),0,-1),
+    ((.05,.03,0),1,-1),((.05,-.03,0),1,1),((.05,0,-.05),2,1),((.05,0,.05),2,-1)])
+def test_fine_steps_use_verified_single_axis_and_measure_between_outputs(pose,axis,sign):
+    t=fine_trial();t.started=1;t._fine_observe(1);fine_window(t,3,pose)
+    assert not any(t.command(3,pose,3,sensors_fresh=True,corridor_clear=True))
+    assert t.state=='RUNNING' and t.phase=='FINE_CHECK'
+    assert t.fine_twist[axis]*sign>0 and sum(abs(v)>1e-9 for v in t.fine_twist)==1
+    # No output until the exact candidate's independent swept-body result arrives.
+    assert not any(t.command(3.05,pose,3,sensors_fresh=False,corridor_clear=False))
+    t.nav=feedback(t,3.1,executing=False)
+    raw=t.command(3.1,pose,3.1,sensors_fresh=True,corridor_clear=True)
+    assert any(raw) and max(map(abs,raw))<=100 and raw[3]==0
+    assert 0<t.fine_duration<=.8
+    t.nav=feedback(t,4.0,executing=False)
+    assert not any(t.command(4.,pose,4.,sensors_fresh=True,corridor_clear=True))
+    assert t.state=='VERIFYING_ALIGNMENT' and not any(t.fine_twist)
+
+
+def test_fine_browser_loss_during_observation_cannot_launch_next_step():
+    t=fine_trial();t._fine_observe(1);t.started=1;t.pause(2,'WAITING_BROWSER')
+    fine_window(t,3,(0,0,0))
+    assert not any(t.command(3,(0,0,0),3,sensors_fresh=True,corridor_clear=True))
+    assert t.state=='WAITING_BROWSER' and t.resume_required
+
+
+def test_fine_step_obstacle_stops_and_requires_new_observation_after_resume():
+    t=fine_trial();t.started=1;t._fine_observe(1);fine_window(t,3,(0,0,0))
+    t.command(3,(0,0,0),3,sensors_fresh=True,corridor_clear=True)
+    t.nav=feedback(t,3.1,executing=False)
+    assert any(t.command(3.1,(0,0,0),3.1,sensors_fresh=True,corridor_clear=True))
+    t.nav=feedback(t,3.2,executing=False)
+    assert not any(t.command(3.2,(0,0,0),3.2,sensors_fresh=True,corridor_clear=False))
+    assert t.state=='WAITING_OBSTACLE' and t.resume_required and not any(t.fine_twist)
 
 
 def test_fine_nav2_config_changes_only_final_checker_not_collision_or_velocity():
@@ -450,3 +490,57 @@ def test_fine_nav2_config_changes_only_final_checker_not_collision_or_velocity()
     c['goal_checker']=regular['/s4_nav2_trial/controller_server']['ros__parameters']['goal_checker']
     c['FollowPath']['xy_goal_tolerance']=.025
     assert fine==regular
+
+
+def test_fine_alignment_rejects_stationary_window_from_replaced_map():
+    t=fine_trial();t.required_map_revision='new'
+    t.stationary_report=dict(ready=True,observed_s=1,map_revision='old')
+    with pytest.raises(ValueError,match='정지'):t.start(1,(0,0,0),operator_confirmed=True)
+    t.state='VERIFYING_ALIGNMENT';t.verification_started=1
+    t.stationary_report.update(observed_s=4,span_s=1.5,pose=list(t.goal))
+    t.nav=feedback(t,4,map_revision='new')
+    assert not any(t.command(4,t.goal,4,sensors_fresh=True,corridor_clear=True))
+    assert t.state=='VERIFYING_ALIGNMENT' and not t.fine_verified
+
+
+def relative_web_state():
+    from navigation_trial_web import State
+    t=trial();t.fine_alignment=True;t.manipulation_alignment=True;t.state='PREVIEW'
+    t.required_map_revision='reviewed-map';t.target_pose=(0,0,0)
+    s=State(t,None);now=time.monotonic();s.controller_ready=True
+    s.pose=[.1,.2,math.pi/2];s.pose_stamp=s.scan_stamp=s.depth_stamp=now
+    s.scan_error=s.depth_error=None;s.navigation_required=True;s.navigation_revision='reviewed-map'
+    s.stationary_localization=dict(ready=True,observed_s=now,map_revision='reviewed-map',pose=s.pose.copy())
+    return s,now
+
+
+def test_relative_fine_goal_binds_after_preparation_in_body_coordinates_once():
+    s,now=relative_web_state();s.bind_relative_target([.01,-.025,0.],now)
+    assert s.trial.goal==pytest.approx((.125,.21,math.pi/2))
+    assert s.trial.state=='READY' and s.request is None and s.nonzero==0
+    s.pose=[2,2,0]
+    with pytest.raises(ValueError):s.bind_relative_target([.01,-.025,0.],now)
+    assert s.trial.goal==pytest.approx((.125,.21,math.pi/2))
+
+
+@pytest.mark.parametrize('fault',['unprepared','stale','revision','moving','pending','large','nan'])
+def test_relative_fine_goal_requires_prepared_fresh_unused_bounded_observation(fault):
+    s,now=relative_web_state();delta=[.01,-.025,0.]
+    if fault=='unprepared':s.controller_ready=False
+    elif fault=='stale':s.stationary_localization['observed_s']=now-1
+    elif fault=='revision':s.stationary_localization['map_revision']='old'
+    elif fault=='moving':s.nonzero=1
+    elif fault=='pending':s.request='start'
+    elif fault=='large':delta=[.16,0,0]
+    elif fault=='nan':delta=[float('nan'),0,0]
+    with pytest.raises(ValueError):s.bind_relative_target(delta,now)
+    assert s.relative_target_binding is None
+
+
+def test_blocked_relative_goal_stays_frozen_and_does_not_authorize_start():
+    s,now=relative_web_state();s.trial.area['feasible_by_yaw'][:]=False
+    with pytest.raises(ValueError,match='장애물'):s.bind_relative_target([.01,-.025,0.],now)
+    assert s.relative_target_binding is not None and s.trial.state=='PREVIEW'
+    assert s.trial.goal is not s.trial.target_pose
+    assert s.request is None and s.nonzero==0
+    with pytest.raises(ValueError):s.bind_relative_target([0,0,0],now)

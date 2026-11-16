@@ -17,13 +17,19 @@ class StationaryScanWindow:
         self.scans = []
         self.poses = []
         self.anchor = None
+        self.command_observation = False
         self.report = {'ready': False, 'reason': 'stationary evidence unavailable'}
 
     def prepare(self, scan, seed, wheel, *, execute, now):
         stamp = scan['observed_s']
+        # A zero command is not a physical STOP proof. If speed bytes are noisy,
+        # collect independent, unsmoothed scan registrations instead of claiming
+        # wheel rest. The pose drift/spread checks below decide whether this
+        # observation window is usable; motor/STOP admission stays separate.
+        command_observation = bool(wheel and wheel.get('zero_command_elapsed_s',0)>=.4)
         quiet = (not execute and wheel is not None
                  and 0 <= now-wheel['observed_s'] <= .35
-                 and all(abs(v) < .001 for v in wheel['twist'])
+                 and (command_observation or wheel.get('stationary_inventory') is True or all(abs(v) < .001 for v in wheel['twist']))
                  and 0 <= now-stamp <= .35)
         if not quiet:
             self.reset()
@@ -32,8 +38,13 @@ class StationaryScanWindow:
             self.reset()
         if self.anchor is None:
             self.anchor = list(seed)
+        if self.scans and command_observation!=self.command_observation:
+            self.reset();self.anchor=list(seed)
+        self.command_observation=command_observation
         self.scans.append((stamp, np.asarray(scan['ranges'], dtype=float)))
         self.scans = [(t, r) for t, r in self.scans if stamp-t <= self.window_s]
+        if command_observation:
+            return scan, self.anchor
         # Invalid/no-return rays cannot become repeated old obstacle readings.
         values = np.stack([r for _, r in self.scans])
         values[~np.isfinite(values) | (values < .25) | (values > 12)] = np.nan
@@ -64,6 +75,7 @@ class StationaryScanWindow:
                  and np.quantile(yaw_errors, .9) <= math.radians(.7)
                  and np.linalg.norm(drift[:2]) <= .008 and abs(drift[2]) <= math.radians(.5))
         self.report = dict(ready=bool(ready), samples=len(self.poses), span_s=span,
+            source='raw_scan_zero_command_window' if self.command_observation else 'wheel_stationary_scan_window',
             observed_s=stamp, map_revision=revision, pose=center.tolist(),
             p90_xy_m=float(np.quantile(errors, .9)), p90_yaw_rad=float(np.quantile(yaw_errors, .9)),
             half_window_drift_xy_m=float(np.linalg.norm(drift[:2])),
@@ -76,6 +88,44 @@ class StationaryScanWindow:
         return center.tolist()
 
 
-def fresh_stationary(report, now):
+def fresh_stationary(report, now, *, revision=None):
     return bool(report and report.get('ready') is True
-                and 0 <= now-report.get('observed_s', -math.inf) <= .5)
+                and 0 <= now-report.get('observed_s', -math.inf) <= .5
+                and (revision is None or report.get('map_revision') == revision))
+
+
+class StationaryWheelInventory:
+    """Torque-OFF inspection only; reuse the 400ms/two-count parked window.
+
+    Keep raw speed/movement reports in the caller's log. This is evidence for
+    scan aggregation, never authority to enable motors or confirm runtime STOP.
+    """
+    def __init__(self):
+        self.samples=[]
+
+    def observe(self,rows,started,received,geometry):
+        valid=(0<=received-started<=.25 and len(rows)==3
+            and all(row.get('complete') and row['bus']=='left' and row['requested_id']==mid
+                and row['offset_and_mode']['operating_mode']==1
+                and row['command']['torque_enabled_raw']==0
+                and row['command']['goal_speed_raw']==0
+                and 0<=row['feedback']['position_raw']<4096
+                and (row['feedback']['speed_raw']&32767)<=50
+                and row['feedback']['moving_raw'] in (0,1)
+                for row,mid in zip(rows,(7,8,9))))
+        if not valid:
+            self.samples=[];return None
+        ticks=[r['sample_started_tick_ms'] for r in rows]
+        positions=[r['feedback']['position_raw'] for r in rows]
+        if self.samples and (not 0<started-self.samples[-1][0]<=.25 or
+                any(not 0<(n-o)%2**32<=250 for n,o in zip(ticks,self.samples[-1][2]))):
+            self.samples=[]
+        self.samples.append((started,positions,ticks))
+        self.samples=[r for r in self.samples if started-r[0]<=.6]
+        span=started-self.samples[0][0]
+        values=np.array([[(p-a+2048)%4096-2048 for p,a in zip(r[1],self.samples[0][1])]
+                         for r in self.samples])
+        if len(self.samples)<3 or span<.4 or np.any(np.ptp(values,axis=0)>2):return None
+        twist=geometry.body_twist(tuple(float(v) for v in values[-1]*math.tau/4096/span))
+        return dict(observed_s=started,twist=twist,stationary_inventory=True,
+            source='torque_off_encoder_window',span_s=span,position_span_counts=np.ptp(values,axis=0).tolist())

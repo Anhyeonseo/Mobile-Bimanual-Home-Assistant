@@ -1,5 +1,20 @@
 # S2 좌표 연결 결과와 인계
 
+이 문서는 당시 구현·실험의 근거다. 현재 상태와 개발 우선순위는 [현재 상태](../CURRENT_STATUS.md)와 [로드맵](../ROADMAP.md)을 따른다.
+
+<details>
+<summary>목차 펼치기</summary>
+
+- [완료한 연결](#완료한-연결)
+- [데이터 흐름과 책임](#데이터-흐름과-책임)
+- [검사 결과](#검사-결과)
+- [배포와 재검사 방법](#배포와-재검사-방법)
+- [실제 운용으로 연결할 초기화](#실제-운용으로-연결할-초기화)
+- [S3로 넘긴 사항](#s3로-넘긴-사항)
+- [코드 경계와 장애 재현 (2026-11-06)](#코드-경계와-장애-재현-2026-11-06)
+
+</details>
+
 2026-11-05 · 공식 ALOHA Mini 1 / SO-ARM101 양팔 / 고정 D415.
 
 **합의한 개발 범위의 S2 좌표 연결과 정지 상태 실물 통합 검사를 완료했다.**
@@ -100,7 +115,7 @@ RGB-D·모터 시각 범위 최대 48.42ms, 모터 속도 0·토크 OFF·모터 
 ```bash
 cd /home/hyper/robot/releases/s2-coordinates-b19a1295753b
 /home/hyper/robot/shared/venvs/room-scan-bag/bin/python tools/diagnostics/capture_s2_observer.py \
-  --port /dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_005100393235511438363730-if02 \
+  --port /dev/ttyACM0 \
   --profile profile.json --seconds 5 --rgbd \
   --output /home/hyper/robot/shared/diagnostics/s2/observer/integrated-NEW.json
 ```
@@ -126,7 +141,7 @@ cd /home/hyper/robot/releases/s2-coordinates-b19a1295753b
 
 ## 코드 경계와 장애 재현 (2026-11-06)
 
-이 구조는 [기존 L0–L5 설계](MOBILE_MANIPULATION_DESIGN.md)의 책임을 구현한다. 단계 번호(S0–S2)는 개발 이력이지 런타임 계층 번호가 아니다.
+이 구조는 [기존 L0–L5 설계](../MOBILE_MANIPULATION_DESIGN.md)의 책임을 구현한다. 단계 번호(S0–S2)는 개발 이력이지 런타임 계층 번호가 아니다.
 
 | 책임 | 코드 진입점 | 입력 → 출력 / 지켜야 할 경계 |
 |---|---|---|
@@ -139,7 +154,9 @@ cd /home/hyper/robot/releases/s2-coordinates-b19a1295753b
 
 **이후 개발:** S3 인식은 같은 세션/프레임의 이미지와 관측 근거를 소비한다. 마스크의 표면점·보이는 중심은 파지 접촉점이 아니다. L3C가 실제 집게·도달성·충돌을 검토하고, L3D가 실행 결과를 검증한다. S4 지도는 캡처 당시의 지도 버전·로봇 위치를 별도로 연결해야 한다. S5 요청 해석이 시리얼 통신이나 원점 설정에 접근하지 않는다. 진단 JSON은 상위 계층의 모터 실행 API가 아니다.
 
-**문제 발생 시:** 호스트 보고서에서 먼저 `error`와 `failure_stage`를 본다. `L2.bind.identity`면 펌웨어 식별, `L2.sample.clock`이면 INFO 왕복·epoch·시계 차이를 확인한다. `last_valid_sequence`는 검증을 마친 마지막 모터 샘플 번호이며, `last_raw_exchange.rows`에는 이후 실패한 SAMPLE의 부분 응답도 남는다. `L2.encoder_update`는 누적 회전 기준, `L3A.match_rgbd`는 촬영 시각 연결, `L3A.coordinate_session`은 장치/원점/보정 식별과 FK 경계다. 카메라 종료 중 별도 오류가 생기면 최초 오류와 구분한다. 오류 해결을 위해 시간을 완화하거나 옛 높이를 재사용하지 않는다.
+**문제 발생 시:** 호스트 보고서에서 먼저 `error`와 `failure_stage`를 본다. `L2.bind.identity`면 펌웨어 식별, `L2.sample.clock`이면 INFO 왕복·epoch·시계 차이를 확인한다. `last_valid_sequence`는 검증을 마친 마지막 모터 샘플 번호이며, `last_raw_exchange.rows`에는 이후 실패한 SAMPLE의 부분 응답도 남는다. `L2.encoder_update`는 누적 회전 기준, `L3A.match_rgbd`는 촬영 시각 연결, `L3A.coordinate_session`은 장치/원점/보정 식별과 FK 경계다.
+
+카메라 종료 중 별도 오류가 생기면 최초 오류와 구분한다. 오류 해결을 위해 시간을 완화하거나 옛 높이를 재사용하지 않는다.
 
 완료된 통합 보고서는 로봇 없이 재생할 수 있다. 첫 엔코더 기준부터 다시 계산해 RGB-D 시각 범위, 스냅샷, 좌표를 원본과 대조한다. 다른 기록을 섞거나 실패한 세션을 실측 근거로 승격하지 않는다.
 

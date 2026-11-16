@@ -1,3 +1,4 @@
+#include "actuator_core/wire_bytes.h"
 #include <assert.h>
 #include <string.h>
 #include "single_arm_config.h"
@@ -29,10 +30,6 @@ static void Host_ResetPositionReadFailure(void){}
 static void BinaryControl_LatchStop(void){stop_count++;}
 static void Host_RequestV2CoordinatedStop(void){stop_count++;}
 static void actuator_safety_report_fault(int *state,uint16_t reason){(void)state;(void)reason;fault_count++;}
-static uint16_t Host_ReadU16Le(const uint8_t *p){uint16_t v;memcpy(&v,p,2);return v;}
-static int32_t Host_ReadI32Le(const uint8_t *p){int32_t v;memcpy(&v,p,4);return v;}
-static void Host_WriteU16Le(uint8_t *p,uint16_t v){memcpy(p,&v,2);}
-static void Host_WriteU32Le(uint8_t *p,uint32_t v){memcpy(p,&v,4);}
 static int Host_SendBinaryFrame(const actuator_frame_t *frame){response=*frame;return 0;}
 static HAL_StatusTypeDef Servo_DisableTorqueAll(void){return disable_fails?HAL_ERROR:HAL_OK;}
 static HAL_StatusTypeDef Servo_ReadAllPositions(uint16_t *p){memcpy(p,physical,sizeof(physical));return read_fails?HAL_ERROR:HAL_OK;}
