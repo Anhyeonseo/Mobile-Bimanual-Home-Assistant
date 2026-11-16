@@ -7,6 +7,9 @@
   <license>Apache-2.0</license>
   <buildtool_depend>ament_python</buildtool_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>moveit_msgs</exec_depend>

@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "status": "camera_metadata_validated",
+  "source_metadata_sha256": "1018cbf36c82724e37ca3a76ceb108f811d6841f866cfcc411af9ea10a285a6e",
+  "camera_device": {
+    "device_id_hash": "d69c11b69175f6c83d119b2da3d05a282efccdf24dea901594ec5c5dd7715a94",
+    "stream_profile_id": "rgbd-v1-3a5a23970bb0606504a4258947f168bee2ec240dd8e21b6a9503d0103367574a",
+    "factory_calibration_sha256": "04d8ba31053708c3aff3642eb3449be8a72867250bd0316606b5da8ec2a4ed89"
+  },
+  "device": {
+    "name": "Intel RealSense D415",
+    "firmware": "5.17.0.10",
+    "usb": "3.2"
+  },
+  "profiles": {
+    "color": {
+      "width": 1280,
+      "height": 720,
+      "fps": 30,
+      "format": "bgr8"
+    },
+    "depth": {
+      "width": 1280,
+      "height": 720,
+      "fps": 30,
+      "format": "z16"
+    },
+    "alignment": "depth_to_color",
+    "source_frame": "color_camera_optical_frame"
+  },
+  "sdk_calibration": {
+    "native_depth_intrinsics": {
+      "width": 1280,
+      "height": 720,
+      "fx": 896.2822875976562,
+      "fy": 896.2822875976562,
+      "ppx": 629.3273315429688,
+      "ppy": 359.8057556152344,
+      "coeffs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "model": "distortion.brown_conrady"
+    },
+    "color_intrinsics": {
+      "width": 1280,
+      "height": 720,
+      "fx": 926.4348754882812,
+      "fy": 925.634765625,
+      "ppx": 638.8695678710938,
+      "ppy": 350.9491882324219,
+      "coeffs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "model": "distortion.inverse_brown_conrady"
+    },
+    "aligned_depth_intrinsics": {
+      "width": 1280,
+      "height": 720,
+      "fx": 926.4348754882812,
+      "fy": 925.634765625,
+      "ppx": 638.8695678710938,
+      "ppy": 350.9491882324219,
+      "coeffs": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "model": "distortion.inverse_brown_conrady"
+    },
+    "depth_scale_m": 0.0010000000474974513,
+    "color_optical_from_depth_optical": [
+      [
+        0.9999894499778748,
+        -0.0010051240678876638,
+        0.00448458269238472,
+        0.014780141413211823
+      ],
+      [
+        0.0009868999477475882,
+        0.999991238117218,
+        0.004064093343913555,
+        -6.43906241748482e-05
+      ],
+      [
+        -0.0044886283576488495,
+        -0.00405962485820055,
+        0.999981701374054,
+        3.3109925425378606e-05
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "calibration_hash_scope": "SDK-reported intrinsics, depth scale and depth-to-color extrinsics; not full EEPROM",
+  "captured_at_utc": "2026-11-15T12:14:45.946132+00:00",
+  "frame_evidence": {
+    "color": {
+      "number": 211,
+      "timestamp_ms": 1794744885832.4287,
+      "timestamp_domain": "timestamp_domain.global_time"
+    },
+    "depth": {
+      "number": 208,
+      "timestamp_ms": 1794744885832.0918,
+      "timestamp_domain": "timestamp_domain.global_time"
+    }
+  },
+  "image_quality_validated": false,
+  "timestamps_synchronized_to_robot": false,
+  "camera_mount_calibrated": false,
+  "coordinate_use_allowed": false,
+  "s2_complete": false,
+  "motion_authorized": false
+}

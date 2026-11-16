@@ -5,6 +5,10 @@
 #include "single_arm_app.h"
 #include "servo_bus.h"
 #include "actuator_core/mobile_ids.h"
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+#include "device_inventory.h"
+#include "right_servo_bus.h"
+#endif
 #if HOST_MOBILE_WHEEL_PULSE_ONLY
 #include "mobile_wheel_pulse.h"
 #define INSPECTION_NAME "mobile-wheel-pulse-v4"
@@ -21,6 +25,9 @@ static UART_HandleTypeDef *host;
 static char command[16];
 static unsigned used;
 static uint32_t read_sequence;
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+static uint32_t wheel_sequence;
+#endif
 static int discard;
 
 static void send_line(const char *line) {
@@ -28,7 +35,7 @@ static void send_line(const char *line) {
 }
 static void info(void) {
 #if HOST_MOBILE_WHEEL_PULSE_ONLY
-    char line[320];
+    char line[384];
     (void)snprintf(line,sizeof(line),
         "{\"firmware\":\"%s\",\"host_baud\":921600,\"servo_baud\":1000000,"
         "\"motion_enabled\":false,\"pulse_supported\":true,\"pulse_consumed\":%s,"
@@ -37,10 +44,14 @@ static void info(void) {
         (unsigned)ACTUATOR_WHEEL_0_ID,(unsigned)ACTUATOR_WHEEL_1_ID,
         (unsigned)ACTUATOR_WHEEL_2_ID,(unsigned)ACTUATOR_LIFT_ID);
 #else
-    char line[320];
+    char line[384];
     (void)snprintf(line, sizeof(line),
         "{\"firmware\":\"%s\",\"host_baud\":921600,"
         "\"servo_baud\":1000000,\"reference_id\":1,\"motion_enabled\":false,"
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+        "\"wheel_samples_supported\":true,"
+        "\"device_inventory_supported\":true,"
+#endif
         "\"lift_read_supported\":%s,\"ids\":[%u,%u,%u,%u]}\r\n",
         INSPECTION_NAME,
 #if HOST_MOBILE_BUS_INSPECTION_ONLY
@@ -116,6 +127,44 @@ static void scan(void) {
         report_motor(actuator_mobile_axis_id(axis), 0);
     send_line("{\"scan\":\"end\",\"motor_write_commands\":0}\r\n");
 }
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+static void device_inventory(unsigned bus, unsigned id) {
+    if (bus>1 || id<1 || id>(bus?6:10)) {
+        send_line("{\"error\":\"invalid device\"}\r\n");return;
+    }
+    uint8_t request[4]={1,(uint8_t)bus,(uint8_t)id,0};
+    uint8_t reply[DEVICE_INVENTORY_REPLY_SIZE];
+    char hex[DEVICE_INVENTORY_REPLY_SIZE*2+1],line[160];
+    static const char digits[]="0123456789abcdef";
+    DeviceInventory_Read(request,sizeof(request),true,reply);
+    for(unsigned i=0;i<sizeof(reply);i++) {
+        hex[2*i]=digits[reply[i]>>4];hex[2*i+1]=digits[reply[i]&15];
+    }
+    hex[sizeof(hex)-1]=0;
+    (void)snprintf(line,sizeof(line),"{\"inventory_hex\":\"%s\"}\r\n",hex);
+    send_line(line);
+}
+static void wheel_sample(void) {
+    char line[320];
+    (void)snprintf(line,sizeof(line),"{\"wheels\":\"begin\",\"sequence\":%lu}\r\n",
+        (unsigned long)++wheel_sequence);
+    send_line(line);
+    for(unsigned axis=0;axis<3;axis++) {
+        uint8_t id=actuator_mobile_axis_id(axis),data[4]={0};
+        uint32_t started=HAL_GetTick();
+        HAL_StatusTypeDef status=Servo_ReadData(id,56,4,data);
+        uint32_t ended=HAL_GetTick();
+        (void)snprintf(line,sizeof(line),
+            "{\"id\":%u,\"ok\":%s,\"started_tick_ms\":%lu,\"ended_tick_ms\":%lu,"
+            "\"position_raw\":%d,\"speed_raw\":%d,\"hal_status\":%u}\r\n",
+            (unsigned)id,status==HAL_OK?"true":"false",(unsigned long)started,(unsigned long)ended,
+            status==HAL_OK?data[0]|(data[1]<<8):-1,status==HAL_OK?data[2]|(data[3]<<8):-1,
+            (unsigned)status);
+        send_line(line);
+    }
+    send_line("{\"wheels\":\"end\",\"motor_write_commands\":0}\r\n");
+}
+#endif
 #if HOST_MOBILE_WHEEL_SETUP_ONLY
 static void prepare_wheels(void) {
     MobileWheelSetupResult wheels[3];
@@ -180,7 +229,14 @@ void SingleArmApp_Init(UART_HandleTypeDef *host_uart, UART_HandleTypeDef *servo_
     host = host_uart;
     used = 0; discard = 0;
     read_sequence = 0;
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+    wheel_sequence = 0;
+#endif
     ServoBus_Init(servo_uart, NULL, NULL);
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+    extern UART_HandleTypeDef huart4;
+    RightServoBus_Init(&huart4);
+#endif
     /* Boot only initializes UART/DMA bookkeeping. No servo transactions. */
     info();
 }
@@ -192,10 +248,16 @@ void SingleArmApp_Process(void) {
     if (byte == '\r') return;
     if (byte == '\n') {
         command[used] = 0;
+#if HOST_MOBILE_BUS_INSPECTION_ONLY
+        unsigned bus=0,id=0;int end=0;
+#endif
         if (!discard && !strcmp(command, "INFO")) info();
         else if (!discard && !strcmp(command, "SCAN")) scan();
 #if HOST_MOBILE_BUS_INSPECTION_ONLY
         else if (!discard && !strcmp(command, "LIFT")) report_motor(ACTUATOR_LIFT_ID, 0);
+        else if (!discard && !strcmp(command, "WHEELS")) wheel_sample();
+        else if (!discard && sscanf(command,"DEVICE %u %u%n",&bus,&id,&end)==2 &&
+                 end==(int)strlen(command)) device_inventory(bus,id);
 #endif
 #if HOST_MOBILE_WHEEL_SETUP_ONLY
         else if (!discard && !strcmp(command, "PREPARE_WHEELS")) prepare_wheels();

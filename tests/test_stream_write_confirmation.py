@@ -127,3 +127,49 @@ def test_usb_disconnect_while_confirming_is_recorded_and_not_retried(monkeypatch
     port.read_until=disconnected;t=StreamValidationTransportV2(port)
     with pytest.raises(OSError,match='disconnected'):t.heartbeat()
     assert len(port.writes)==1 and t.write_diagnostics()['events'][0]['resolution']=='receive_error'
+
+
+@pytest.mark.parametrize('kind', ['executor', 'dispatch', 'tracking', 'feedback'])
+@pytest.mark.parametrize('echo', ['valid', 'sequence', 'sender-time'])
+def test_diagnostic_exchange_checks_payload_echoes_without_resending(kind, echo):
+    import struct
+    from so101_arm_bridge import stream_protocol_v2 as protocol
+
+    layouts = {
+        'executor': ('get_executor_diagnostics', Msg.EXECUTOR_DIAGNOSTICS, protocol.EXECUTOR_DIAGNOSTICS_V2),
+        'dispatch': ('get_dispatch_diagnostics', Msg.DISPATCH_DIAGNOSTICS, protocol.DISPATCH_DIAGNOSTICS_V2),
+        'tracking': ('get_tracking_diagnostics', Msg.TRACKING_DIAGNOSTICS, protocol.TRACKING_DIAGNOSTICS_V2),
+        'feedback': ('get_feedback_snapshot', Msg.FEEDBACK_SNAPSHOT, protocol.FEEDBACK_SNAPSHOT_V2),
+    }
+    method, response_type, layout = layouts[kind]
+
+    class DiagnosticPort:
+        def __init__(self):
+            self.writes = []
+
+        def write(self, data):
+            self.writes.append(data)
+            request = decode_frame_v2(data)
+            payload = bytearray(layout.size)
+            if kind == 'feedback':
+                payload[1] = 12
+            struct.pack_into('<II', payload, 4,
+                             request.sequence + (echo == 'sequence'),
+                             (request.sender_time_ms + (echo == 'sender-time')) & 0xffffffff)
+            self.pending = encode_frame_v2(FrameV2(
+                message_type=response_type, sequence=request.sequence,
+                sender_time_ms=0, payload=bytes(payload)))
+            return len(data)
+
+        def read_until(self, delimiter):
+            result, self.pending = self.pending, b''
+            return result
+
+    port = DiagnosticPort()
+    read = getattr(StreamValidationTransportV2(port), method)
+    if echo == 'valid':
+        assert read().request_sequence == 1
+    else:
+        with pytest.raises(transport_module.StreamTransportV2Error, match=f'{echo} echo mismatch'):
+            read()
+    assert len(port.writes) == 1

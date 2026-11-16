@@ -57,6 +57,7 @@ int main(void){
 '''
     path=tmp_path/'platform-resume.c';path.write_text(code);exe=tmp_path/'platform-resume'
     subprocess.run(['gcc','-std=c11','-Wall','-Wextra','-Werror','-I',str(BOARD/'Inc'),
+                    '-I',str(ROOT/'firmware/stm32_actuator/include'),
                     str(path),str(BOARD/'Src/s3_platform_snapshot.c'),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)
 
@@ -156,6 +157,12 @@ int main(void){
   assert(now_us==100400 && arm_count==armed);
   assert(Servo_InMotionTelemetryBegin()==HAL_BUSY);servo_feedback_token=0;
  }
+ /* Unified boot: mobile reader already owns the healthy shared RX ring,
+    but output has not yet switched the gate out of maintenance mode. */
+ servo_in_motion_telemetry.enabled=0;healthy=true;service_allowed=true;prepare_fails=true;
+ unsigned shared_armed=arm_count;now_us=12345;
+ assert(Servo_InMotionTelemetryBegin()==HAL_OK);
+ assert(arm_count==shared_armed && now_us==12345);
  servo_in_motion_telemetry.enabled=0;healthy=false;prepare_fails=true;
  assert(Servo_InMotionTelemetryBegin()==HAL_ERROR && !servo_in_motion_telemetry.enabled);
  prepare_fails=false;service_allowed=false;
@@ -359,4 +366,47 @@ int main(void){
                     '-I',str(ROOT/'tests/fixtures/servo_hal'),'-I',str(BOARD/'Inc'),
                     '-I',str(ROOT/'firmware/stm32_actuator/include'),str(path),
                     str(BOARD/'Src/s3_platform_snapshot.c'),'-o',str(exe)],check=True)
+    subprocess.run([str(exe)],check=True)
+
+
+def test_clock_snapshot_keeps_now_and_epoch_together_without_consuming_event(tmp_path):
+    source=(BOARD/'Src/control_tick.c').read_text()
+    start=source.index('bool ControlTick_PeekClock(')
+    end=source.index('\n}\n',start)+3
+    code=r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+static uint32_t previous_started_us,now,mask;
+static uint8_t previous_started_valid,pending;
+static bool interrupt_waiting;
+static uint32_t __get_PRIMASK(void){return mask;}
+static void __disable_irq(void){mask=1;}
+static void __enable_irq(void){mask=0;if(interrupt_waiting){previous_started_us=now+1;now++;pending=1;interrupt_waiting=false;}}
+static uint32_t Timebase_NowUs(void){assert(mask);return now;}
+'''+source[start:end]+r'''
+int main(void){
+ uint32_t sampled,epoch;
+ assert(!ControlTick_PeekClock(NULL,&epoch));
+ assert(!ControlTick_PeekClock(&sampled,NULL));
+ assert(!ControlTick_PeekClock(&sampled,&epoch));
+ previous_started_valid=1;
+ for(unsigned wrap=0;wrap<2;wrap++){
+  previous_started_us=wrap?UINT32_MAX-2500:10000;
+  now=previous_started_us+4999;interrupt_waiting=true;pending=0;
+  assert(ControlTick_PeekClock(&sampled,&epoch));
+  assert(sampled-epoch==4999 && !mask && pending==1);
+  assert(ControlTick_PeekClock(&sampled,&epoch));assert(sampled-epoch==0);
+ }
+ mask=1;interrupt_waiting=true;now+=100;
+ assert(ControlTick_PeekClock(&sampled,&epoch));assert(mask==1 && interrupt_waiting);
+ /* A real missed epoch remains visible; no phase clamp or relaxed timeout. */
+ now=previous_started_us+6000;
+ assert(ControlTick_PeekClock(&sampled,&epoch));assert(sampled-epoch==6000);
+ return 0;
+}
+'''
+    path=tmp_path/'clock.c';path.write_text(code);exe=tmp_path/'clock'
+    subprocess.run(['gcc','-std=c11','-Wall','-Wextra','-Werror',str(path),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

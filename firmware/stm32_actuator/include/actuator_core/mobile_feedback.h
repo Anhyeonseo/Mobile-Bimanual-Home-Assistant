@@ -20,6 +20,10 @@ typedef struct {
     uint8_t voltage_raw, temperature, moving;
     uint32_t observed_ms, mode_ms;
     bool valid, mode_verified;
+    /* Optional same-transaction mode/torque/goal readback (33..48). */
+    bool drive_valid;
+    uint8_t torque_enabled;
+    int32_t goal_velocity_raw;
 } actuator_mobile_axis_sample_t;
 /* Supplied by the independently observed/homed lift controller. A position
  * register alone cannot establish height, home, or mechanical load holding. */
@@ -33,6 +37,20 @@ typedef enum {
     MOBILE_FEEDBACK_OVERFLOW, MOBILE_FEEDBACK_AMBIGUOUS, MOBILE_FEEDBACK_MODE,
     MOBILE_FEEDBACK_DEVICE, MOBILE_FEEDBACK_TRANSPORT
 } actuator_mobile_feedback_fault_t;
+enum {
+    MOBILE_FEEDBACK_FIELD_MODE=1, MOBILE_FEEDBACK_FIELD_TORQUE=2,
+    MOBILE_FEEDBACK_FIELD_VOLTAGE=4, MOBILE_FEEDBACK_FIELD_TEMPERATURE=8,
+    MOBILE_FEEDBACK_FIELD_CURRENT=16, MOBILE_FEEDBACK_FIELD_MOVING=32,
+    MOBILE_FEEDBACK_FIELD_LOAD=64
+};
+typedef struct {
+    actuator_mobile_feedback_fault_t fault;
+    uint32_t started_ms;
+    actuator_mobile_axis_sample_t previous;
+    actuator_sts_response_t response;
+    uint8_t axis, fields;
+    bool reading_mode;
+} actuator_mobile_feedback_failure_t;
 typedef struct {
     actuator_mobile_supervisor_t *supervisor;
     actuator_mobile_feedback_config_t config;
@@ -42,6 +60,16 @@ typedef struct {
     uint32_t token, started_ms;
     uint8_t axis, cursor, dirty, received_bytes;
     bool configured, active, reading_mode, reply_ready;
+    bool read_drive_state;
+    /* Opt-in for commissioned unified wheels: reject a lone implausible
+     * temperature jump and reread this axis without renewing its sample age. */
+    bool confirm_temperature_spike, temperature_pending;
+    uint32_t temperature_rechecks, temperature_recovered;
+    uint32_t temperature_last_recheck_ms[3];
+    uint8_t temperature_recheck_seen_mask;
+    uint8_t rejected_fields;
+    uint32_t failure_count;
+    actuator_mobile_feedback_failure_t first_failure;
 } actuator_mobile_feedback_reader_t;
 
 /* Single main-loop owner. Bind only while DISABLED, clearing previous evidence.
@@ -76,4 +104,15 @@ bool actuator_mobile_feedback_publish(actuator_mobile_feedback_reader_t *r,
  * Never releases the supervisor STOP latch or resumes a prior command. */
 bool actuator_mobile_feedback_reset(actuator_mobile_feedback_reader_t *r,
     bool transport_idle_and_quiet, bool motion_outputs_inhibited);
+typedef struct {
+    uint32_t first_ms,last_ms;
+    int32_t anchor,low,high;
+    uint8_t samples;
+    bool tracking;
+} actuator_mobile_stationary_window_t;
+/* Same powered maintenance evidence: zero goal readback, >=6 independent
+ * samples across >=400 ms, total encoder span <=2, bounded speed indication.
+ * Only supplements STOP proof after an actual zero write; never motion/ARM. */
+bool actuator_mobile_wheels_stop_observe(actuator_mobile_stationary_window_t windows[3],
+    const actuator_mobile_feedback_reader_t *reader,uint32_t zero_written_ms,uint32_t now_ms);
 #endif

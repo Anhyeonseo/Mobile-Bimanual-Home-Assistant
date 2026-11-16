@@ -17,7 +17,13 @@
     "full_body_lidar_depth_planning_projection",
     "scan_time_full_body_map_generation",
     "persistent_lidar_and_body_map_bundle",
-    "validated_body_map_reload"
+    "validated_body_map_reload",
+    "persisted_native_depth_chunks",
+    "conservative_slam_lattice_conversion",
+    "real_slam_posegraph_restart_replay",
+    "saved_body_map_ros_publisher",
+    "scan_localization_health_gate",
+    "full_mesh_place_release_retreat_planning"
   ],
   "requires_user_or_measurement": [
     {
@@ -28,7 +34,7 @@
     {
       "id": "lidar",
       "layer": "L0-L3A",
-      "needed": "LDS-01로 확인됨. 케이블 미준비로 연결 검사는 보류; 장착·드라이버·수신 및 바퀴 odometry 확인 필요"
+      "needed": "2026-11-12 실물 스캔 비교로 정한 명목 장착값과 카메라 공통 좌표 연결 완료. 점 배열에 맞춘 음수 관측 시각 간격/호스트 수신 추정 시각 적용 후 젯슨 RGB-D 동시 60초·라이다 291회·최대 간격 0.201432초 검증. USB/장치 지연·이동 중 보정·정밀 거리/장착 및 실제 바퀴 odometry는 미검증. docs/history/S4_COMMISSIONING_PREPARATION.md 참조."
     },
     {
       "id": "lift",
@@ -64,12 +70,13 @@
   "physical_adapters_pending": [
     "commissioned_shared_firmware",
     "live_slam_and_scan_ingestion",
-    "calibrated_whole_motion_ik_and_collision",
     "grasp_and_release_sensor_evidence",
     "voice_model",
     "live_furniture_keyframes_and_loop_reprojection",
-    "full_height_global_nav2_costmap_publisher",
-    "external_text_api_client"
+    "external_text_api_client",
+    "measured_mobile_profile_and_single_owner_target_composition",
+    "whole_fetch_with_real_sensors_nav2_moveit_and_mcu",
+    "target_load_and_cadence_qualification"
   ],
   "notes": [
     "합성 센서·기능 결과로 검증한 성공은 실물 성공이 아닙니다.",
@@ -134,5 +141,28 @@
       "blocks_s2_software_development": false,
       "related_observation": "Single temperature sample 31 -> 60 -> 31 C; interpretation unresolved."
     }
-  ]
+  ],
+  "current_stage_summary": {
+    "as_of": "2026-11-12",
+    "stage": "S4_read_only_commissioning",
+    "s3": "accepted_by_user",
+    "s4_physical_verified": false,
+    "jetson_touched_during_s4": true,
+    "profile": "config/home_assistant/s4_commissioning.pending.json",
+    "documentation": "docs/history/S4_COMMISSIONING_PREPARATION.md",
+    "historical_development_decisions": "S1/S2 observations retained below; not current controller state",
+    "inspection_evidence": "config/home_assistant/s4_response_diagnostics.observed.json"
+  },
+  "s4_living_map": {
+    "design": "docs/S4_LIVING_MAP_DESIGN.md",
+    "local_capabilities": [
+      "frontier_survey_ui_simulation",
+      "registered_rgb_depth_semantic_archive",
+      "fresh_lidar_native_depth_local_updates",
+      "stop_before_map_swap",
+      "confirmed_free_geometry_retirement"
+    ],
+    "physical_autonomous_mapping_verified": false,
+    "physical_dynamic_replanning_verified": false
+  }
 }

@@ -68,7 +68,7 @@ class GatewayStore:
 
 
 class Gateway:
-    def __init__(self, application, token, store, *, public_origin=None, assistant=None):
+    def __init__(self, application, token, store, *, public_origin=None, assistant=None, language_model=None):
         if (
             not isinstance(token, str)
             or len(token) < 32
@@ -97,6 +97,12 @@ class Gateway:
         self.public_origin = public_origin
         self.app, self.token, self.store = application, token, store
         self.assistant = assistant
+        self.language = None
+        if language_model is not None:
+            if assistant is None:
+                raise ValueError("assistant required for language model")
+            from .assistant.local_language import LanguageJobs
+            self.language = LanguageJobs(assistant, language_model)
         self.started = time.monotonic()
         self.lock = threading.RLock()
         self.permits = {}
@@ -108,6 +114,10 @@ class Gateway:
             self.permits.clear()
             if self.app.lease.owner:
                 self.app.cancel(self.app.lease.owner, self.now())
+            if self.assistant is not None:
+                survey = self.assistant.survey
+                if survey.session_id and survey.pending != 'save_exit' and self.assistant.scan.get(survey.session_id)['status'] == 'SCANNING':
+                    survey.action(survey.session_id, 'pause', self.now())
 
     def now(self):
         return time.monotonic() - self.started
@@ -117,11 +127,15 @@ class Gateway:
             self._tick()
 
     def _tick(self):
+        if self.language is not None:
+            self.language.poll()
         result = self.app.tick(self.now())
         if result:
             self.store.save(self.app.requests[result["request_id"]], result)
             if self.assistant is not None:
                 self.assistant.on_tick(result)
+        if self.assistant is not None and (not self.faulted or self.assistant.survey.pending):
+            self.assistant.survey.tick(self.now())
 
     def dispatch(self, method, path, authorization, body, permit=None):
         with self.lock:
@@ -133,7 +147,14 @@ class Gateway:
         ):
             return 401, {"error": "unauthorized"}
         if self.faulted and path.startswith('/v1/assistant/') and method == 'POST' and not path.endswith('/cancel'):
-            return 503, {'error': 'gateway_fault_latched'}
+            from .assistant.language import parse_request
+            immediate_cancel = (path in {'/v1/assistant/requests', '/v1/assistant/language-requests'}
+                and isinstance(body, dict) and set(body) == {'utterance', 'request_id'}
+                and parse_request(body['utterance'], body['request_id'])['operation'] == 'cancel')
+            if path.endswith('/answer') and isinstance(body,dict) and set(body)=={'utterance'}:
+                immediate_cancel = parse_request(body['utterance'],'answer-check')['operation']=='cancel'
+            if not immediate_cancel:
+                return 503, {'error': 'gateway_fault_latched'}
         if path.startswith('/v1/assistant/'):
             from .assistant.api import dispatch
             return dispatch(self, method, path, body, authorization, permit)
@@ -150,14 +171,18 @@ class Gateway:
             self.permits[nonce] = now + 3
             return 200, {"permit": nonce, "valid_for_ms": 3000}
         if path == "/v1/map" and method == "GET":
+            if self.assistant and self.assistant.household:
+                return 200, self.assistant.household.status()['map_document']
             return 200, self.app.map.descriptor()
         if path == "/v1/navigation/preview" and method == "POST":
+            if self.assistant and self.assistant.household:
+                raise InvalidTask('recorded_home_review_only')
             if not self.app.pose_known:
                 raise InvalidTask("localization_required")
             return 200, self.app.map.plan(NavigateRequest.from_dict(body), self.app.xy)
         if path == "/v1/health" and method == "GET":
             return (503 if self.faulted else 200), {
-                "mode": "simulation",
+                "mode": "recorded_home_review" if self.assistant and self.assistant.household else "simulation",
                 "hardware_enabled": False,
                 "faulted": self.faulted,
                 "active_request": self.app.lease.owner,
@@ -238,7 +263,7 @@ def handler_for(gateway):
                 if len(lengths) > 1:
                     raise InvalidTask("ambiguous content length")
                 length = int(lengths[0]) if lengths else 0
-                geometry_input = (self.path == "/v1/assistant/furniture/observations" or
+                geometry_input = (self.path in {"/v1/assistant/furniture/observations", "/v1/assistant/object-captures"} or
                                   self.path.startswith("/v1/assistant/scans/") and self.path.endswith("/map"))
                 body_limit = 131072 if geometry_input else 16384
                 if length < 0 or length > body_limit:
@@ -314,7 +339,7 @@ def handler_for(gateway):
                 self.send_header("Content-Type", mime)
                 self.send_header(
                     "Content-Security-Policy",
-                    "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+                    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
                 )
                 self.send_header("Referrer-Policy", "no-referrer")
                 self.send_header("Cache-Control", "no-store")
@@ -334,6 +359,9 @@ def main(argv=None):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--assistant-database", type=Path)
     parser.add_argument("--assistant-demo", action="store_true")
+    parser.add_argument("--household-profile", type=Path)
+    parser.add_argument("--household-source-map", type=Path)
+    parser.add_argument("--local-language-url", help="Loopback llama.cpp server; no model download")
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(
@@ -361,15 +389,26 @@ def main(argv=None):
         assistant = AssistantService(app, WorldStore(args.assistant_database),
             Context(app.map.map_id, app.map.revision, 'simulation-calibration',
                     'session-'+secrets.token_hex(8), app.map.frame_id), time.time)
+        if args.household_profile:
+            if args.assistant_demo:
+                parser.error('choose recorded home or demo')
+            from .assistant.context_labels import load_household_profile
+            assistant.attach_household(load_household_profile(args.household_profile, source_map=args.household_source_map))
         if args.assistant_demo and not assistant.store.entities():
             assistant.refresh_demo()
-    elif args.assistant_demo:
+    elif args.assistant_demo or args.household_profile:
         parser.error('--assistant-demo requires --assistant-database')
+    language_model = None
+    if args.local_language_url:
+        if assistant is None:
+            parser.error("local language requires assistant database")
+        from home_perception.language.local_model import LocalLanguageModel
+        language_model = LocalLanguageModel(args.local_language_url)
     gateway = Gateway(
         app,
         args.token_file.read_text().strip(),
         GatewayStore(args.database),
-        assistant=assistant,
+        assistant=assistant, language_model=language_model,
         public_origin=args.public_origin
         or (
             f"{'https' if args.cert else 'http'}://{args.bind}:{args.port}"
@@ -408,6 +447,8 @@ def main(argv=None):
         with gateway.lock:
             if app.lease.owner:
                 app.cancel(app.lease.owner, gateway.now())
+            if gateway.language is not None:
+                gateway.language.close()
             gateway.store.db.close()
             if assistant is not None:
                 assistant.store.close()

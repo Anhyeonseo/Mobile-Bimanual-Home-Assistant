@@ -202,10 +202,10 @@ def test_four_legs_free_centre_is_blocked_by_upper_body_depth_without_semantic_l
 
 def test_blind_upper_voxel_and_lidar_unknown_remain_untraversable():
     doc,v,envelope = bed_scene()
-    del v.cells[(1,1,11)]
+    del v.cells[(1,1,10)]
     assert fused(doc,v,envelope)['map_document']['rows'][1][1] == '?'
     doc['rows'][1] = '.?'+'.'*10
-    v.cells[(1,1,11)] = (False,1.)
+    v.cells[(1,1,10)] = (False,1.)
     assert fused(doc,v,envelope)['map_document']['rows'][1][1] == '?'
 
 
@@ -249,8 +249,81 @@ def test_global_scan_history_is_not_mistaken_for_fresh_local_clearance():
     doc,v,envelope=bed_scene()
     # A new frame elsewhere keeps the sensor live, but this old free column
     # cannot authorize motion. It can still be used to propose a global route.
-    v.cells[(1,1,11)]=(False,.1)
+    v.cells[(1,1,10)]=(False,.1)
     assert fused(doc,v,envelope)['map_document']['rows'][1][1] == '.'
     local=fused(doc,v,envelope,purpose='local_traversability')
     assert local['map_document']['rows'][1][1] == '?'
     assert local['live_travel_guard_required']
+
+
+def test_low_table_blocks_tall_posture_but_clear_overhead_does_not_block_short_posture():
+    doc,v,tall=bed_scene()
+    # Observed surface is at 0.8 m. Names and lidar free centres are irrelevant.
+    assert fused(doc,v,tall)['map_document']['rows'][5][5]=='#'
+    short=replace(tall,geometry_id='synthetic-short-posture',height_m=.7)
+    assert fused(doc,v,short)['map_document']['rows'][5][5]=='.'
+    # Missing observations above this body's required height are not a veto.
+    v.cells={cell:value for cell,value in v.cells.items() if cell[2]<7}
+    assert fused(doc,v,short)['map_document']['rows'][5][5]=='.'
+    assert fused(doc,v,tall)['map_document']['rows'][5][5]=='?'
+
+
+def test_unnamed_small_obstacle_and_body_width_still_block_travel():
+    doc,v,envelope=bed_scene()
+    doc['rows']=['.'*12]*12
+    v.cells={cell:(False,1.) for cell in v.cells}
+    v.cells[(5,5,2)]=(True,1.)
+    result=fused(doc,v,envelope)
+    assert result['map_document']['rows'][5][5]=='#'
+    narrow=NavigationMap(result['map_document'])
+    narrow._cell(.75,.55)
+    wider=fused(doc,v,replace(envelope,radius_m=.16))
+    with pytest.raises(InvalidTask,match='blocked'):
+        NavigationMap(wider['map_document'])._cell(.75,.55)
+
+
+def test_agreed_s5_policy_is_visible_and_preview_requires_per_task_confirmation(environment):
+    _, service, gateway = environment
+    policy = service.status()['interaction_policy']
+    assert policy['input_mode'] == 'text' and policy['inference_target'] == 'local_pc'
+    assert policy['future_inference_target'] == 'on_device'
+    assert policy['confirm_each_task'] and policy['explicit_destination_required']
+    assert not policy['handover_enabled'] and not policy['default_destination_enabled']
+    assert policy['maximum_objects_per_task'] == 1
+    service.prepare('거실 탁자에 있는 검은 마커펜을 침실 협탁에 놓아줘', 'agreed-scope')
+    preview = service.preview('agreed-scope')
+    assert preview['confirmation']['required']
+    assert preview['confirmation']['scope'] == 'one_complete_object_transfer'
+    assert preview['target']['label'] in preview['confirmation']['summary']
+    assert preview['destination']['label'] in preview['confirmation']['summary']
+    assert not service.app.tasks
+    code, result = gateway.dispatch('POST', '/v1/assistant/requests/agreed-scope/execute', AUTH,
+                                   {'preview_id': preview['preview_id']})
+    assert code == 409 and 'permit' in result['error']
+    assert not service.app.tasks
+
+
+@pytest.mark.parametrize('utterance,issue', [
+    ('검은 마커펜을 내 손에 놓아줘', 'handover_not_supported'),
+    ('검은 마커펜을 협탁에 놓고 나서 컵을 가져와', 'single_task_required'),
+    ('컵 집고 리모컨 가져와', 'single_task_required'),
+    ('검은 마커펜 두 개를 협탁에 놓아줘', 'single_task_required'),
+    ('검은 마커펜을 협탁에 가져오지 마', 'negated_action_requires_clarification'),
+])
+def test_model_omitted_scope_constraints_cannot_enable_execution(utterance, issue, environment):
+    _, service, _ = environment
+    # An extractor incorrectly returns an ordinary supported delivery. The
+    # original user request still controls the agreed interaction scope.
+    result = service.prepare(utterance, 'omitted-constraint', meaning=meaning())
+    assert result['status'] == 'NEEDS_CLARIFICATION' and issue in result['intent']['issues']
+    with pytest.raises(InvalidTask):
+        service.preview('omitted-constraint')
+    assert not service.app.tasks
+
+
+def test_person_destination_does_not_become_an_implicit_dropoff(environment):
+    _, service, _ = environment
+    result = service.prepare('마커펜 나한테 가져와', 'person-destination',
+                             meaning={**meaning(), 'destination_phrase': '나한테'})
+    assert 'concrete_destination_required' in result['intent']['issues']
+    assert not service.app.tasks

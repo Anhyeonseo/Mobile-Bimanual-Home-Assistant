@@ -1,0 +1,481 @@
+{
+  "schema_version": 1,
+  "checked_on_local_date": "2026-11-12",
+  "timezone": "Asia/Seoul",
+  "status": "replacement_stationary_cadence_verified",
+  "model_expected": "LDS-01",
+  "usb_adapter": "CP2102 10c4:ea60",
+  "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+  "baud": 230400,
+  "user_confirmed": {
+    "fixed_at_existing_mount": true,
+    "power_and_signal_cables_connected": true,
+    "rotated_during_official_driver_test": true,
+    "replacement_fixed_at_existing_mount": true
+  },
+  "after_reconnect": {
+    "passive": {
+      "captured_at_utc": "2026-11-11T15:50:53.506986+00:00",
+      "mode": "passive_serial_read_only",
+      "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+      "baud": 230400,
+      "serial_command_bytes_sent": 0,
+      "robot_motion_commands": 0,
+      "duration_s": 20.038940735999972,
+      "bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sectors": 0,
+      "discarded_bytes": 0,
+      "checksum_failed_sectors": 0,
+      "checksum_method": "LDS specification p5: (255-sum(first40)) mod256 matches byte40 or41",
+      "sequence_errors": [],
+      "sequence_error_count": 0,
+      "complete_scans": 0,
+      "scan_starts": 0,
+      "scan_gaps_over_035s": 0,
+      "range_accuracy_validated": false,
+      "mount_calibrated": false
+    },
+    "official_ros_driver": {
+      "captured_at_utc": "2026-11-11T15:52:02.160623+00:00",
+      "driver": "hls_lfcd_lds_driver 2.1.1",
+      "frames": 0,
+      "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+      "robot_motion_commands": 0,
+      "sensor_start_pause_commands": true,
+      "driver_exit_code": 255,
+      "frame_ids": [],
+      "samples_per_scan": [],
+      "stamp_semantics": "upstream publication timestamp; first-ray acquisition time not qualified",
+      "range_accuracy_validated": false,
+      "mount_calibrated": false,
+      "motion_authorized": false
+    },
+    "active_raw": {
+      "captured_at_utc": "2026-11-11T15:53:00.929598+00:00",
+      "mode": "sensor_start_pause_raw_capture",
+      "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+      "baud": 230400,
+      "serial_command_bytes_sent": 2,
+      "robot_motion_commands": 0,
+      "duration_s": 20.057126138999934,
+      "bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sectors": 0,
+      "discarded_bytes": 0,
+      "checksum_failed_sectors": 0,
+      "checksum_method": "LDS specification p5: (255-sum(first40)) mod256 matches byte40 or41",
+      "sequence_errors": [],
+      "sequence_error_count": 0,
+      "complete_scans": 0,
+      "scan_starts": 0,
+      "scan_gaps_over_035s": 0,
+      "range_accuracy_validated": false,
+      "mount_calibrated": false
+    }
+  },
+  "motion_commands": 0,
+  "sensor_paused_after_test": true,
+  "navigation_authorized": false,
+  "mount_transform": null,
+  "range_accuracy_validated": false,
+  "cadence_verified": true,
+  "clock_note": "Target UTC is approximately nine hours behind PC UTC; target capture timestamps preserved verbatim. User-facing date uses Asia/Seoul client context. Cross-host time alignment unverified. Target timedatectl reports NTP enabled and synchronized; which host clock is correct is not established.",
+  "conclusion": "Packet framing fix verified on identical missing-sector ROS replay and a 60-second stationary Jetson sensor run. Mount/range/acquisition timing, localization and moving load remain unqualified.",
+  "historical_evidence": "config/home_assistant/lidar_device.observed.json",
+  "local_evidence": "output/s4-lidar-connected",
+  "target_evidence": "/home/hyper/robot/shared/diagnostics/s4-lidar-connected",
+  "references": [
+    "https://raw.githubusercontent.com/ROBOTIS-GIT/hls_lfcd_lds_driver/2.1.1/src/hlds_laser_publisher.cpp",
+    "https://emanual.robotis.com/assets/docs/LDS_Basic_Specification.pdf"
+  ],
+  "original_cable_retest": {
+    "captured_at_utc": "2026-11-11T15:58:24.828345+00:00",
+    "mode": "sensor_start_pause_raw_capture",
+    "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+    "baud": 230400,
+    "serial_command_bytes_sent": 2,
+    "robot_motion_commands": 0,
+    "duration_s": 20.008301060999997,
+    "bytes": 0,
+    "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sectors": 0,
+    "discarded_bytes": 0,
+    "checksum_failed_sectors": 0,
+    "checksum_method": "LDS specification p5: (255-sum(first40)) mod256 matches byte40 or41",
+    "sequence_errors": [],
+    "sequence_error_count": 0,
+    "complete_scans": 0,
+    "scan_starts": 0,
+    "scan_gaps_over_035s": 0,
+    "range_accuracy_validated": false,
+    "mount_calibrated": false
+  },
+  "software_audit": {
+    "checked_on_local_date": "2026-11-12",
+    "physical_device_opened": false,
+    "fixture_sha256": "475b3a3939ec339aef62b2b71a619c45b1ef8210e9de74f93f20ac5be1d870a6",
+    "scope": "PTY replay validates readers and decoder; excludes real CP210x USB/UART, physical line states and sensor output",
+    "raw_reader": {
+      "received_bytes": 50400,
+      "complete_scans": 20,
+      "checksum_failures": 0
+    },
+    "official_driver": {
+      "received_scans": 20,
+      "rays_per_scan": 360,
+      "exit_code_after_requested_stop": 255
+    },
+    "requested_serial_settings": {
+      "baudrate": 230400,
+      "bytesize": 8,
+      "parity": "N",
+      "stopbits": 1,
+      "xonxoff": false,
+      "rtscts": false,
+      "dsrdtr": false,
+      "rts": true,
+      "dtr": true
+    },
+    "unresolved": [
+      "actual_CP210x_USB_UART_receive_path",
+      "actual_OS_applied_port_configuration",
+      "electrical_effect_of_RTS_DTR_on_connected_adapter",
+      "sensor_power_and_output"
+    ],
+    "hardware_fault_confirmed": false,
+    "last_port_query": "ttyUSB0 absent during audit; no physical serial port opened",
+    "local_evidence": "output/s4-lidar-connected/software-audit.json",
+    "target_evidence": "/home/hyper/robot/shared/diagnostics/s4-lidar-connected/software-audit/report.json"
+  },
+  "local_replacement_test": {
+    "checked_on_local_date": "2026-11-12",
+    "host": "local_pc",
+    "unit_identity": "different LDS-01 per user; adapter serial 0001 is not a unique lidar identifier",
+    "report": {
+      "host": "local_pc",
+      "unit": "replacement_same_model_reported_by_user",
+      "serial_configuration": {
+        "requested": {
+          "baudrate": 230400,
+          "bytesize": 8,
+          "parity": "N",
+          "stopbits": 1,
+          "xonxoff": false,
+          "dsrdtr": false,
+          "rtscts": false,
+          "timeout": 0.05,
+          "write_timeout": 1,
+          "inter_byte_timeout": null
+        },
+        "rts": true,
+        "dtr": true,
+        "os_input_baud_is_230400": true,
+        "os_output_baud_is_230400": true,
+        "os_receiver_enabled": true,
+        "os_8bit": true,
+        "os_parity_enabled": false,
+        "os_two_stop_bits": false,
+        "os_software_flow_enabled": false,
+        "os_hardware_flow_enabled": false,
+        "os_canonical": false
+      },
+      "captured_at_utc": "2026-11-12T01:07:33.400414+00:00",
+      "mode": "sensor_start_pause_raw_capture",
+      "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+      "baud": 230400,
+      "serial_command_bytes_sent": 2,
+      "robot_motion_commands": 0,
+      "duration_s": 20.002882834000047,
+      "bytes": 217950,
+      "raw_sha256": "c855dc6fb0df14506e1701313e8891a6ec4683638c0485b58c3af5465485c71b",
+      "sectors": 5189,
+      "discarded_bytes": 11,
+      "checksum_failed_sectors": 0,
+      "checksum_method": "LDS specification p5: (255-sum(first40)) mod256 matches byte40 or41",
+      "sequence_errors": [
+        {
+          "packet": 3539,
+          "previous": 58,
+          "next": 0
+        },
+        {
+          "packet": 4678,
+          "previous": 58,
+          "next": 0
+        }
+      ],
+      "sequence_error_count": 2,
+      "complete_scans": 84,
+      "scan_starts": 87,
+      "scan_gaps_over_035s": 0,
+      "range_accuracy_validated": false,
+      "mount_calibrated": false,
+      "scan_start_interval_s": {
+        "min": 0.19996726799990938,
+        "median": 0.20072049150007842,
+        "max": 0.2025660480001079
+      },
+      "rpm_median": 298.3,
+      "valid_points": {
+        "min": 320,
+        "median": 322.0,
+        "max": 325
+      }
+    },
+    "local_evidence": "output/s4-lidar-connected/local-second-unit",
+    "conclusion": "Real bytes received with same acquisition algorithm and actual OS port settings verified. Host and sensor changed together; original sensor vs Jetson fault not isolated. Two missing sectors remain; not navigation-qualified."
+  },
+  "jetson_replacement_test": {
+    "raw": {
+      "host": "jetson",
+      "unit": "replacement_same_model_reported_by_user",
+      "serial_configuration": {
+        "requested": {
+          "baudrate": 230400,
+          "bytesize": 8,
+          "parity": "N",
+          "stopbits": 1,
+          "xonxoff": false,
+          "dsrdtr": false,
+          "rtscts": false,
+          "timeout": 0.05,
+          "write_timeout": 1,
+          "inter_byte_timeout": null
+        },
+        "rts": true,
+        "dtr": true,
+        "os_input_baud_is_230400": true,
+        "os_output_baud_is_230400": true,
+        "os_receiver_enabled": true,
+        "os_8bit": true,
+        "os_parity_enabled": false,
+        "os_two_stop_bits": false,
+        "os_software_flow_enabled": false,
+        "os_hardware_flow_enabled": false,
+        "os_canonical": false
+      },
+      "captured_at_utc": "2026-11-11T16:17:58.331683+00:00",
+      "mode": "sensor_start_pause_raw_capture",
+      "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+      "baud": 230400,
+      "serial_command_bytes_sent": 2,
+      "robot_motion_commands": 0,
+      "duration_s": 20.108394165999925,
+      "bytes": 234865,
+      "raw_sha256": "889ab8ddda8ee02fb9840234ed47b2d6f1e13168cc7100efd786ccac7b0d9a43",
+      "sectors": 5592,
+      "discarded_bytes": 0,
+      "checksum_failed_sectors": 0,
+      "checksum_method": "LDS specification p5: (255-sum(first40)) mod256 matches byte40 or41",
+      "sequence_errors": [
+        {
+          "packet": 1,
+          "previous": 40,
+          "next": 0
+        }
+      ],
+      "sequence_error_count": 1,
+      "complete_scans": 93,
+      "scan_starts": 94,
+      "scan_gaps_over_035s": 0,
+      "range_accuracy_validated": false,
+      "mount_calibrated": false,
+      "scan_start_interval_s": {
+        "min": 0.20026600800019878,
+        "median": 0.2008257219999905,
+        "max": 0.20203537399993365
+      },
+      "rpm_median": 298.4,
+      "valid_points": {
+        "min": 238,
+        "median": 243,
+        "max": 245
+      }
+    },
+    "official_ros": {
+      "captured_at_utc": "2026-11-11T16:19:29.371195+00:00",
+      "driver": "hls_lfcd_lds_driver 2.1.1",
+      "frames": 90,
+      "port": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+      "robot_motion_commands": 0,
+      "sensor_start_pause_commands": true,
+      "driver_exit_code": 255,
+      "frame_ids": [
+        "lidar_a"
+      ],
+      "samples_per_scan": [
+        360
+      ],
+      "stamp_semantics": "upstream publication timestamp; first-ray acquisition time not qualified",
+      "range_accuracy_validated": false,
+      "mount_calibrated": false,
+      "motion_authorized": false,
+      "stamp_interval_s": {
+        "min": 0.2002403736114502,
+        "median": 0.20074915885925293,
+        "max": 0.3992633819580078
+      },
+      "gaps_over_035s": 2,
+      "valid_points": {
+        "min": 238,
+        "median": 242.0,
+        "max": 244
+      },
+      "max_publication_age_s": 0.0013835430145263672,
+      "scan_time_median_s": 0.20134228467941284
+    },
+    "software_fix": {
+      "symptom": "unbounded Serial.flush / usb_serial_generic_wait_until_sent before timed capture, repeated during cleanup",
+      "action": "removed tcdrain calls; one-byte writes use write_timeout=1; cleanup reports stop-write failures",
+      "permanent_tool": "tools/diagnostics/lds01_capture.py",
+      "regression_tests_passed": 7,
+      "physical_stop_verified": false
+    },
+    "steady_raw_sequence_error_count": 0,
+    "startup_partial_sequence_reset_count": 1,
+    "cadence_qualified_for_navigation": false,
+    "current_replacement_mount_transform_verified": false,
+    "evidence_root": "/home/hyper/robot/shared/diagnostics/s4-lidar-connected/",
+    "original_unit_fault_confirmed": false
+  },
+  "cadence_fix": {
+    "upstream_tag": "2.1.1",
+    "upstream_commit": "fa4608d80b6005e0ca63197f79ad6d09381f84b3",
+    "source": "ros2_ws/src/hls_lfcd_lds_driver",
+    "local_evidence": "output/s4-lidar-fix",
+    "target_evidence": "/home/hyper/robot/shared/diagnostics/s4-lidar-gap-fixed/live-60s",
+    "duration_requested_s": 60,
+    "live": {
+      "mode": "real_sensor",
+      "robot_motion_commands": 0,
+      "moving_mapping_qualified": false,
+      "driver_path": "/home/hyper/robot/shared/runtime/s4-lidar-fix/install/hls_lfcd_lds_driver/lib/hls_lfcd_lds_driver/hlds_laser_publisher",
+      "driver_sha256": "95807be4fae6e60319d32ddbc802458572fcc9bf328862abb2258abf163a60aa",
+      "passed": true,
+      "frames": 291,
+      "gaps_over_035": 0,
+      "maximum_gap_s": 0.2012628900015443,
+      "minimum_gap_s": 0.20021181025276746,
+      "mean_gap_s": 0.20073545903625048,
+      "health": {
+        "epoch": "initial",
+        "ready": false,
+        "scan_ready": true,
+        "localization_ready": false,
+        "scan_error": null,
+        "localization_error": "awaiting localization",
+        "consecutive_scans": 291,
+        "maximum_scan_gap_s": 0.2012628900015443,
+        "motion_authorized": false
+      },
+      "missing_sector_observed": false,
+      "driver_exit_code": 0
+    },
+    "live_decoder_stats": {
+      "complete": 291,
+      "partial": 0,
+      "rejected": 0,
+      "checksum_errors": 0,
+      "backlog_resets": 0
+    },
+    "replay": {
+      "upstream": {
+        "mode": "virtual_serial",
+        "robot_motion_commands": 0,
+        "moving_mapping_qualified": false,
+        "driver_path": "output/s4-lidar-fix/upstream-install/hls_lfcd_lds_driver/lib/hls_lfcd_lds_driver/hlds_laser_publisher",
+        "driver_sha256": "f9f844606f88d245228fe195afcb84b865c605aa430f8e90b018a19f94de7660",
+        "passed": false,
+        "frames": 34,
+        "gaps_over_035": 5,
+        "maximum_gap_s": 0.39681763713861073,
+        "minimum_gap_s": 0.19946929018033188,
+        "mean_gap_s": 0.2302941035929755,
+        "health": {
+          "epoch": "initial",
+          "ready": false,
+          "scan_ready": false,
+          "localization_ready": false,
+          "scan_error": "awaiting consecutive scans",
+          "localization_error": "awaiting localization",
+          "consecutive_scans": 2,
+          "maximum_scan_gap_s": 0.39681763713861073,
+          "motion_authorized": false
+        },
+        "missing_sector_observed": false,
+        "driver_exit_code": 255,
+        "virtual_commands_hex": "6265"
+      },
+      "patched": {
+        "mode": "virtual_serial",
+        "robot_motion_commands": 0,
+        "moving_mapping_qualified": false,
+        "driver_path": "/home/an-hyeonseo/Documents/GitHub/SO101-Can-Towel-Manipulation/workspaces/home-assistant/output/s4-lidar-fix/install/hls_lfcd_lds_driver/lib/hls_lfcd_lds_driver/hlds_laser_publisher",
+        "driver_sha256": "8893c603423ed272a06772c9f0dda3f892a830e223ea2c08c909ea75b20b71c4",
+        "passed": true,
+        "frames": 39,
+        "gaps_over_035": 0,
+        "maximum_gap_s": 0.20370768530301575,
+        "minimum_gap_s": 0.1963989958599086,
+        "mean_gap_s": 0.19999688093651602,
+        "health": {
+          "epoch": "initial",
+          "ready": false,
+          "scan_ready": true,
+          "localization_ready": false,
+          "scan_error": null,
+          "localization_error": "awaiting localization",
+          "consecutive_scans": 39,
+          "maximum_scan_gap_s": 0.20370768530301575,
+          "motion_authorized": false
+        },
+        "missing_sector_observed": true,
+        "driver_exit_code": 0,
+        "virtual_commands_hex": "6265"
+      },
+      "sensor_loss": {
+        "mode": "virtual_serial",
+        "robot_motion_commands": 0,
+        "moving_mapping_qualified": false,
+        "driver_path": "/home/an-hyeonseo/Documents/GitHub/SO101-Can-Towel-Manipulation/workspaces/home-assistant/output/s4-lidar-fix/install/hls_lfcd_lds_driver/lib/hls_lfcd_lds_driver/hlds_laser_publisher",
+        "driver_sha256": "8893c603423ed272a06772c9f0dda3f892a830e223ea2c08c909ea75b20b71c4",
+        "passed": true,
+        "frames": 20,
+        "gaps_over_035": 0,
+        "maximum_gap_s": 0.20100587520892077,
+        "minimum_gap_s": 0.19913563792215427,
+        "mean_gap_s": 0.19997676023721347,
+        "health": {
+          "epoch": "initial",
+          "ready": false,
+          "scan_ready": false,
+          "localization_ready": false,
+          "scan_error": null,
+          "localization_error": "awaiting localization",
+          "consecutive_scans": 20,
+          "maximum_scan_gap_s": 0.20100587520892077,
+          "motion_authorized": false
+        },
+        "missing_sector_observed": false,
+        "driver_exit_code": 0,
+        "virtual_commands_hex": "6265"
+      }
+    },
+    "source_sha256": {
+      "ros2_ws/src/hls_lfcd_lds_driver/LICENSE": "143077f9f6a8de5a99f78c2c2472801fb53cf240277ef661642f079b9acdfff8",
+      "ros2_ws/src/hls_lfcd_lds_driver/CMakeLists.txt": "027e5f160399254831c01e533283979ef00edbe35b56dcdf0323ac6f3d23ca1c",
+      "ros2_ws/src/hls_lfcd_lds_driver/PATCHES.md": "5287aa025c1532d9ce3a5271affca9f3ecf21ed179954b145301843a85b3918a",
+      "ros2_ws/src/hls_lfcd_lds_driver/README.md": "7376e3246c1bcf7dd461098303b9554ed2a202926e154344e6989c12f4632588",
+      "ros2_ws/src/hls_lfcd_lds_driver/package.xml": "00cf29e28f4adddca2662a35163e183f4678a576c7f01e82b16cb85243d4913c",
+      "ros2_ws/src/hls_lfcd_lds_driver/rviz/hlds_laser.rviz": "4eda7fa707c052c793ef2ede6449787a6581e36765a72ab5cb3ea79ea5920322",
+      "ros2_ws/src/hls_lfcd_lds_driver/launch/view_hlds_laser.launch.py": "30ee83ae0b40fed5148f88f0333ca63016a2303070e799824c5247dba3baa93a",
+      "ros2_ws/src/hls_lfcd_lds_driver/launch/hlds_laser.launch.py": "843d885746682fed536fae02744ba3b7b453330249cdcd0ad4ebadf24fba07e0",
+      "ros2_ws/src/hls_lfcd_lds_driver/src/hlds_laser_segment_publisher.cpp": "3eba665589b2527facbc82218e9a0e359a36144fdff047aad93930990dcd5cc9",
+      "ros2_ws/src/hls_lfcd_lds_driver/src/hlds_laser_publisher.cpp": "5a11a43054d6e21fff4a1fff5247265237756a6612a7bda91cfd7c1fd257c429",
+      "ros2_ws/src/hls_lfcd_lds_driver/include/hls_lfcd_lds_driver/scan_decoder.hpp": "117af53744e2535963dc8fbc52035714f9b95e2f5647bfa7a74062634cb21856",
+      "ros2_ws/src/hls_lfcd_lds_driver/include/hls_lfcd_lds_driver/hlds_laser_segment_publisher.hpp": "0014b6418e1da88184321dbb491607b3c28f211fd63132df9cc06f7e8634a765",
+      "ros2_ws/src/hls_lfcd_lds_driver/include/hls_lfcd_lds_driver/lfcd_laser.hpp": "99406ac19c599cc3637af075e1f7ee595eeb581ec2125481f209424da5970613"
+    }
+  }
+}

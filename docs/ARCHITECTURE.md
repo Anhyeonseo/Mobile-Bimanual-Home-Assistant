@@ -1,10 +1,35 @@
-# 시스템 구조
+# 시스템 구조와 상세 계약
 
-> 2026-10-29 이후 통합 설계는 [홈 어시스턴트 v0.2](MOBILE_MANIPULATION_DESIGN.md),
-> 구현과 검사 결과는 [구현 기록](HOME_ASSISTANT_IMPLEMENTATION.md)을 기준으로 한다.
-> 아래는 기존 모바일 기반의 세부 기록이며, 최신 실물 완료 상태를 뜻하지 않는다.
+통신·상태·단위·소유권을 확인할 때 읽는 기술 참고다. 사용자 요구와 실제 완료 상태는 제품 설계·현재 상태를 먼저 본다.
 
-기준 방향: 2026-10-04. VLM으로 요청·장면 후보를 해석하고 기존 기하·주행·조작 실행기로 검증하는 플랫폼을 개발한다. 아래 상위 판단/의미 지도는 **목표 설계**이며, 이미 구현한 계약과 구분한다. 현재 계획에 VLA 학습·성능 비교는 포함하지 않는다.
+<details>
+<summary>목차 펼치기</summary>
+
+- [계층과 책임](#계층과-책임)
+- [현재 코드와 목표 설계](#현재-코드와-목표-설계)
+- [실행 순서와 작업 계약](#실행-순서와-작업-계약)
+- [베이스·관측·TF 설계](#베이스관측tf-설계)
+- [VLM 판단과 기존 P&P 실행 경계](#vlm-판단과-기존-pp-실행-경계)
+- [펌웨어 구성과 공유 버스](#펌웨어-구성과-공유-버스)
+- [오프라인 작업 재생 계약](#오프라인-작업-재생-계약)
+- [펌웨어–ROS 브릿지 연결 보강](#펌웨어ros-브릿지-연결-보강)
+- [정지 후 집기 관측과 시점 재탐색](#정지-후-집기-관측과-시점-재탐색)
+- [하드웨어 없는 실행기와 앱 연결 경계](#하드웨어-없는-실행기와-앱-연결-경계)
+- [리프트·탐색·앱의 추가 실행 계약](#리프트탐색앱의-추가-실행-계약)
+- [전체 runtime·관측 증거·설정 경계 (2026-09-16)](#전체-runtime관측-증거설정-경계-2026-09-16)
+- [SO-101 모션 평활화와 PID 시험 후보](#so-101-모션-평활화와-pid-시험-후보)
+- [집기·놓기 단계와 물체 장면 갱신](#집기놓기-단계와-물체-장면-갱신)
+- [측정 관측·그리퍼·표면 연결](#측정-관측그리퍼표면-연결)
+- [2026-09-16 주행·센서·지도 재점검](#2026-09-16-주행센서지도-재점검)
+
+</details>
+
+현재 제품 요구는 [제품 설계](MOBILE_MANIPULATION_DESIGN.md), 우선순위·평가·현실적인 허용 오차는
+[로드맵](ROADMAP.md), 실제 구현·실물 확인 수준은 [현재 상태](CURRENT_STATUS.md)를 따른다.
+
+아래는 통신·상태·단위·소유권 계약과 날짜별 구현 기록이다. 과거의 미구현 표·VLM 중심 목표·
+하드웨어 구성·timeout 후보를 최신 제품 요구나 실물 성능으로 해석하지 않는다. 설정값을
+바꾸기 전 계산 허용치인지 실물 판정값인지 구분하고 실제 측정 근거를 확인한다.
 
 ## 계층과 책임
 
@@ -28,6 +53,21 @@
 주행·인식·리프트·조작·작업 관리를 분리한다. 기존 [Bimanual-Pick-And-Place](https://github.com/Anhyeonseo/Bimanual-Pick-And-Place)의 경로를 Classical 모듈에 이식한 부분은 재사용한다. 왼쪽 USART1 → Waveshare에 왼팔 1–6·wheel 7/8/9·lift 10, 오른쪽 UART4에 별도 팔 1–6을 연결한다. 2026-10-04 Pi의 별도 유지보수 도구와 STM32 v4 이미지로 베이스 텔레옵을 사용자 확인했다. 이 성공은 ROS/전체 fetch의 실물 연결과 별개다.
 
 VLM은 후보·이유·불확실성을 제공한다. 모터 명령·관절 제한·정지 확인을 직접 결정하지 않는다. 시맨틱 후보가 타당해도 실제 좌표·충돌·하중·관측 신선도가 검증돼야 실행한다.
+
+### 공통 실행 코드 위치
+
+| 책임 | 코드 | 경계 |
+|---|---|---|
+| 패킷 숫자 변환 | `firmware/stm32_actuator/include/actuator_core/wire_bytes.h` | 정렬되지 않은 바이트 배열도 동일하게 해석. 길이·CRC·명령 검증은 각 프로토콜이 담당 |
+| 팔·보조축 읽기 순서 | `firmware/stm32_g474_single_arm/Core/Src/s3_platform_snapshot.c` | 읽기 재시도와 원래 관측 시각을 보존. 제어 주기·유효기간을 늘리지 않음 |
+| 응답 대조 | `so101_arm_bridge/stream_transport_v2.py` | 요청 번호·시각 대조를 공통 처리. 불확실한 명령을 재전송하지 않음 |
+| 주행·집기 준비 | `home_robot_tasks/platform_preparation.py` | 도구에서 주입한 장치로 정지·리프트 유지·준비 상태를 관측. 포트를 직접 열지 않음 |
+| 집기 후보 평가 | `home_robot_tasks/carry_planning.py` | 계획 한 번 안에서 후보 평가를 재사용. 실제 접촉 자세나 새 계획은 다시 계산 |
+
+주행 웹 도구와 집기 도구는 같은 준비 절차를 호출한다. 집기가 주행 웹 서버 모듈을 가져오지 않는다.
+팔 제한은 읽기 전용 `motion_limits`로 조회한다. 수치 연산·통신·실물 허용 오차를 구분하며,
+이번 구조 정리는 제어 임계값이나 실물 합격 기준을 변경하지 않는다. 실제 시간 단축과 성공률은
+동일 작업의 실물 기록으로 확인한다.
 
 ## 현재 코드와 목표 설계
 
@@ -114,7 +154,7 @@ RGB-D는 물체 XYZ, 작업면 높이, 상대 거리·방향, 놓을 영역을 �
 
 ### 개발 판단의 검증 기록
 
-작업 ID로 요청·모델/프롬프트·관측·TF·지도 revision·판단 후보/거절 이유·선택 pose·실제 행동·결과와 수동 정답을 묶는 로그를 설계한다. 기록 재생으로 원인을 재현하고 한 요소씩 바꿔 비교한다. 현재의 실행 시간/실패 로그를 재사용하지만 전체 VLM 판단 추적이 이미 구현됐다고 표기하지 않는다. 최종 기준은 [로드맵의 E1](ROADMAP.md#e1-반복-평가시간-최적화운용-승격)에 둔다.
+작업 ID로 요청·모델/프롬프트·관측·TF·지도 revision·판단 후보/거절 이유·선택 pose·실제 행동·결과와 수동 정답을 묶는 로그를 설계한다. 기록 재생으로 원인을 재현하고 한 요소씩 바꿔 비교한다. 현재의 실행 시간/실패 로그를 재사용하지만 전체 VLM 판단 추적이 이미 구현됐다고 표기하지 않는다. 최종 기준은 [전체 시간과 평가](ROADMAP.md#전체-시간과-평가)에 둔다.
 
 ## 펌웨어 구성과 공유 버스
 
@@ -312,7 +352,7 @@ JSON의 과거 source 경로/hash는 이력 근거이며 모바일 보정 검증
 - 진단은 명령 session/sequence, 실제 feedback 나이, 버스 owner/token, 지연·누락·복구
   수, 정지 원인과 원점 유효성을 포함한다. UART 전송 성공과 물리 결과를 구분한다.
 
-실행 순서와 통과 기준은 [로드맵 F1–F3](ROADMAP.md#작업별-구현-범위와-검증)에 둔다.
+현재 개발 순서와 완료 기준은 [로드맵](ROADMAP.md#개발-순서)에 둔다.
 
 ## 오프라인 작업 재생 계약
 
@@ -483,10 +523,14 @@ Nav2에는 지도 좌표의 목표 pose를 전달한다. [공식 NavigateToPose 
 미관측 시간의 이동을 만들어내지 않는다. wheel slip·추정 공분산·ROS 연결은 남아 있다.
 
 C/Python `mobile_wire`는 ARM/VELOCITY/STOP의 동일 36-byte 초안 프레임과
-CRC32C를 교환하고 `mobile_supervisor`에 admission을 연결한다. 짧은 절대 명령
+CRC32C를 교환하고 `mobile_supervisor`에 admission을 연결한다.
+
+짧은 절대 명령
 만료도 적용하며 수신 시점부터 최대 watchdog을 다시 부여하지 않는다.
 `mobile_endpoint`·`MobileClient`에 capability·bounded RTT 동기화·64-byte
-응답/feedback·stream parser를 구현했다. resident v2 host parser에도 MOBILE_REQUEST/RESPONSE handler를 등록했다. 실제 보드 endpoint는 기본 미연결이며, 이 상태에서는 명시적으로 거절한다.
+응답/feedback·stream parser를 구현했다. resident v2 host parser에도 MOBILE_REQUEST/RESPONSE handler를 등록했다.
+
+실제 보드 endpoint는 기본 미연결이며, 이 상태에서는 명시적으로 거절한다.
 [프레임 규격](../protocol/README.md)을 따른다.
 
 ### 추가한 실행·검증 모듈
@@ -584,10 +628,12 @@ AMCL/TF 위치를 명시적으로 공급한다. `FakeRobot`용 기본 설정의 
 설정은 `config/nav2.simulation.yaml`과 `navigate.simulation.xml`이다. 현재 BT는
 경로 생성→추종이며 동적 재계획·복구는 후속이다. DWB 방향 전환 잠금은
 목표 근처 정체에서 1초 후 해제하도록 후보 설정했고, 별도의 10초 진행 감시는 유지한다.
+
 설정 의미는 [Jazzy OscillationCritic 소스](https://api.nav2.org/nav2-jazzy/html/oscillation_8cpp_source.html)를 따른다. 센서·지도·바퀴 치수/속도 단위·
-팔/리프트 운반 조건은 합성이며 미끄럼·하중·제동 거리를 검증하지 않는다.
-2D 라이다만 주행 입력으로 사용한다. HTTP→실제 Nav2 전 경로를 loopback에서
-시험한다. 실제 휴대폰 UI/페어링과 fetch/search/manipulation 통합은 남아 있다.
+팔/리프트 운반 조건은 합성이며 미끄럼·하중·제동 거리를 검증하지 않는다. 2D 라이다만 주행 입력으로 사용한다. HTTP→실제 Nav2 전 경로를 loopback에서
+시험한다.
+
+실제 휴대폰 UI/페어링과 fetch/search/manipulation 통합은 남아 있다.
 
 `--fault scan_loss`/`--fault tf_loss`는 두 번째 주행 중 해당 출력을 중단한다.
 수신 scan과 조회한 TF의 시각이 0.3초 후보 제한을 넘으면 연속 조건 상실로 정지한다.
@@ -600,6 +646,7 @@ ROS 타이머는 프레임뿐 아니라 전체 모바일 명령 주기/세션 �
 `nav2_controller`, `nav2_dwb_controller`, `nav2_bt_navigator`, `nav2_msgs`,
 `moveit_ros_move_group`, `moveit_kinematics`, `moveit_planners_ompl`,
 `moveit_simple_controller_manager`, `robot_state_publisher`, `xacro` 및 전이 의존성이다.
+
 Python host 의존성은 기존 lock 파일을 따른다. 현재 PC는 Nav2 1.3.13을 임시 prefix에
 풀어 사용했으며 시스템 ROS 패키지를 교체하지 않았다. CI에는 동일 통합 작업을
 추가했지만 원격 실행 결과는 아직 없다.
@@ -636,9 +683,10 @@ deadline 중 먼저 도달한 제한을 적용한다. 준비 대기도 포함하
 검사한다. main loop의 `MobileServoOutput_Poll`, TX/error callback, 기존 host stop
 latch까지 연결했다. faulted TX는 UART 소유권을 유지하고 RX 정리·abort 확인 후에만
 복구한다. 재활성화에는 STOP 송신 완료, 새 측정 정지, 전체 정지 확인과 더 큰 session이
-필요하다. 상위 host의 ARM만으로 출력 fault를 지울 수 없다. host handler도 같은 supervisor에
-연결된 output의 가용성을 검사하며 ARM/VELOCITY를 명시 거절한다(status 4).
-출력 미연결 상태에서 명령을 수락한 것처럼 응답하지 않는다.
+필요하다.
+
+상위 host의 ARM만으로 출력 fault를 지울 수 없다. host handler도 같은 supervisor에
+연결된 output의 가용성을 검사하며 ARM/VELOCITY를 명시 거절한다(status 4). 출력 미연결 상태에서 명령을 수락한 것처럼 응답하지 않는다.
 
 기본 부팅에서는 **미설정**이며 `MobileServoOutput_Configure`를 호출하지 않는다.
 외부 통합자가 실측 supervisor/feedback, 시간 budget, whole-stop 증거를 준비해야 한다.
@@ -663,10 +711,11 @@ latch까지 연결했다. faulted TX는 UART 소유권을 유지하고 RX 정리
 
 `mobile_feedback`은 8–11번 모터를 순환하며 mode register 33의 값 1을 READ로
 확인하고 telemetry 56–70을 읽는다. mode는 만료 전에 재확인하며 전원/통신 복구 시
-모든 mode/샘플을 폐기한다. 주소와 속도/전류 sign-magnitude 해석은
+모든 mode/샘플을 폐기한다.
+
+주소와 속도/전류 sign-magnitude 해석은
 [Feetech SDK 헤더](https://github.com/ftservo/FTServo_Arduino/blob/main/src/SMS_STS.h)와
-[해석 구현](https://github.com/ftservo/FTServo_Arduino/blob/main/src/SMS_STS.cpp)을 확인했다.
-장치 모델/펌웨어 일치와 전류 환산은 별도 확인하며 `current_raw`를 mA로 표시하지 않는다.
+[해석 구현](https://github.com/ftservo/FTServo_Arduino/blob/main/src/SMS_STS.cpp)을 확인했다. 장치 모델/펌웨어 일치와 전류 환산은 별도 확인하며 `current_raw`를 mA로 표시하지 않는다.
 
 한 번의 publish에는 네 축 모두의 새 telemetry가 필요하다. 가장 오래된 요청 시작
 시각을 feedback 시각으로 사용하고 축 간 시각 차이도 제한한다. mode가 오래됐거나
@@ -688,10 +737,8 @@ broadcast, 잘못된 checksum 또는 같은 lease의 재송신은 거절한다. 
 버스를 반환하고, Reset은 motion을 계속 차단한 채 관측만 재개한다. 재활성화에는
 별도로 새 정지 feedback·전체 정지 증거와 새 session이 필요하다.
 
-출력 `velocity_direction[4]`와 수신 방향은 같은 실측 부호를 사용한다(리프트 논리 +는 UP).
-reader가 바인딩되면 supervisor·방향·팔 예약 시간이 output 설정과 일치해야 한다.
-기본 부팅에서는 reader/output Configure와 endpoint 초기화를 호출하지 않는다.
-장치 모델 readback·boot ID·AL/LS 높이·전체 hold는 보드 조립 코드에 연결했다.
+출력 `velocity_direction[4]`와 수신 방향은 같은 실측 부호를 사용한다(리프트 논리 +는 UP). reader가 바인딩되면 supervisor·방향·팔 예약 시간이 output 설정과 일치해야 한다. 기본 부팅에서는 reader/output Configure와 endpoint 초기화를 호출하지 않는다. 장치 모델 readback·boot ID·AL/LS 높이·전체 hold는 보드 조립 코드에 연결했다.
+
 모드 WRITE 진입점·실측 프로파일·독립 interlock/하중 제공자와 명시적 복구는 남아 있다. 이번 fake HAL 통합은 실제 reader/writer/gate/core를 실행하며 RX ring과
 모터 응답만 합성했다. 별도의 Nav2 C plant가 이 HAL 경로를 실행한다고 집계하지 않는다.
 
@@ -750,19 +797,21 @@ unwrap 기준은 idle 실측으로 갱신한다. 관측 공백/범위 이탈/인
 PC 조립은 `compose_fetch_adapter`에 arm/lift/navigation/alignment/search/capture/
 manipulation 포트, semantic resolver, 환경/단계 monitor, stop backend, clock,
 capture sink를 명시적으로 주입한다. resolver는 준비 동작을 `{arm, height_um}`으로,
-나머지 작업을 해당 포트의 파라미터로 변환한다. 장소 이름을 임의 좌표로 바꾸는
-기본값은 없다. capture sink는 검증된 frame/깊이 관측으로 다음 계획 context를 갱신한다.
-준비 단계는 정지한 플랫폼에서 팔 이동→안전한 팔 자세에서 lift 이동을 구분하며,
+나머지 작업을 해당 포트의 파라미터로 변환한다.
+
+장소 이름을 임의 좌표로 바꾸는
+기본값은 없다. capture sink는 검증된 frame/깊이 관측으로 다음 계획 context를 갱신한다. 준비 단계는 정지한 플랫폼에서 팔 이동→안전한 팔 자세에서 lift 이동을 구분하며,
 완료 조건은 실제 monitor에서 별도로 받아야 한다. 조립 자체는 simulation 경계다.
 
 `PayloadMonitor`는 commissioning 시 제공할 간격/effort/시간 임계값과 독립
 `GripMeasurement`/`PayloadObservation`을 받는다. 두 표본 모두 sequence가
 증가하고 충분한 관측 구간을 충족해야 증거가 된다. stale·재전송·잘못된 물체·관측
-공백은 증거를 폐기하며 carrying 의무는 지우지 않는다. release는 새 빈 그리퍼와
+공백은 증거를 폐기하며 carrying 의무는 지우지 않는다.
+
+release는 새 빈 그리퍼와
 같은 물체의 지정 목적지 관측이 필요하다. `PayloadTaskMonitor`는 환경 monitor의
 하중 관련 boolean을 이 증거로 덮어쓰고 가장 오래된 시각을 유지한다. 조립의
-`before_start`에는 그 monitor의 동일 이름 메서드를 연결해 pick/place 의도만 설정한다.
-이 모듈은 영상 인식기·전류 환산·MCU 메시지나 실제 하중 유지 제어기가 아니다.
+`before_start`에는 그 monitor의 동일 이름 메서드를 연결해 pick/place 의도만 설정한다. 이 모듈은 영상 인식기·전류 환산·MCU 메시지나 실제 하중 유지 제어기가 아니다.
 
 앱 구성 시 하나의 `TaskLease`를 `RobotApplication(..., lease=lease)`와
 `SystemStopBackend(client, lease)`에 함께 전달한다. stop backend는 root 작업과
@@ -798,10 +847,13 @@ resident arm/lift/stop/evidence 클라이언트와 route builder, TF buffer, 카
 
 `OnnxDetector`는 명시적 YOLOv8 axis-aligned detection 출력 `[1,4+classes,anchors]`,
 고정 크기 NCHW float32 RGB, 모델 SHA-256·클래스 순서를 요구한다. 자동 다운로드는
-없다. letterbox/NMS 어댑터 시험만 했고 실제 모델·영상 정확도/Jetson 성능은 미측정이다.
+없다.
+
+letterbox/NMS 어댑터 시험만 했고 실제 모델·영상 정확도/Jetson 성능은 미측정이다.
 `MoveItBridge`는 측정 12축 anchor + lift state로 단일 팔 Cartesian 접근 계획을 요청하고
 50ms resident 목표로 변환한다. 시간/속도/관절 범위/처음 anchor/반대팔/그리퍼 보존을
 검사한다. `start_state.is_diff=true`로 실측 관절을 갱신하면서 기존 attached object를 보존한다.
+
 집기/놓기 세부 조정 코드는 아래 `PickPlacePort`로 연결했다. 실제 그리퍼 보정·scene
 geometry·단계별 관측 제공자는 별도이며 합성 held 전환은 물리적 집힘의 증거가 아니다.
 
@@ -819,7 +871,9 @@ python3 tools/setup/firmware/prepare_mobile_profile.py \
 
 새 폴더에 JSON/C header/manifest를 생성한다. 모의 header는 명시적 host 시험 define
 없이는 컴파일이 실패한다. measured 설정은 모터/관절/버스/lift 기구/lift hold/카메라
-측정 기록 6종의 경로·hash를 요구한다. 기록 내용의 정확성은 별도 검토한다. 기본
+측정 기록 6종의 경로·hash를 요구한다. 기록 내용의 정확성은 별도 검토한다.
+
+기본
 `MOBILE_BOARD_PROFILE_HEADER`는 비어 있으며 자동으로 생성물을 적용하지 않는다.
 `MobileBoard_ProvisionModes`는 secured maintenance에서만 명시적으로 호출하고 torque-off
 READ 후 unlock/mode/lock 각각을 WRITE→READ 검증한다. 실패 후 동일 부팅에서
@@ -865,12 +919,11 @@ torque만 쓰고 acceleration/time은 이전 값을 남겼다. 우측도 두 필
 
 `route_for_arm`의 task waypoint 사이에서 `s(u)=10u³−15u⁴+6u⁵`를 사용한다. 양 끝
 속도/가속도는 0이고 각 관절 이동량 d에 대해 `T >= max(1.875|d|/v,
-sqrt((10/sqrt(3))|d|/a), cbrt(60|d|/j))`를 만족하는 최소 50ms 격자 시간을 선택한다.
-기본 a=1, j=8은 미실측 후보이며 관절별 vector로 주입할 수 있다. 충돌 계획이 아니라
-기존 두 endpoint 사이 선분의 시간만 바꾸므로 upstream 충돌 검증을 생략할 수 없다.
-arm→gripper 같은 의미 있는 task 경계에서만 정지하며 MoveIt 경로점마다 이 함수를
-호출해 반복 정지시키지 않는다. MoveIt은 TOTG→Ruckig→ValidateSolution을 사용한다.
-Ruckig 플러그인 부재/실패는 계획 실패이며 무평활화 자동 fallback은 없다.
+sqrt((10/sqrt(3))|d|/a), cbrt(60|d|/j))`를 만족하는 최소 50ms 격자 시간을 선택한다. 기본 a=1, j=8은 미실측 후보이며 관절별 vector로 주입할 수 있다.
+
+충돌 계획이 아니라
+기존 두 endpoint 사이 선분의 시간만 바꾸므로 upstream 충돌 검증을 생략할 수 없다. arm→gripper 같은 의미 있는 task 경계에서만 정지하며 MoveIt 경로점마다 이 함수를
+호출해 반복 정지시키지 않는다. MoveIt은 TOTG→Ruckig→ValidateSolution을 사용한다. Ruckig 플러그인 부재/실패는 계획 실패이며 무평활화 자동 fallback은 없다.
 
 서보에 도달하는 것은 기존 50ms position 샘플/5ms MCU 선형 보간이다. 따라서 위
 연속 곡선 및 Ruckig의 jerk 제한과 실제 전송·양자화된 목표의 jerk는 같은 보장이
@@ -898,8 +951,9 @@ python3 tools/run/analyze_arm_motion.py --trace output/arm-trace.json \
 
 JSON 최상위는 `joint_names`(12개 고유 이름), `samples`다. 각 sample에는 원 관측
 `time_s`, `target_rad` 12개, `measured_rad` 12개를 기록한다. 도구는 추종 RMS/최대
-오차, 최종 목표 정지 구간의 마지막 0.5초 peak-to-peak/RMS, 정착 시간을 출력한다.
-관측 간격이 0.1초를 넘거나 충분한 hold가 없으면 해당 지표를 null로 남긴다. 0.02rad
+오차, 최종 목표 정지 구간의 마지막 0.5초 peak-to-peak/RMS, 정착 시간을 출력한다. 관측 간격이 0.1초를 넘거나 충분한 hold가 없으면 해당 지표를 null로 남긴다.
+
+0.02rad
 정착 오차는 분석 기본값이며 `--settling-tolerance-rad`로 변경 가능하다. 목표를
 측정으로 복제한 기록은 실측 비교에 사용할 수 없다. 자동 PID tuning이나 원인 확정은
 하지 않으며 센서 샘플링보다 빠른 진동은 이 위치 로그만으로 평가할 수 없다.
@@ -939,14 +993,14 @@ JSON 최상위는 `joint_names`(12개 고유 이름), `samples`다. 각 sample�
 
 단계 이름과 원래 task parameters를 `resolve_stage(stage, parameters, now)`에 **시작 시점에**
 전달한다. motion 단계는 기존 `ManipulationPort`용 Cartesian task, jaw 단계는 주입한
-그리퍼 port의 보정된 명령, scene 단계는 아래 명시적 scene change를 반환한다.
-후퇴를 미리 계획하거나 최초 영상 시각을 갱신해 재사용하지 않는다. 새로운 실측 anchor,
-scene revision, 원 관측 시각을 사용하며 오래된 target은 기존 `ManipulationPort`가 거절한다.
-관측 유효 시간이 만료되면 새 관측을 공급해야 하며 timeout을 늘려 신선함을 만들지 않는다.
+그리퍼 port의 보정된 명령, scene 단계는 아래 명시적 scene change를 반환한다. 후퇴를 미리 계획하거나 최초 영상 시각을 갱신해 재사용하지 않는다.
+
+새로운 실측 anchor,
+scene revision, 원 관측 시각을 사용하며 오래된 target은 기존 `ManipulationPort`가 거절한다. 관측 유효 시간이 만료되면 새 관측을 공급해야 하며 timeout을 늘려 신선함을 만들지 않는다.
 
 `monitor`는 기존 `PayloadTaskMonitor`의 `grasp_verified`, `load_retained`,
-`release_verified`, 새 `gripper_empty`/`gripper_open` 및 독립 환경 조건을 사용한다.
-scene 제공자는 **해당 object ID**의 `object_attached`/`object_detached`를 함께 제공한다.
+`release_verified`, 새 `gripper_empty`/`gripper_open` 및 독립 환경 조건을 사용한다. scene 제공자는 **해당 object ID**의 `object_attached`/`object_detached`를 함께 제공한다.
+
 실제 배포는 scene의 단일 writer 소유권·revision/신선함을 보장해야 하며, bool을 상수로
 넣어서는 안 된다. 그리퍼 전환 중에는 전환 완료 조건을 연속 조건으로 요구하지 않지만,
 완료 관측 전에는 부착/분리/후퇴로 넘어가지 않는다. 최상위 `RoutedSkillAdapter`가
@@ -961,6 +1015,7 @@ position_m, quaternion_xyzw, size_m(box 3축), touch_links, observed_s다. attac
 [MoveIt Planning Scene API](https://moveit.picknik.ai/main/doc/examples/planning_scene_ros_api/planning_scene_ros_api_tutorial.html)를
 사용하되 실제 Jazzy 동작을 검증했다. 부착 ADD가 world object를 자동 제거하므로
 동일 diff에 world REMOVE를 중복 전송하지 않는다(중복 제거는 false ACK를 만든다).
+
 분리는 attached REMOVE와 명시적 world ADD를 함께 보낸다. Apply의 success만으로
 완료하지 않고 Get 결과의 geometry/pose/링크/부착·world 배타성을 확인한다. 링크 상대
 object pose와 primitive pose를 합성해 비교하고 q와 -q를 동일 회전으로 취급한다.
@@ -979,15 +1034,17 @@ dwell을 기다린다. 전체 출력에 내부 11단계의 이름·시간이 포
 
 ## 측정 관측·그리퍼·표면 연결
 
-`EvidenceProducer`는 arm/base/localization/lift/scene별 `SourceSample`을 받는다.
-각 입력은 sequence, 원 관측 시각, boot ID, profile SHA-256과 정해진 측정 필드만
+`EvidenceProducer`는 arm/base/localization/lift/scene별 `SourceSample`을 받는다. 각 입력은 sequence, 원 관측 시각, boot ID, profile SHA-256과 정해진 측정 필드만
 허용한다. 가장 오래된 원 시각을 `RobotObservation.observed_s`로 보존하고 동일
-시각의 반복 poll은 출력하지 않는다. 누락 시 미준비, stale/skew는 거절, 순서/identity
+시각의 반복 poll은 출력하지 않는다.
+
+누락 시 미준비, stale/skew는 거절, 순서/identity
 위반은 fault다. 건강·lift 지지·reach/collision은 독립 입력이며 명령 성공에서 만들지 않는다.
 `RosEvidencePublisher`는 이 관측과 `GripMeasurement`/`PayloadObservation`을 ROS
-시각으로 변환해 기존 typed topic으로 보낸다. 상대 원 관측 나이를 보존한다. 장치
-드라이버 callback은 원 취득 시각/boot/profile을 넣어 observe한 뒤 produce/publish한다.
-상태 fusion 오류는 기존 runtime fault/stop 경로로 전달해야 한다. serial polling은
+시각으로 변환해 기존 typed topic으로 보낸다. 상대 원 관측 나이를 보존한다.
+
+장치
+드라이버 callback은 원 취득 시각/boot/profile을 넣어 observe한 뒤 produce/publish한다. 상태 fusion 오류는 기존 runtime fault/stop 경로로 전달해야 한다. serial polling은
 기존 단일 제어 worker가 담당하며 새 publisher가 UART를 열지 않는다.
 
 `JawCalibration`은 측정 각도→jaw 간격의 단조 표를 선형 보간하고 범위 밖 외삽을
@@ -1000,9 +1057,10 @@ validator를 확인한다. 그리퍼 동작에서는 나머지 11축을 보존�
 `ManipulationBindings.factory`를 ROS factory의 `manipulation_bindings`에 주입하면
 공유 그리퍼와 기존 motion/scene 포트가 연결된다. 모든 6개 motion stage의 명시적
 frame 기준 offset, fresh stage observation과 object-specific scene evidence, 좌우 jaw
-보정을 요구한다. stage 관측은 object/arm/stage/capture/pose/scene/calibration/frame과
-원 시각에 묶인다. attach/detach는 `SceneUpdatePort` 형식의 fresh object pose를 사용한다.
-대기 중 오래된 값을 새 시각으로 바꾸지 않으며 보정 전에는 geometry를 임의 생성하지 않는다.
+보정을 요구한다.
+
+stage 관측은 object/arm/stage/capture/pose/scene/calibration/frame과
+원 시각에 묶인다. attach/detach는 `SceneUpdatePort` 형식의 fresh object pose를 사용한다. 대기 중 오래된 값을 새 시각으로 바꾸지 않으며 보정 전에는 geometry를 임의 생성하지 않는다.
 
 `PlanningContext.observed_s`는 로봇 관측 시각이고 `target_observed_s`는 원 target
 노출 시각이다. 입장·계획→실행 handoff는 둘 다 신선해야 한다. 실행 중에는 state가
@@ -1038,7 +1096,9 @@ MCU 실측 wheel sample → MCU 취득 시각/host RTT 검사 → odom + odom→
 `build_guarded_navigation`은 준비된 기존 client를 주입받아 포트/IO/maintenance를 반환한다.
 `build_ros_runtime(navigation_port=port, navigation_maintenance=(maintain,),
 navigation_observations=(depth_source.poll,))`로 기존 단일 executor에 넣는다.
-`request_stop`은 같은 `SystemStopClient.request`에 연결한다. 별도 UART writer,
+`request_stop`은 같은 `SystemStopClient.request`에 연결한다.
+
+별도 UART writer,
 자동 ARM/homing/reconnect나 원본 LeRobot Host를 만들지 않는다. 아직 실물 launch나
 보드 설정을 완성했다는 뜻은 아니며 physical application 차단은 유지한다.
 
@@ -1060,17 +1120,19 @@ navigation_observations=(depth_source.poll,))`로 기존 단일 executor에 넣�
 어느 높이에라도 hit가 있으면 occupied, 전체 높이를 확인한 경우만 free, 나머지는 unknown이다.
 이는 분해능과 센서 성능에 한계가 있는 모델이다. 한 ray가 실제 모든 재질·작은 물체·voxel 내부를 확인했다는 증명은 아니다.
 
-`nav2.depth.simulation.yaml`은 기존 simulation YAML 뒤에 적용하는 후보 overlay다.
-controller stamped 출력을 켜고 **rolling local costmap**에 odom 기준 depth 격자를 별도
+`nav2.depth.simulation.yaml`은 기존 simulation YAML 뒤에 적용하는 후보 overlay다. controller stamped 출력을 켜고 **rolling local costmap**에 odom 기준 depth 격자를 별도
 StaticLayer로 추가한다. LiDAR layer와 분리하고 maximum 결합/footprint 자동 삭제 금지를
-설정한다. 이 격자를 map 기준 전역 지도에 그대로 넣지 않는다. depth global projection이
+설정한다. 이 격자를 map 기준 전역 지도에 그대로 넣지 않는다.
+
+depth global projection이
 필요하면 map→odom 변경까지 반영하는 별도 동기화가 필요하다.
 [Nav2 StaticLayer](https://docs.nav2.org/jazzy/configuration_and_development/configuration_guide/core_servers/costmap_2d/costmap_plugins/static/)의 지도 수신 기능을 이용한다.
-Jazzy StaticLayer의 `use_maximum`은 plugin 하위가 아닌 costmap 수준 파라미터다.
-rolling max 결합에서 255(unknown)가 254(lethal)를 가리지 않도록 local costmap의
+
+Jazzy StaticLayer의 `use_maximum`은 plugin 하위가 아닌 costmap 수준 파라미터다. rolling max 결합에서 255(unknown)가 254(lethal)를 가리지 않도록 local costmap의
 `track_unknown_space=false`를 사용한다. 원 depth volume의 unknown은 유지하며 최종
-`TravelGuard`가 미관측 공간 진입을 차단한다. 이 guard 없이 이 overlay를 구동하지 않는다.
-실제 Nav2 costmap 시험에서 낮은 laser의 상판 삭제 방지·새 depth의 상판 삭제·depth free가
+`TravelGuard`가 미관측 공간 진입을 차단한다.
+
+이 guard 없이 이 overlay를 구동하지 않는다. 실제 Nav2 costmap 시험에서 낮은 laser의 상판 삭제 방지·새 depth의 상판 삭제·depth free가
 LiDAR hit를 지우지 않는 양방향 합성을 확인한다. 전체 controller 경로/실기 성능 검증과는 별개다.
 
 운반 반경은 팔/그리퍼/물체까지 포함한 원형 부피로 보수적으로 잡고, 측정 속도와 명령 속도
@@ -1111,9 +1173,8 @@ boot/제어 기한·지도 정지 후 전환을 포함한다. 3카메라 후보 
 `build_guarded_navigation`은 `TravelSessionPort → GuardedNavigationPort → MobileBaseDriver`를 반환한다.
 `reset_observations(epoch)`를 반드시 주입해 `RosNavigationDepth.reset(epoch)`와 독립 clearance 생산자를 함께 초기화하고,
 `depth.poll`은 runtime observations에, 반환 maintenance는 공유 제어 worker에 등록한다.
-새 epoch의 정지 피드백·posture/hold·depth·clearance가 모두 준비된 뒤에만 Nav2와 바퀴 소유권을 연다.
-정지 상태에서 관측을 다시 기다리는 한도는 후보 2초이며, timeout은 작업 실패/공통 stop이다.
-활성 주행의 입력 상실은 fault를 유지하며 자동 재시도·회전·후진·ARM은 없다.
+
+새 epoch의 정지 피드백·posture/hold·depth·clearance가 모두 준비된 뒤에만 Nav2와 바퀴 소유권을 연다. 정지 상태에서 관측을 다시 기다리는 한도는 후보 2초이며, timeout은 작업 실패/공통 stop이다. 활성 주행의 입력 상실은 fault를 유지하며 자동 재시도·회전·후진·ARM은 없다.
 
 탐색 후 정렬도 운반 자세/높이 준비를 거친다. 복합 단계의 `alignment_phase_safe`는 실제 현재 하위 단계에서 계산하며
 리프트 이동을 바퀴 이동과 혼동하지 않는다. 집기 정렬/높이는 선택된 관측 시점을 사용하고 이동 뒤 재촬영한다.

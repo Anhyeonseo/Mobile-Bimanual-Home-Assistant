@@ -11,11 +11,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class SAMMasks:
-    def __init__(self, device):
+    def __init__(self, device, *, cache_dir=None):
         from transformers import Sam2Model, Sam2Processor
 
         self.device = device
-        options = {"revision": MODEL_REVISION, "cache_dir": str(ROOT / "artifacts/models/huggingface")}
+        options = {"revision": MODEL_REVISION, "cache_dir": str(cache_dir or ROOT / "artifacts/models/huggingface")}
         print(f"Loading {MODEL_ID} on {device} ...", flush=True)
         self.processor = Sam2Processor.from_pretrained(MODEL_ID, **options)
         self.model = Sam2Model.from_pretrained(MODEL_ID, use_safetensors=True, **options).to(device).eval()

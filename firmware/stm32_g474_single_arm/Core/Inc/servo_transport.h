@@ -62,6 +62,9 @@ bool ServoTransport_ClaimQueued(UART_HandleTypeDef *uart,
     actuator_bus_router_t *router, uint32_t available_us,
     ServoQueuedTransaction *transaction, const uint8_t **bytes,
     size_t *length, actuator_bus_work_t *kind);
+bool ServoTransport_DeferUnsentQueued(ServoQueuedTransaction *transaction);
+/* Only before any HAL transmit attempt; leaves STOP latched, never rearms. */
+HAL_StatusTypeDef ServoTransport_CancelUnsentQueued(ServoQueuedTransaction *transaction);
 HAL_StatusTypeDef ServoTransport_CompleteQueued(
     ServoQueuedTransaction *transaction, bool transport_ok);
 /* Explicit abort/cleanup. Caller first aborts/drains RX and verifies quiet.

@@ -170,7 +170,25 @@ static BimanualTrackingFeedbackResult read_slot(uint8_t slot){
 int main(int argc,char**argv){
  assert(argc==4);selected_bus=atoi(argv[1]);uint8_t slot=(uint8_t)atoi(argv[2]);int mode=atoi(argv[3]);
  for(unsigned i=0;i<2;i++){uart[i].gState=HAL_UART_STATE_READY;uart[i].hdmarx=&dma[i];uart[i].Instance=&registers[i];assert(ServoTransport_Register(&uart[i]));}
+ if(mode==26){
+  /* Mobile feedback owns shared RX before periodic output mode starts. */
+  uint32_t mobile_token;
+  assert(ServoTransport_ServiceAllowed());
+  assert(ServoTransport_BeginReadOnly(&uart[0],&mobile_token));
+  cursor[0]=1234;
+  assert(BimanualTrackingFeedback_Begin()==HAL_OK);
+  assert(cursor[0]==1234 && ServoTransport_Owns(&uart[0],mobile_token));
+  assert(BimanualTrackingFeedback_Start(0,HAL_GetTick(),commands,commands,0,0)==HAL_BUSY);
+  BimanualTrackingFeedback_End();
+  assert(ServoTransport_Owns(&uart[0],mobile_token) && dma_active[0]);
+  assert(ServoTransport_End(&uart[0],mobile_token,false)==HAL_OK);
+  assert(BimanualTrackingFeedback_Begin()==HAL_OK);
+  assert(read_slot(0)==BIMANUAL_TRACKING_SAMPLE_READY);
+  BimanualTrackingFeedback_End();return 0;
+ }
  if(mode==21||mode==22){
+  /* Exercise actual receiver setup, not reuse of an already active ring. */
+  dma_active[selected_bus]=false;
   setup_failure=mode;
   assert(BimanualTrackingFeedback_Begin()==HAL_ERROR);
   assert(!BimanualTrackingFeedback_CanStart());
@@ -207,6 +225,59 @@ int main(int argc,char**argv){
   assert(BimanualTrackingFeedback_Poll(HAL_GetTick(),&sample)==BIMANUAL_TRACKING_FAULT);
   assert(BimanualTrackingFeedback_Start(2,HAL_GetTick(),commands,commands,0,0)!=HAL_OK);
   BimanualTrackingFeedback_End();assert(!BimanualTrackingFeedback_Active());return 0;
+ }
+ if(mode==28 || mode==29){
+  /* A clean timeout first polled at 4.1 ms still fits the 4.2 ms lease.
+   * Parsing timeout is not new wire activity; do not start a second quiet wait.
+   * Real late bytes at the same instant must still retain ownership and fault. */
+  BimanualTrackingFeedback_End();
+  assert(BimanualTrackingFeedback_BeginObservation()==HAL_OK);
+  advance_us(1000-(uint32_t)(simulation_us%1000)+(slot%4)*250);
+  if(slot>=4)now_us=UINT32_MAX-2000U;
+  fault_mode=1;unsigned before=delay_calls;
+  assert(BimanualTrackingFeedback_Start(3,HAL_GetTick(),commands,commands,0,0)==HAL_OK);
+  BimanualTrackingFeedbackSample sample;
+  uint32_t start=now_us;
+  for(unsigned elapsed=0;elapsed<=3900;elapsed+=100){
+   assert(BimanualTrackingFeedback_Poll(HAL_GetTick(),&sample)==BIMANUAL_TRACKING_PENDING);
+   if(elapsed<3900)advance_us(100);
+  }
+  advance_us(200);
+  if(mode==29){
+   uint8_t *ring=selected_bus?right_servo_rx_ring:servo_dma_rx_ring;
+   ring[cursor[selected_bus]++%256]=0xFF;
+  }
+  BimanualTrackingFeedbackResult result=BimanualTrackingFeedback_Poll(HAL_GetTick(),&sample);
+  if(mode==28){
+   assert(result==BIMANUAL_TRACKING_TRANSIENT_FAILURE);
+   assert(now_us-start==4100 && BimanualTrackingFeedback_CanStart());
+   fault_mode=0;advance_us(20000);
+   assert(read_slot(3)==BIMANUAL_TRACKING_SAMPLE_READY);
+  }else{
+   assert(result==BIMANUAL_TRACKING_PENDING);
+   advance_us(100);
+   assert(BimanualTrackingFeedback_Poll(HAL_GetTick(),&sample)==BIMANUAL_TRACKING_FAULT);
+   assert(!BimanualTrackingFeedback_CanStart());
+  }
+  assert(delay_calls==before);
+  BimanualTrackingFeedback_End();return 0;
+ }
+ if(mode==27){
+  BimanualTrackingFeedback_End();
+  assert(BimanualTrackingFeedback_BeginObservation()==HAL_OK);
+  fault_mode=1;
+  for(unsigned n=0;n<4;n++){
+   advance_us(20000);assert(read_slot(2)==BIMANUAL_TRACKING_TRANSIENT_FAILURE);
+   assert(BimanualTrackingFeedback_CanStart());
+  }
+  fault_mode=0;advance_us(20000);
+  assert(read_slot(2)==BIMANUAL_TRACKING_SAMPLE_READY);
+  assert(BimanualTrackingFeedback_GetSnapshot()->consecutive_failed_pairs==0);
+  /* A real transport failure remains fatal in observation too. */
+  fault_mode=3;advance_us(20000);assert(read_slot(2)==BIMANUAL_TRACKING_FAULT);
+  BimanualTrackingFeedback_End();
+  /* Existing mode 6 separately proves default trajectory still stops at three. */
+  return 0;
  }
  if(mode==24){
   fault_mode=3;assert(read_slot(2)==BIMANUAL_TRACKING_FAULT);

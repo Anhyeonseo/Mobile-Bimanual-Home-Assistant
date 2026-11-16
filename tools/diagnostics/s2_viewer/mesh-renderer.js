@@ -64,6 +64,7 @@ function create(canvas,data,math){
     if(!data.display.lift_only)for(const side of ['left','right'])for(const visual of data.surfaces.arm_visuals){draw(meshes[visual.mesh],mul(current.arms[side][visual.link],visual.origin),visual.material==='motor'?motor:(side==='left'?left:right));}
     const camera=current.frames.camera;
     draw(meshes['d415.stl'],mul(camera,data.camera_model.color_optical_from_mesh),neutral);
+    for(const v of current.extra_visuals||[])draw(meshes[v.mesh],v.transform,rgb(v.color||'--viz-series-2'));
   }};
 }
 // Canvas fallback keeps the official robot geometry visible without WebGL.
@@ -100,6 +101,7 @@ function createSoftware(canvas,data,{mul,point}) {
     if(current.platform)add('vertical_link.STL',current.platform,data.display.highlight_platform?left:neutral);
     if(!data.display.lift_only)for(const side of ['left','right'])for(const v of data.surfaces.arm_visuals)add(v.mesh,mul(current.arms[side][v.link],v.origin),v.material==='motor'?motor:side==='left'?left:right);
     add('d415.stl',mul(current.frames.camera,data.camera_model.color_optical_from_mesh),neutral);
+    for(const v of current.extra_visuals||[])add(v.mesh,v.transform,rgb(v.color||'--viz-series-2'));
     triangles.sort((a,b)=>a.depth-b.depth);
     for(const t of triangles){ctx.beginPath();ctx.moveTo(...t.pts[0].slice(0,2));ctx.lineTo(...t.pts[1].slice(0,2));ctx.lineTo(...t.pts[2].slice(0,2));ctx.closePath();ctx.fillStyle=t.paint;ctx.fill();}
   }};

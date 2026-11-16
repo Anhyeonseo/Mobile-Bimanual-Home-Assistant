@@ -89,7 +89,7 @@ def test_stop_consumes_prior_ack_and_requires_actual_confirmation():
     with pytest.raises(RuntimeError): module.stop(Port([dict(type="stopped", armed=False, stop_confirmed=False)]))
 
 
-@pytest.mark.parametrize("bad_ack", [False, True])
+@pytest.mark.parametrize("bad_ack", [False, True, 'write_timeout'])
 def test_interactive_exit_or_error_always_stops_and_restores_terminal(monkeypatch, bad_ack):
     class InteractivePort(Port):
         def __init__(self): super().__init__([])
@@ -101,6 +101,7 @@ def test_interactive_exit_or_error_always_stops_and_restores_terminal(monkeypatc
             elif data.startswith(b"ARM "):
                 response = dict(type="armed", session=123, sequence=0, armed=True, fault=False)
             elif data.startswith(b"D "):
+                if bad_ack=='write_timeout':raise OSError('Write timeout')
                 response = dict(type="ack", session=123, sequence=99 if bad_ack else 1, armed=True, fault=False)
             else:
                 assert data == b"STOP\n"
@@ -118,7 +119,7 @@ def test_interactive_exit_or_error_always_stops_and_restores_terminal(monkeypatc
     monkeypatch.setattr(module.secrets, "randbelow", lambda n: 122)
     port = InteractivePort()
     if bad_ack:
-        with pytest.raises(RuntimeError): module.run(port, 1)
+        with pytest.raises((RuntimeError,OSError)): module.run(port, 1)
     else: assert module.run(port, 1)["stop_confirmed"]
     assert restored == [["saved"]]
     assert port.writes[-1] == b"STOP\n"
@@ -153,13 +154,14 @@ termios.tcsetattr = lambda *a: None
 tty.setcbreak = lambda *a: None
 class Port:
     data = bytearray()
-    def __init__(self, *a, **k): pass
+    def __init__(self, *a, **k): self.read_timeout=k['timeout'];self.write_timeout=k['write_timeout']
     def __enter__(self): return self
     def __exit__(self, *a): pass
     def reset_input_buffer(self): pass
     def read(self, n):
         result = bytes(self.data[:n]); del self.data[:n]; return result
     def write(self, data):
+        assert self.read_timeout==.01 and .03<self.write_timeout<.3
         parts = data.decode().split()
         with open(log, "a") as f: f.write(parts[0]+"\n")
         if parts[0] == "INFO":
@@ -185,7 +187,12 @@ class Server:
     def shutdown(self): self.ended.set()
     def server_close(self): pass
 base_teleop_web.ThreadingHTTPServer = Server
-sys.argv = ["teleop_mobile_base.py", "--port", "fake", mode]
+class Started(base_teleop_web.Control):
+    def take_action(self, now):
+        if not self.active: return "start"
+        return None
+base_teleop_web.Control = Started
+sys.argv = ["teleop_mobile_base.py", "--port", "fake", mode, "--record-dir", str(pathlib.Path(log).parent/"sessions")]
 runpy.run_path(str(pathlib.Path(root)/"tools/run/teleop_mobile_base.py"), run_name="__main__")
 '''
     result = subprocess.run([sys.executable, "-c", child, str(ROOT), str(log), signal_name, mode],
@@ -231,3 +238,13 @@ def test_startup_failure_snapshot_survives_successful_cleanup(binaries, scenario
 @pytest.mark.parametrize("scenario", [29,30,31])
 def test_zero_speed_may_enable_torque_and_torque_off_must_be_verified(binaries, scenario):
     subprocess.run([str(binaries / "app"), str(scenario)], check=True)
+
+
+def test_failed_hold_retains_confirmed_wheel_stop(monkeypatch):
+    monkeypatch.setattr(module,'PRESERVE_HOLD',True)
+    reply=dict(type='stopped',armed=False,stop_confirmed=True,hold_confirmed=False,
+               hold_reason='HOLD_READ_FAILED',hold_failed_slot=7)
+    with pytest.raises(module.StopError) as caught:module.stop(Port([reply]))
+    assert caught.value.reply==reply
+    message=module.stop_failure_message(caught.value,caught.value.reply)
+    assert 'supports' in message and 'Cut motor' not in message

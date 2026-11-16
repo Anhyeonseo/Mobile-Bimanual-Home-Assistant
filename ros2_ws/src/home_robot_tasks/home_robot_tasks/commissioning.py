@@ -38,7 +38,7 @@ def _validate(value,schema,path):
 def validate_board_profile(document):
     if (not isinstance(document,dict) or set(document)!={'schema_version','mode','board','measurement_records'}
             or type(document['schema_version']) is not int or document['schema_version']!=1
-            or document['mode'] not in ('simulation','measured')):
+            or document['mode'] not in ('simulation','measured','commissioning')):
         raise InvalidTask('explicit versioned board profile required')
     _validate(document['board'],SCHEMA,'board')
     p=document['board'];s=p['output']['schedule'];l=p['lift'];m=p['mobile'];f=p['feedback'];stop=p['stop']
@@ -59,8 +59,10 @@ def validate_board_profile(document):
     for i,a in enumerate(f['axes']):
         if a['velocity_direction']!=p['output']['velocity_direction'][i] or a['minimum_voltage_raw']>=a['maximum_voltage_raw']:
             raise InvalidTask('RX/TX direction or voltage mismatch')
-    if document['mode']=='measured':
+    if document['mode'] in ('measured','commissioning'):
         required={'motor_identity','joint_limits','bus_timing','lift_geometry','lift_hold','camera_extrinsics'}
+        if document['mode']=='commissioning':
+            required={'motor_identity','joint_limits','lift_geometry','camera_extrinsics'}
         if not isinstance(document['measurement_records'],dict) or set(document['measurement_records'])!=required:
             raise InvalidTask('all commissioning measurement records required')
         for record in document['measurement_records'].values():
@@ -88,6 +90,8 @@ def export_profile(document, destination):
     header='/* Generated profile '+sha+'; not a hardware qualification. */\n'
     if profile['mode']=='simulation':
         header+='#ifndef MOBILE_PROFILE_OFFLINE_TEST\n#error "Synthetic profile: offline tests only"\n#endif\n'
+    if profile['mode']=='commissioning':
+        header+='#if !HOST_S4_UNIFIED_CANDIDATE\n#error "Commissioning profile requires the explicit S4 preparation path"\n#endif\n'
     header+='static const MobileBoardProfile commissioned_mobile_profile = '+_initializer(profile['board'])+';\n'
     destination.mkdir(parents=True)
     (destination/'mobile_profile.json').write_bytes(canonical+b'\n')
@@ -95,5 +99,7 @@ def export_profile(document, destination):
     files={n:hashlib.sha256((destination/n).read_bytes()).hexdigest() for n in ('mobile_profile.json','mobile_profile.h')}
     manifest=dict(schema_version=1,mode=profile['mode'],profile_sha256=sha,files=files,hardware_authorized=False,
                   boot_initialization=False,automatic_homing=False)
+    if profile['mode']=='commissioning':
+        manifest['pending_physical_acceptance']=['shared_bus_timing','lift_hold','wheel_motion_and_stop','loaded_manipulation']
     (destination/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     return manifest

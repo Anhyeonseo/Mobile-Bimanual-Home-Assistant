@@ -35,8 +35,18 @@ def main():
     parser.add_argument(
         "--fault", choices=("none", "scan_loss", "tf_loss"), default="none"
     )
+    parser.add_argument("--params-file",type=Path,default=ROOT/"config/nav2.simulation.yaml")
+    parser.add_argument("--teleop-command-profile",type=Path,help="exercise recorded command conversion in an ideal synthetic plant; never opens robot hardware")
+    parser.add_argument("--supervised-bridge",action='store_true',help='exercise the production sensor/Nav2/web-trial connection with a native C synthetic base')
+    parser.add_argument('--map-target',type=float,nargs=3,help='synthetic explicit map target for supervised bridge')
+    parser.add_argument('--preplaced-box',action='store_true',help='supervised synthetic 45x32cm box, absent from saved map; goal 1.19m ahead')
+    parser.add_argument('--depth-only-box-plan',action='store_true',help='verify parked Nav2 planning around an elevated depth-only box; no motion')
+    parser.add_argument('--sudden-box',action='store_true',help='inject a close box during supervised motion, then remove it and verify latched zero output')
     args = parser.parse_args()
+    if args.depth_only_box_plan:args.preplaced_box=True;args.supervised_bridge=True
+    if args.sudden_box:args.supervised_bridge=True;args.map_target=(.4,0.,0.)
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.supervised_bridge:return check_supervised_bridge(args)
     import rclpy
     from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
     from lifecycle_msgs.srv import ChangeState
@@ -54,7 +64,7 @@ def main():
         get_package_prefix,
         get_package_share_directory,
     )
-    from home_robot_tasks.base_motion import OmniKinematics, Wheel, WheelOdometry
+    from home_robot_tasks.base_motion import OmniKinematics, Wheel, WheelOdometry, TeleopCommandModel
     from home_robot_tasks.nav2_port import Nav2Port
     from home_robot_tasks.application import RobotApplication
     from home_robot_tasks.navigation import NavigationMap
@@ -85,6 +95,14 @@ def main():
             for a in (0, 2 * math.pi / 3, 4 * math.pi / 3)
         )
     )
+    command_model = (TeleopCommandModel(json.loads(args.teleop_command_profile.read_text()))
+                     if args.teleop_command_profile else None)
+    if command_model:
+        # Only this ideal test plant interprets raw command units as a response.
+        # The hardware driver keeps measured geometry/feedback scale separate.
+        geometry = type('RecordedCommandPlant',(),{
+            'body_twist': lambda self, rates: command_model.expected_twist(tuple(v*100 for v in rates)),
+            'wheel_rates': lambda self, twist, limits=None: tuple(v/100 for v in command_model.raw_command(twist))})()
     odometry = WheelOdometry(geometry, max_gap_s=0.25)
     odometry.pose = (-1.0, 0.0, 0.0)
     command = [0.0, 0.0, 0.0]
@@ -280,6 +298,8 @@ def main():
         "hardware_commands": 0,
         "physical_task_completed": False,
         "real_nav2_planner": True,
+        "params_file": str(args.params_file),
+        "params_sha256": hashlib.sha256(args.params_file.read_bytes()).hexdigest(),
         "real_nav2_controller": True,
         "native_c_mobile_plant": True,
         "localization": "real AMCL with synthetic scan/odometry",
@@ -318,7 +338,7 @@ def main():
                 application[0].tick(time.monotonic() - started)
 
     try:
-        config = yaml.safe_load((ROOT / "config/nav2.simulation.yaml").read_text())
+        config = yaml.safe_load(args.params_file.read_text())
         config["/offline_nav2/bt_navigator"]["ros__parameters"][
             "default_nav_to_pose_bt_xml"
         ] = str(ROOT / "config/navigate.simulation.xml")
@@ -550,7 +570,8 @@ def main():
                     "yaw_rad": 0.0,
                 }
 
-            first = request("arrive", 1.2, 0.0)
+            arrival_x = -.65 if command_model else 1.2
+            first = request("arrive", arrival_x, 0.0)
             start_goal = time.monotonic()
             assert http("POST", "/v1/requests", first)[0] == 409
             assert submit_http(first)[0] == 202
@@ -572,7 +593,10 @@ def main():
                 time.monotonic() - started,
             )
             report["application_idempotency_and_lease"] = True
-            assert math.hypot(odometry.pose[0] - 1.2, odometry.pose[1]) < 0.12
+            assert math.hypot(odometry.pose[0] - arrival_x, odometry.pose[1]) < 0.12
+            if command_model:
+                report['recorded_command_profile_sha256'] = hashlib.sha256(args.teleop_command_profile.read_bytes()).hexdigest()
+                report['recorded_command_profile_test_scope'] = 'ideal synthetic plant only; recorded floor scale and deadband not independently validated'
             assert moving_commands[0] > 0
             report["navigate_wall_s"] = round(time.monotonic() - start_goal, 3)
             report["arrival_pose"] = odometry.pose
@@ -666,6 +690,197 @@ def main():
     print(json.dumps(report))
     if not report["passed"]:
         raise RuntimeError("Nav2 run or shutdown failed")
+
+
+def check_supervised_bridge(args):
+    """Exercise the exact parked planner and FollowPath peer used on Jetson."""
+    import numpy as np
+    import rclpy
+    from types import SimpleNamespace
+    from navigation_trial_web import State
+    from pulse_mobile_base import PATTERNS
+    from home_robot_tasks.nav2_trial import Nav2Trial,Nav2SensorBridge
+    from home_robot_tasks.base_motion import WheelOdometry
+    from so101_arm_bridge.host_simulator import NativeHostSerial
+    from so101_arm_bridge.mobile_client import MobileClient
+    from so101_arm_bridge.stream_transport_v2 import StreamValidationTransportV2,MobileV2Exchange
+    read=lambda name:json.loads((ROOT/'config/home_assistant'/name).read_text())
+    grid=np.zeros((120,120),dtype=int);grid[[0,-1],:]=100;grid[:,[0,-1]]=100
+    map_file=args.output/'fixture-map.json';area_file=args.output/'fixture-area.npz';visibility_file=args.output/'fixture-visibility.json'
+    map_file.write_text(json.dumps(dict(width=120,height=120,resolution=.05,origin=[-3.,-3.],data=grid.ravel().tolist())))
+    area=dict(feasible_by_yaw=np.ones((72,120,120),bool),resolution_m=.05,origin_xy_m=np.array([-3.,-3.]),rgbd_obstacles=np.zeros((120,120),bool))
+    np.savez_compressed(area_file,**area)
+    visibility=read('lidar_visibility.review.json');visibility_file.write_text(json.dumps(dict(visibility=visibility)))
+    trial=Nav2Trial(read('s4_base.nominal.json'),area,patterns=PATTERNS,navigation_body=read('navigation_body.fixed.json'),command_profile=read('s4_base.command-candidate.json'),controller_maximum_raw=read('s4_unified.policy.json')['maximum_wheel_speed_raw'],distance=1.2 if args.preplaced_box else .4)
+    trial.target_pose=(1.19,0.,0.) if args.preplaced_box else None if args.map_target is None else tuple(args.map_target)
+    trial.plan((0.,0.,0.));state=State(trial,None)
+    rclpy.init();node=rclpy.create_node('nav2_supervised_bridge_fixture')
+    if args.preplaced_box:
+        from nav_msgs.msg import OccupancyGrid
+        from map_msgs.msg import OccupancyGridUpdate
+        costmap=[None,None]
+        def costmap_review(m):
+            data=np.array(m.data).reshape(m.info.height,m.info.width)
+            costmap[:]=[m,data]
+            write_costmap_review()
+        def write_costmap_review():
+            m,data=costmap
+            if m is None:return
+            xs=m.info.origin.position.x+(np.arange(m.info.width)+.5)*m.info.resolution
+            ys=m.info.origin.position.y+(np.arange(m.info.height)+.5)*m.info.resolution
+            box=data[np.ix_((ys>=-.2)&(ys<=.2),(xs>=.4)&(xs<=.9))]
+            yy,xx=np.nonzero(data>=99)
+            points=[(float(xs[x]),float(ys[y])) for x,y in zip(xx,yy) if abs(xs[x])<2 and abs(ys[y])<2]
+            (args.output/'global-costmap-review.json').write_text(json.dumps(dict(maximum=int(box.max()) if box.size else None,occupied=int(np.count_nonzero(box>=99)),central_lethal=points))+'\n')
+        def costmap_update(m):
+            if costmap[0] is None:return
+            costmap[1][m.y:m.y+m.height,m.x:m.x+m.width]=np.array(m.data).reshape(m.height,m.width)
+            write_costmap_review()
+        node.create_subscription(OccupancyGrid,'/s4_nav2_trial/global_costmap/costmap',costmap_review,10)
+        node.create_subscription(OccupancyGridUpdate,'/s4_nav2_trial/global_costmap/costmap_updates',costmap_update,10)
+    bridge=None;clock=lambda:int(time.monotonic()*1000)
+    serial=NativeHostSerial(args.library,clock,boot_id=42)
+    client=MobileClient(MobileV2Exchange(StreamValidationTransportV2(serial,response_timeout_s=.05)),clock)
+    client.synchronize()
+    geometry=SimpleNamespace(body_twist=lambda rates:trial.model.expected_twist(tuple(v*100 for v in rates)))
+    odom=WheelOdometry(geometry,max_gap_s=.3)
+    report=dict(mode='simulation',hardware_commands=0,physical_task_completed=False,passed=False,
+        production_sensor_bridge=True,production_trial_gate=True,native_c_mobile_plant=True,
+        limitations=['Synthetic lidar/depth and ideal command response; not physical calibration or braking.'])
+    trace=[];started=None;stop_at=None;ready_since=None;last_scan=-1.;nonzero=0;max_raw=0;injected=None;paused=False;resumed=False
+    intrusion_at=None;intrusion_world=None;intrusion_stop_at=None
+    try:
+        bridge=Nav2SensorBridge(node,state,SimpleNamespace(map=map_file,area=area_file,visibility=visibility_file,output=args.output),ROOT)
+        began=time.monotonic()
+        while time.monotonic()-began<(600 if args.preplaced_box else 125):
+            now=time.monotonic();feedback=client.status()
+            measured=tuple(v/100 for v in feedback.velocity_raw[:3]);odom.observe(measured,now)
+            pose=odom.pose;state.pose=list(pose);state.pose_stamp=state.scan_stamp=now;state.scan_error=state.depth_error=None
+            state.pose_history.append((now,list(pose)));state.pose_history=state.pose_history[-100:]
+            state.depth_points=[];state.depth_stamp=now-.03
+            if args.sudden_box and intrusion_at is None and pose[0]>.05:
+                intrusion_at=now
+                # A 20 cm high box enters 17 cm beyond the fixed body's front.
+                front=max(p[0] for p in trial.navigation_body['footprint_xy_m'])+.17
+                intrusion_world=np.array([[pose[0]+front,y,.2] for y in np.linspace(-.16,.16,25)])
+            if intrusion_at is not None and now-intrusion_at<1.5:
+                c,s=math.cos(pose[2]),math.sin(pose[2])
+                xy=(intrusion_world[:,:2]-pose[:2])@np.array([[c,-s],[s,c]])
+                state.depth_points=np.column_stack((xy,intrusion_world[:,2])).tolist()
+            if args.depth_only_box_plan:
+                state.depth_points=[[float(x),float(y),.6] for x in np.arange(.425,.876,.025) for y in np.arange(-.16,.161,.025)]
+            state.wheel_observation=dict(observed_s=now,twist=geometry.body_twist(measured))
+            if args.fault!='none' and started is not None and nonzero>15 and injected is None:injected=now
+            injecting=injected is not None and now-injected<1.
+            if injecting and args.fault=='tf_loss':state.wheel_observation=None
+            state.nav2_control=dict(goal=list(trial.goal),execute=trial.state=='RUNNING')
+            if now-last_scan>=.1 and not (injecting and args.fault=='scan_loss'):
+                mx,my,_=visibility['base_from_lidar_translation_m'];c,s=math.cos(pose[2]),math.sin(pose[2])
+                lx,ly=pose[0]+c*mx-s*my,pose[1]+s*mx+c*my
+                ranges=[]
+                for i in range(360):
+                    a=pose[2]+visibility['yaw_rad']+math.radians(i);dx,dy=math.cos(a),math.sin(a)
+                    distances=[v for v in (((2.95 if dx>0 else -2.95)-lx)/dx if abs(dx)>1e-9 else 99.,
+                                          ((2.95 if dy>0 else -2.95)-ly)/dy if abs(dy)>1e-9 else 99.) if v>0]
+                    distance=min(distances)
+                    if args.preplaced_box and not args.depth_only_box_plan:
+                        # Ray/rectangle intersection in world coordinates;
+                        # this obstacle is intentionally absent from grid.
+                        low,high=0.,math.inf
+                        for p,d,lo,hi in ((lx,dx,.425,.875),(ly,dy,-.16,.16)):
+                            if abs(d)<1e-9:
+                                if not lo<=p<=hi:high=-1.
+                            else:
+                                a,b=sorted(((lo-p)/d,(hi-p)/d));low=max(low,a);high=min(high,b)
+                        if high>=low and low>0:distance=min(distance,low)
+                    ranges.append(math.nan if i in visibility['masked_ray_indices'] or distance>3.5 else distance)
+                scan=dict(observed_s=now,angle_min=0.,angle_increment=math.pi/180,time_increment=-.00028,scan_time=.1,ranges=ranges)
+                bridge.publish_scan(scan)
+                from home_robot_tasks.s4_recorded_mapping import scan_points,transform
+                state.scan_points=scan_points(scan,transform([mx,my,visibility['yaw_rad']]),None).tolist()
+                last_scan=now
+            for _ in range(6):rclpy.spin_once(node,timeout_sec=.001)
+            bridge.tick();trial.nav=state.nav2_feedback
+            if trial.nav.get('error'):raise RuntimeError(trial.nav['error'])
+            if started is None and trial.backend_ready():
+                if ready_since is None:ready_since=now
+                # Several parked planning cycles must have no FollowPath action
+                # and no native velocity writes before the explicit start.
+                assert bridge.active is None and nonzero==0 and client.session is None
+                if now-ready_since>(4 if args.preplaced_box else 1):
+                    report['parked_planning_without_enable']=True
+                    report['initial_nav2_path']=bridge.path
+                    (args.output/'planning.json').write_text(json.dumps(report,indent=2)+'\n')
+                    if args.depth_only_box_plan:
+                        review=json.loads((args.output/'global-costmap-review.json').read_text())
+                        assert review['occupied']>0
+                        assert max(abs(p[1]) for p in bridge.path)>.35
+                        assert costmap[1].shape==(120,120)
+                        assert np.count_nonzero(costmap[1][0]>=99)>100
+                        report.update(passed=True,depth_only_obstacle_planning=True,nonzero_commands=nonzero,
+                                      global_map_geometry_preserved=True,saved_walls_preserved=True)
+                        break
+                    trial.start(now,pose,operator_confirmed=True);client.arm(1);started=now
+            if client.session is not None:
+                clear=state.corridor_clear()
+                raw=trial.command(time.monotonic(),pose,state.pose_stamp,sensors_fresh=not (injecting and args.fault=='scan_loss'),corridor_clear=clear)
+                if trial.state in trial.WAITING:
+                    paused=True;assert not any(raw)
+                    if trial.collision_hold:
+                        if not args.sudden_box:raise RuntimeError('synthetic preplaced obstacle reached immediate stop zone')
+                        if intrusion_stop_at is None:intrusion_stop_at=now
+                    if trial.recovery_ready and trial.resume_required and not args.sudden_box:
+                        trial.resume(time.monotonic(),pose,state.pose_stamp,operator_confirmed=True,sensors_fresh=True,corridor_clear=True)
+                elif paused and trial.state=='RUNNING' and any(raw):resumed=True
+                client.velocity(raw,lifetime_ms=150)
+                nonzero+=bool(any(raw));max_raw=max(max_raw,*map(abs,raw))
+                trace.append(dict(t=now-began,pose=list(pose),raw=list(raw),nav=trial.nav.get('result'),phase=trial.state))
+                if args.sudden_box and intrusion_stop_at is not None:
+                    assert not any(raw) and trial.collision_hold and trial.resume_required
+                    if now-intrusion_at>4.:
+                        proof=client.status();assert not any(proof.velocity_raw)
+                        assert not state.depth_points
+                        report.update(passed=True,sudden_obstacle_stop=True,
+                            stop_request_latency_s=intrusion_stop_at-intrusion_at,
+                            measured_mobile_stop=True,no_auto_restart_after_removal=True,
+                            nonzero_commands=nonzero,maximum_raw=max_raw)
+                        break
+                if len(trace)%100==0:
+                    (args.output/'progress.json').write_text(json.dumps(trace[-1])+'\n')
+                if trial.state=='SETTLING':
+                    if stop_at is None:stop_at=now
+                    if now-stop_at>=.4:
+                        client.stop()
+                        for _ in range(10):
+                            time.sleep(.02);proof=client.status()
+                            if proof.feedback_is_fresh() and not any(proof.velocity_raw):break
+                        assert not any(proof.velocity_raw)
+                        trial.finish(True)
+                        report.update(passed=True,arrived=True,measured_mobile_stop=True,
+                            arrival_pose=list(pose),goal=list(trial.goal),wall_s=now-started,
+                            nonzero_commands=nonzero,maximum_raw=max_raw,follow_path_terminal=bridge.result)
+                        if args.preplaced_box:
+                            lateral=max(abs(r['pose'][1]) for r in trace)
+                            assert lateral>.35
+                            report.update(preplaced_box_m=[.45,.32],saved_map_contains_box=False,
+                                          maximum_lateral_detour_m=lateral)
+                        if args.fault!='none':
+                            assert paused and resumed
+                            report.update(injected_fault=args.fault,zero_output_pause=True,resumed_same_goal=True,controller_reset=False)
+                        break
+            time.sleep(.01)
+        if not report['passed']:raise TimeoutError('supervised Nav2 bridge did not finish')
+    except Exception as error:
+        report['error']=str(error);raise
+    finally:
+        if client.session is not None:
+            try:client.stop()
+            except Exception as error:report['cleanup_error']=str(error)
+        if bridge:bridge.close();report['process_exit_codes']=[p.returncode for p in bridge.processes]
+        (args.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
+        (args.output/'control.json').write_text(json.dumps(trace))
+        node.destroy_node();rclpy.shutdown()
+    print(json.dumps(report))
 
 
 if __name__ == "__main__":

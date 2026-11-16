@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "purpose": "integration commissioning limits; not measured motion acceptance",
+  "maximum_wheel_speed_raw": 100,
+  "maximum_lift_speed_raw": 100,
+  "maximum_lift_height_um": 610000,
+  "stopped_speed_raw": 10,
+  "lift_tolerance_um": 2000,
+  "current_microamps_per_raw": 6500,
+  "maximum_current_raw": 320,
+  "feedback_max_age_ms": 250,
+  "stop_timeout_ms": 1500,
+  "arm_hold_tolerance_raw": 32,
+  "automatic_homing": false,
+  "source_notes": {
+    "speed": "At most the existing lift teleop raw 100; below wheel teleop raw 200 cap. New coupled behavior requires physical acceptance.",
+    "lift_scale": "Read from current s2_coordinates.development.json, cross-check encoder_units.LIFT_METERS_PER_TURN; do not substitute the historical descent fit.",
+    "current": "Existing single_arm_config.h: approximately 6.5 mA/raw, raw 320 protection. Not a new current calibration.",
+    "timing": "Engineering budgets satisfying the actual shared-bus scheduler. Must be tested on the installed controller before movement.",
+    "hold": "Pending measured hold acceptance; does not create any sensor hold evidence."
+  }
+}

@@ -16,6 +16,7 @@ typedef struct {
     bool active;
     bool stop_required;
     bool transmit_allowed;
+    bool transmit_attempted;
     bool read_only, read_sent;
 } ServoTransportOwner;
 
@@ -86,6 +87,7 @@ bool ServoTransport_Begin(UART_HandleTypeDef *uart,
         bus->token == UINT32_MAX) return false;
     if (kind == ACTUATOR_BUS_WORK_STOP) bus->stop_required = true;
     bus->active = true;
+    bus->transmit_attempted = false;
     bus->transmit_allowed = true;
     bus->read_only = false; bus->read_sent = false;
     bus->kind = kind;
@@ -116,6 +118,7 @@ bool ServoTransport_BeginCleanup(UART_HandleTypeDef *uart, uint32_t *token)
     if (bus == NULL || token == NULL || bus->active || bus->token == UINT32_MAX)
         return false;
     bus->active = true;
+    bus->transmit_attempted = false;
     bus->transmit_allowed = false;
     bus->kind = ACTUATOR_BUS_WORK_FEEDBACK;
     *token = ++bus->token;
@@ -133,7 +136,8 @@ bool ServoTransport_BeginReadOnly(UART_HandleTypeDef *uart, uint32_t *token)
     if (bus == NULL || token == NULL || bus->active || bus->token == UINT32_MAX ||
         uart->gState != HAL_UART_STATE_READY ||
         __HAL_UART_GET_FLAG(uart, UART_FLAG_BUSY) != RESET) return false;
-    bus->active = true; bus->transmit_allowed = true;
+    bus->active = true;
+    bus->transmit_attempted = false; bus->transmit_allowed = true;
     bus->read_only = true; bus->read_sent = false;
     bus->kind = ACTUATOR_BUS_WORK_FEEDBACK; *token = ++bus->token;
     return true;
@@ -242,7 +246,7 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
         ((held && ((data[5]==33 && data[6]==1) || (data[5]==40 && data[6]==8) ||
                    ((data[5]==3 || data[5]==56) && data[6]==4) ||
                    (left && data[2]==ACTUATOR_LIFT_ID &&
-                    ((data[5]==9 && data[6]==4) ||
+                    ((data[5]==9 && data[6]==4) || (data[5]==31 && data[6]==3) ||
                      ((data[5]==40 || data[5]==55) && data[6]==1) ||
                      (data[5]==42 && data[6]==2))))) ||
          (wheel && ((data[5]==3 && data[6]==4) ||
@@ -315,14 +319,22 @@ static bool may_transmit(UART_HandleTypeDef *uart, uint32_t token,
     /* Maintenance image: every HAL transmit path is READ-only, even if a
      * caller accidentally obtains a normal service lease. No broadcasts,
      * arm writes, torque changes, or arbitrary register access.
-     * ID 1 identity alone is allowed as a known left-arm reference. */
-    if (length != 8 ||
+     * Existing fixed inventory blocks also permit arm state diagnosis. */
+    bool inventory_read = length == 8 && data[2]>=1 && data[2]<=ACTUATOR_LIFT_ID &&
+        ((data[5]==0 && data[6]==7) || (data[5]==9 && data[6]==4) ||
+         (data[5]==31 && data[6]==3) || (data[5]==40 && data[6]==10) ||
+         (data[5]==55 && data[6]==16));
+    extern UART_HandleTypeDef huart4;
+    if (uart==&huart4 && (!inventory_read || data[2]>6)) return false;
+    if (!inventory_read && (length != 8 ||
         !((data[2] >= ACTUATOR_WHEEL_0_ID && data[2] <= ACTUATOR_LIFT_ID) ||
           (data[2] == 1 && data[5] == 3 && data[6] == 4)) ||
         !((data[5] == 3 && data[6] == 4) ||
           (data[5] == 33 && data[6] == 1) ||
           (data[5] == 40 && data[6] == 1) ||
-          (data[5] == 56 && data[6] == 2))) return false;
+          (data[5] == 56 && data[6] == 2) ||
+          (data[2] >= ACTUATOR_WHEEL_0_ID && data[2] <= ACTUATOR_WHEEL_2_ID &&
+           data[5] == 56 && data[6] == 4)))) return false;
 #else
     if (!bus->read_only) return true;
 #endif
@@ -355,6 +367,7 @@ HAL_StatusTypeDef ServoTransport_Transmit(UART_HandleTypeDef *uart,
 {
     if (!may_transmit(uart, token, data, length)) return HAL_ERROR;
     if (periodic_mode) return HAL_ERROR;
+    find_bus(uart)->transmit_attempted = true;
     return HAL_UART_Transmit(uart, data, length, timeout_ms);
 }
 
@@ -362,6 +375,7 @@ HAL_StatusTypeDef ServoTransport_TransmitIT(UART_HandleTypeDef *uart,
     uint32_t token, const uint8_t *data, uint16_t length)
 {
     if (!may_transmit(uart, token, data, length)) return HAL_ERROR;
+    find_bus(uart)->transmit_attempted = true;
     return HAL_UART_Transmit_IT(uart, data, length);
 }
 
@@ -369,6 +383,7 @@ HAL_StatusTypeDef ServoTransport_TransmitDMA(UART_HandleTypeDef *uart,
     uint32_t token, const uint8_t *data, uint16_t length)
 {
     if (!may_transmit(uart, token, data, length)) return HAL_ERROR;
+    find_bus(uart)->transmit_attempted = true;
     return HAL_UART_Transmit_DMA(uart, data, length);
 }
 
@@ -424,6 +439,33 @@ HAL_StatusTypeDef ServoTransport_CompleteQueued(
     find_bus(transaction->uart)->active = false;
     transaction->active = false;
     return HAL_OK;
+}
+
+bool ServoTransport_DeferUnsentQueued(ServoQueuedTransaction *transaction)
+{
+    if(transaction==NULL || !transaction->active)return false;
+    ServoTransportOwner *bus=find_bus(transaction->uart);
+    if(!owns(bus,transaction->gate_token) || bus->transmit_attempted || bus->stop_required ||
+       transaction->uart->gState!=HAL_UART_STATE_READY ||
+       __HAL_UART_GET_FLAG(transaction->uart,UART_FLAG_BUSY)!=RESET ||
+       !actuator_bus_router_defer_unstarted(transaction->router,transaction->router_token,Timebase_NowUs()))return false;
+    bus->active=false;transaction->active=false;return true;
+}
+
+/* Cancel only a reservation that never reached any HAL TX entry point.
+ * Preserve the STOP latch and do not record the rejected packet as completed. */
+HAL_StatusTypeDef ServoTransport_CancelUnsentQueued(ServoQueuedTransaction *transaction)
+{
+    if (transaction == NULL || !transaction->active) return HAL_ERROR;
+    ServoTransportOwner *bus = find_bus(transaction->uart);
+    if (!owns(bus, transaction->gate_token) || bus->transmit_attempted ||
+        !transaction->router->bus.active ||
+        transaction->router->bus.token != transaction->router_token) return HAL_ERROR;
+    if (transaction->uart->gState != HAL_UART_STATE_READY ||
+        __HAL_UART_GET_FLAG(transaction->uart, UART_FLAG_BUSY) != RESET) return HAL_BUSY;
+    /* No bytes were launched and the line is idle; the existing failed-owner
+     * recovery can release this reservation without inventing TX completion. */
+    return ServoTransport_RecoverQueued(transaction, true);
 }
 
 HAL_StatusTypeDef ServoTransport_RecoverQueued(

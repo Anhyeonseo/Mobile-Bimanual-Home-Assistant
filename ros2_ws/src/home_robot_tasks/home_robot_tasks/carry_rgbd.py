@@ -162,7 +162,10 @@ class StationarySceneCheck:
             nearer95=(float(np.quantile(np.maximum(self.depth[depth_valid]-depth_m[depth_valid],0.),.95))
                       if depth_valid.any() else 0.)
             checked95=nearer95 if name=='background' and self.maximum_depth is not None else depth95
-            depth_ok=(not depth_area.any() or (depth_valid.sum()>=30 and depth_coverage>=.7 and checked95<=.006))
+            # SDK float32 scale 0.001000000047... represents six depth units
+            # as 0.006000000285 m. Preserve the 6 mm inclusive threshold with
+            # only a nanometre of numerical tolerance, not a new noise budget.
+            depth_ok=(not depth_area.any() or (depth_valid.sum()>=30 and depth_coverage>=.7 and checked95<=.006+1e-9))
             image_change=float(np.mean(abs(gray[valid].astype(float)-self.color[valid].astype(float))>35))
             checks[name]=dict(unchanged=bool(coverage>=.7 and depth_ok and image_change<=.1 and largest_entrant<30),
                               valid_fraction=coverage,depth_difference95_m=depth95,image_changed_fraction=image_change,

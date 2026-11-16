@@ -1,0 +1,19 @@
+{
+  "repository": "ROBOTIS-GIT/turtlebot3",
+  "commit": "0c0be84e3f5c3194fb2adea8426a58a96060eab5",
+  "mesh_path": "turtlebot3_description/meshes/sensors/lds.stl",
+  "mesh_sha256": "98f0bd7046159f83caab9509293112ef13534368535669124b91b5114c3132f6",
+  "mesh_scale_m": 0.001,
+  "mesh_frame": "official TurtleBot3 base_scan visual, identity origin",
+  "dimensions_spec_mm": [
+    69.5,
+    95.5,
+    39.5
+  ],
+  "specification": "https://emanual.robotis.com/assets/docs/LDS_Basic_Specification.pdf",
+  "manual": "https://emanual.robotis.com/docs/en/platform/turtlebot3/appendix_lds_01/",
+  "license": "config/home_assistant/official_sources/turtlebot3-LICENSE",
+  "installed_mount_verified": false,
+  "beam_center_from_boss_m": 0.0174,
+  "beam_center_basis": "spec p4: center of 9.4 mm optical band, between 12.7 and 22.1 mm above boss datum; nominal only"
+}

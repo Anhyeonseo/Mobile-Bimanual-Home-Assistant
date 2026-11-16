@@ -29,7 +29,7 @@ def build_runtime(*, world, navigation_map, catalog_document, state, payload, ca
                   source, detector, navigation, arm, lift, planner, planning_context=None,
                   surface_observer, stop_client, clock, scene_revision,
                   maintenance=(), observations=(), maximum_tick_gap_s=.1,
-                  manipulation_factory=None, surface_sampler=None, placement_policy=None):
+                  manipulation_factory=None, surface_sampler=None, placement_policy=None, alignment=None):
     lease = TaskLease()
     stop = SystemStopBackend(stop_client, lease)
     # Device factories bind to the SAME stop owner as every nested task.
@@ -69,12 +69,15 @@ def build_runtime(*, world, navigation_map, catalog_document, state, payload, ca
         manipulation = manipulation_factory(motion=manipulation, arm=arm,
             monitor=monitor, clock=clock, catalog=catalog)
     adapter = compose_fetch_adapter(backends=dict(arm=arm,lift=lift,navigation=nav,
-        alignment=nav,search=search,capture=capture,manipulation=manipulation),
+        alignment=alignment or nav,search=search,capture=capture,manipulation=manipulation),
         resolve=catalog.resolve,monitor=monitor,phase_monitor=monitor,stop_backend=stop,
-        clock=clock,before_start=monitor.before_start,alignment_transport=catalog.doc["transport"],
+        clock=clock,before_start=monitor.before_start,alignment_transport=(placement_policy.transport_for_alignment if hasattr(placement_policy,"transport_for_alignment") else catalog.doc["transport"]),
+        resolver_factory=(placement_policy.resolver_factory(catalog) if hasattr(placement_policy,"resolver_factory") else None),
         capture_sink=lambda g,s,p,o: catalog.capture_sink(g,s,p,o,camera,surface_observer=surface_observer))
     app = RobotApplication(world,navigation_map,adapter,lease=lease,
-        initial_xy=state.latest.xy_yaw[:2],exact_goal_simulation=False)
+        initial_xy=state.latest.xy_yaw[:2],exact_goal_simulation=False,
+        planning_in_skill=hasattr(placement_policy,"resolver_factory"),
+        task_timeout_s=1200 if hasattr(placement_policy,"resolver_factory") else 300)
     def registered_geometry():
         if lease.owner is not None and catalog.invalid_places:
             raise InvalidTask('registered geometry changed; stop and re-register the affected place')

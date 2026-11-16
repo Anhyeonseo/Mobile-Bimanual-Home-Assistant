@@ -1,12 +1,24 @@
 #include "mobile_board.h"
 #include "mobile_boot_identity.h"
 #include "actuator_core/robot_evidence.h"
+#include "actuator_core/mobile_ids.h"
 #include "binary_control.h"
 #include "servo_bus.h"
 #include "right_servo_bus.h"
 #include "mobile_hold_output.h"
 #include "mobile_arm_observer.h"
 #include "single_arm_config.h"
+#if HOST_S4_UNIFIED_CANDIDATE
+#include "device_inventory.h"
+#include MOBILE_BOARD_PROFILE_HEADER
+static UART_HandleTypeDef *commission_left,*commission_right;
+static uint32_t commission_ticket,commission_issued,commission_sequence;
+static bool commission_attempted;
+static bool power_attempted,power_enabled;
+static bool recovery_attempted;
+static uint8_t commission_reason;
+static actuator_lift_hold_monitor_t lift_hold_monitor;
+#endif
 #include "timebase.h"
 #define MOBILE_BOARD_SUPPORTED (HOST_BIMANUAL_TRACKING_FEEDBACK_BUILD && \
     HOST_BIMANUAL_FEEDBACK_SNAPSHOT_BUILD && HOST_BIMANUAL_DMA_DISPATCH_BUILD)
@@ -22,6 +34,9 @@
 static MobileBoardProfile profile;
 static actuator_robot_evidence_t host_evidence;
 static bool host_evidence_bound;
+#if HOST_S4_UNIFIED_CANDIDATE
+static uint32_t transport_admission_sequence;
+#endif
 static actuator_mobile_supervisor_t supervisor;
 static actuator_mobile_endpoint_t mobile_endpoint;
 static actuator_lift_t lift;
@@ -44,7 +59,32 @@ static actuator_arm_hold_monitor_t hold_monitor;
 static uint32_t interlock_ms,last_lift_sample;
 static bool arms_safe,lift_hold,have_interlock_stamp,have_load_stamp;
 static UART_HandleTypeDef *left_uart,*right_uart;
-actuator_lift_endpoint_t *MobileBoard_LiftEndpoint(void){return prepared?&lift_endpoint:NULL;}
+static uint32_t first_stop_diagnostics[24];
+#if HOST_S4_UNIFIED_CANDIDATE
+static actuator_mobile_stationary_window_t wheel_stop_windows[3],wheel_idle_windows[3];
+static uint32_t runtime_started_ms;
+#endif
+static void record_board_stop(uint32_t source){
+    if(first_stop_diagnostics[0])return;
+    const actuator_mobile_feedback_reader_t *r=MobileServoFeedback_State();
+    const actuator_mobile_axis_sample_t *a=&r->axes[3];
+    uint32_t *d=first_stop_diagnostics;
+    d[0]=source;d[1]=HAL_GetTick();d[2]=r->fault;d[3]=lift.state;d[4]=lift.fault;
+    d[5]=a->observed_ms;d[6]=a->mode_ms;d[7]=(uint32_t)a->position_raw;
+    d[8]=(uint32_t)a->velocity_raw;d[9]=(uint32_t)a->current_raw;d[10]=a->moving;
+    d[11]=(a->valid?1u:0u)|(a->mode_verified?2u:0u)|(a->drive_valid?4u:0u);
+    d[12]=a->torque_enabled;d[13]=(uint32_t)a->goal_velocity_raw;
+    d[14]=lift.feedback.healthy;d[15]=lift.feedback.hold_verified;
+#if HOST_S4_UNIFIED_CANDIDATE
+    d[16]=lift_hold_monitor.first_ms;d[17]=lift_hold_monitor.last_ms;
+    d[18]=lift_hold_monitor.anchor_raw;
+    d[19]=(lift_hold_monitor.tracking?1u:0u)|(lift_hold_monitor.proven?2u:0u);
+#endif
+    d[20]=interlock_ms;d[21]=have_interlocks;d[22]=lift.previous_raw;d[23]=(uint32_t)lift.height_um;
+}
+void MobileBoard_Diagnostics(uint32_t out[24]){if(out)memcpy(out,first_stop_diagnostics,sizeof(first_stop_diagnostics));}
+static void board_stop(uint32_t source){record_board_stop(source);BinaryControl_LatchStop();}
+actuator_lift_endpoint_t *MobileBoard_LiftEndpoint(void){return prepared&&!supervisor.transport_only?&lift_endpoint:NULL;}
 actuator_mobile_supervisor_t *MobileBoard_Supervisor(void){return prepared?&supervisor:NULL;}
 bool MobileBoard_Prepare(UART_HandleTypeDef *uart,UART_HandleTypeDef *right,const MobileBoardProfile *p,bool secured){
 #if !MOBILE_BOARD_SUPPORTED
@@ -105,8 +145,49 @@ bool MobileBoard_ProvisionModes(const actuator_device_profile_t *p,bool secured)
     }
     return startup.state==DEVICE_STARTUP_READY;
 }
+static uint32_t read32(const uint8_t *p);
+static void write32(uint8_t *p,uint32_t v);
+static bool enter_transport(const uint8_t q[36],uint8_t out[64]){
+#if HOST_S4_UNIFIED_CANDIDATE && MOBILE_BOARD_SUPPORTED
+    uint32_t now=HAL_GetTick();
+    if(!prepared||!q||!out||memcmp(q,"AE\x01\x02",4)||
+       read32(q+32)!=actuator_crc32c(q,32))return false;
+    for(unsigned i=21;i<32;i++)if(q[i])return false;
+    /* The request references the last accepted initial measurement verbatim.
+     * It cannot extend that measurement's life or create new arm evidence. */
+    if(!host_evidence_bound||read32(q+4)!=host_evidence.sequence||
+       read32(q+8)!=mobile_endpoint.boot_id||read32(q+12)!=host_evidence.observed_ms||
+       read32(q+16)!=host_evidence.expires_ms||q[20]!=host_evidence.flags)return false;
+    bool accepted=supervisor.transport_only&&transport_admission_sequence==read32(q+4);
+    if(!accepted){
+        if(stop_requested||!runtime_started||!output_ready||!power_enabled||
+           !MobileArmObserver_OwnsFeedback()||
+           supervisor.state!=ACTUATOR_MOBILE_DISABLED||supervisor.session||
+           !actuator_robot_evidence_fresh(&host_evidence,now,profile.stop.feedback_max_age_ms)||
+           (host_evidence.flags&5u)!=5u||!arms_safe||!lift_hold||
+           lift.state!=LIFT_HOLDING||lift_endpoint.active||!lift.zero_sent||lift.command_raw||
+           !lift.homed||!lift.have_sample||now-lift.observed_ms>=profile.lift.feedback_timeout_ms)
+            return false;
+        BimanualFeedbackSnapshot snap;BimanualFeedbackSnapshot_Copy(now,&snap);
+        if(snap.present_mask!=BIMANUAL_FEEDBACK_COMPLETE_MASK)return false;
+        for(unsigned i=0;i<12;i++)if(snap.sample_age_ms[i]>=profile.stop.feedback_max_age_ms)return false;
+        /* Busy is an explicit non-admission, not an abort of a live read. */
+        if(!BimanualTrackingFeedback_Pending() && MobileServoFeedback_EnterTransport()){
+            if(!MobileArmObserver_Suspend()){board_stop(4);return false;}
+            transport_admission_sequence=read32(q+4);accepted=true;
+        }
+    }
+    memset(out,0,64);memcpy(out,"AF\x01\x02",4);if(!accepted)out[3]|=128u;
+    write32(out+4,read32(q+4));write32(out+8,mobile_endpoint.boot_id);write32(out+12,now);
+    write32(out+16,host_evidence.observed_ms);out[20]=host_evidence.flags;
+    write32(out+60,actuator_crc32c(out,60));return true;
+#else
+    (void)q;(void)out;return false;
+#endif
+}
 bool MobileBoard_Evidence(const uint8_t q[36],uint8_t out[64]){
-    if(!prepared)return false;
+    if(q&&q[3]==2)return enter_transport(q,out);
+    if(!prepared||supervisor.transport_only)return false;
     uint32_t age=profile.stop.feedback_max_age_ms;
     if(profile.lift.feedback_timeout_ms<age)age=profile.lift.feedback_timeout_ms;
     if(!actuator_robot_evidence_accept(&host_evidence,mobile_endpoint.boot_id,age,HAL_GetTick(),q,out))return false;
@@ -116,7 +197,10 @@ bool MobileBoard_Evidence(const uint8_t q[36],uint8_t out[64]){
     return true;
 }
 bool MobileBoard_Boot(UART_HandleTypeDef *uart,UART_HandleTypeDef *right){
-#ifdef MOBILE_BOARD_PROFILE_HEADER
+#if HOST_S4_UNIFIED_CANDIDATE
+    commission_left=uart;commission_right=right;
+    return false; /* No bus/flash writes or boot-time provisioning. */
+#elif defined(MOBILE_BOARD_PROFILE_HEADER)
 #include MOBILE_BOARD_PROFILE_HEADER
     return MobileBoard_Prepare(uart,right,&commissioned_mobile_profile,true);
 #else
@@ -124,10 +208,20 @@ bool MobileBoard_Boot(UART_HandleTypeDef *uart,UART_HandleTypeDef *right){
 #endif
 }
 bool MobileBoard_IsConfigured(void){return prepared;}
+bool MobileBoard_TransportOnly(void){return supervisor.transport_only;}
+bool MobileBoard_PowerReady(void){
+#if HOST_S4_UNIFIED_CANDIDATE
+    return prepared&&power_enabled&&!commission_reason&&!stop_requested;
+#else
+    return true;
+#endif
+}
+bool MobileBoard_MaintenanceAllowed(void){return !runtime_started&&!output_ready&&!stop_requested;}
 bool MobileBoard_StopActive(void){return stop_requested;}
 const actuator_system_stop_t *MobileBoard_StopState(void){return &system_stop;}
 bool MobileBoard_ArmsPrepared(void){
     if(!prepared)return true; /* Unconfigured legacy image. */
+    if(!MobileBoard_PowerReady())return false;
     if(stop_requested)return false;
     if(runtime_started)return true;
 #if MOBILE_BOARD_SUPPORTED
@@ -138,6 +232,9 @@ bool MobileBoard_ArmsPrepared(void){
        !MobileArmObserver_Configure(left_uart,right_uart,profile.arm_read_period_ms,profile.stop.feedback_max_age_ms)){
         MobileBoard_RequestStop();return false;
     }
+#if HOST_S4_UNIFIED_CANDIDATE
+    runtime_started_ms=HAL_GetTick();
+#endif
     runtime_started=true;return true;
 #else
     return false;
@@ -145,7 +242,7 @@ bool MobileBoard_ArmsPrepared(void){
 }
 bool MobileBoard_PrepareArmMotion(int32_t anchor[12]){
     if(!prepared)return true;
-    if(!runtime_started||stop_requested||!anchor||!MobileArmObserver_Suspend())return false;
+    if(!runtime_started||stop_requested||supervisor.transport_only||!anchor||!MobileArmObserver_Suspend())return false;
 #if MOBILE_BOARD_SUPPORTED
     /* The first trajectory uses the existing freshly prepared torque-off
      * anchor. Background observation starts after its finite completion. */
@@ -164,9 +261,16 @@ bool MobileBoard_PrepareArmMotion(int32_t anchor[12]){
 }
 void MobileBoard_RequestStop(void){
     if(!prepared||stop_requested)return;
-    stop_requested=true;
+    record_board_stop(5);stop_requested=true;
     MobileServoOutput_Stop();actuator_lift_endpoint_stop(&lift_endpoint);
-    ServoTransport_RequestStop(left_uart);ServoTransport_RequestStop(right_uart);
+    ServoTransport_RequestStop(left_uart);
+    if(supervisor.transport_only){
+        /* Arm goals and torque are already resident. Stop wheels without
+         * requesting arm writes/observations over an unrelated UART. */
+        system_stop.started_ms=HAL_GetTick();system_stop.state=SYSTEM_STOP_PENDING;
+        return;
+    }
+    ServoTransport_RequestStop(right_uart);
     uint16_t lp[6]={0},rp[6]={0};bool valid=false;
 #if MOBILE_BOARD_SUPPORTED
     BimanualFeedbackSnapshot snap;BimanualFeedbackSnapshot_Copy(HAL_GetTick(),&snap);
@@ -189,6 +293,20 @@ void MobileBoard_ObserveLoad(uint32_t stamp,bool retained){
 }
 static void poll_stop(uint32_t now,const actuator_mobile_feedback_reader_t *r,bool base_stopped,bool modes){
     if(!stop_requested)return;
+    if(supervisor.transport_only){
+        const actuator_mobile_output_t *o=MobileServoOutput_State();
+        uint32_t age=0;bool newer=o->stop_written;
+        for(unsigned i=0;i<3;i++){
+            uint32_t a=now-r->axes[i].observed_ms;if(a>age)age=a;
+            uint32_t delta=r->axes[i].observed_ms-o->stop_written_ms;
+            newer=newer&&delta>0&&delta<UINT32_C(0x80000000);
+        }
+        last_stop_proof=(actuator_stop_proof_t){.observed_ms=now-age,
+            .base_stopped=newer&&base_stopped&&modes&&r->fault==MOBILE_FEEDBACK_OK};
+        system_stop.actions_completed=o->stop_written;system_stop.actions_completed_ms=o->stop_written_ms;
+        /* Whole-system proof stays unconfirmed; AQ scope=1 separately proves wheels. */
+        system_stop.state=SYSTEM_STOP_UNCONFIRMED;return;
+    }
     actuator_bus_router_t *left=MobileServoOutput_StopRouter(),*right=MobileHoldOutput_Router();
     if(!left||!right)return;
     actuator_stop_proof_t proof={0};
@@ -204,11 +322,24 @@ static void poll_stop(uint32_t now,const actuator_mobile_feedback_reader_t *r,bo
         BimanualTrackingFeedbackSample sample;
         BimanualTrackingFeedbackResult result=BimanualTrackingFeedback_Poll(now,&sample);
         if(result==BIMANUAL_TRACKING_SAMPLE_READY){
-            int32_t unwrapped;
-            if(!BimanualOperationalLimits_UnwrapModuloRaw(BIMANUAL_ARM_LEFT,sample.joint_index,
-                    sample.left_position_raw,&unwrapped)||
-               !BimanualOperationalLimits_UnwrapModuloRaw(BIMANUAL_ARM_RIGHT,sample.joint_index,
-                    sample.right_position_raw,&unwrapped))monitor_fault=true;
+            int32_t unwrapped[2],position[2];
+            bool valid=true;
+            for(unsigned side=0;side<2;side++){
+                BimanualArm arm=side?BIMANUAL_ARM_RIGHT:BIMANUAL_ARM_LEFT;
+                const BimanualOperationalLimit *limit=BimanualOperationalLimits_Get(arm,sample.joint_index);
+                uint16_t raw=side?sample.right_position_raw:sample.left_position_raw;
+                if(!limit||!BimanualOperationalLimits_UnwrapModuloRaw(arm,sample.joint_index,raw,&unwrapped[side])||
+                   actuator_unwrapped_raw_to_urad(limit->zero_raw,limit->positive_raw_direction,
+                       unwrapped[side],&position[side])!=ACTUATOR_UNWRAP_OK||
+                   position[side]<limit->urad.minimum_urad||position[side]>limit->urad.maximum_urad)valid=false;
+            }
+            if(!valid){
+                monitor_fault=true;BimanualFeedbackSnapshot_InvalidatePair(sample.joint_index);
+            }else{
+                /* STOP owns the UART now; keep the public measured snapshot
+                 * advancing from these actual reads, never from hold goals. */
+                BimanualFeedbackSnapshot_UpdatePair(sample.joint_index,position[0],position[1],sample.observed_ms);
+            }
             (void)actuator_arm_hold_monitor_observe(&hold_monitor,sample.joint_index,
                 sample.left_position_raw,sample.right_position_raw,sample.observed_ms,now);
             monitor_joint=(sample.joint_index+1u)%6u;
@@ -230,7 +361,13 @@ static void poll_stop(uint32_t now,const actuator_mobile_feedback_reader_t *r,bo
     if(now-interlock_ms>oldest)oldest=now-interlock_ms;
     if(now-load_ms>oldest)oldest=now-load_ms;
     proof.observed_ms=now-oldest;proof.base_stopped=base_stopped&&modes&&r->fault==MOBILE_FEEDBACK_OK;
+    bool bottom_after_stop=actuator_lift_bottom_transport_ready(&lift,now)&&system_stop.actions_completed&&
+        lift.observed_ms-system_stop.actions_completed_ms>0&&
+        lift.observed_ms-system_stop.actions_completed_ms<UINT32_C(0x80000000)&&
+        lift.feedback.bottom_drive_observed_ms-system_stop.actions_completed_ms>0&&
+        lift.feedback.bottom_drive_observed_ms-system_stop.actions_completed_ms<UINT32_C(0x80000000);
     proof.lift_holding=lift.state==LIFT_HOLDING&&have_interlocks&&lift_hold&&
+        (bottom_after_stop||(!lift.feedback.bottom_transport_verified&&!lift.feedback.hold_report_remaining_ms))&&
         now-interlock_ms<profile.lift.feedback_timeout_ms;
     proof.load_retained=have_load&&load_retained&&now-load_ms<profile.stop.feedback_max_age_ms;
     actuator_system_stop_poll_timed(&system_stop,left,right,&proof,Timebase_NowUs(),now);
@@ -239,19 +376,25 @@ static void poll_stop(uint32_t now,const actuator_mobile_feedback_reader_t *r,bo
 void MobileBoard_ObserveInterlocks(uint32_t stamp,bool safe,bool held){
     if(HAL_GetTick()-stamp>=profile.lift.feedback_timeout_ms||
        (have_interlock_stamp&&(stamp-interlock_ms==0||stamp-interlock_ms>=UINT32_C(0x80000000)))){have_interlocks=false;return;}
-    interlock_ms=stamp;arms_safe=safe;lift_hold=held;have_interlocks=true;have_interlock_stamp=true;
+    interlock_ms=stamp;arms_safe=safe;
+#if HOST_S4_UNIFIED_CANDIDATE
+    (void)held; /* Actual drive/position readback owns lift holding. */
+#else
+    lift_hold=held;
+#endif
+    have_interlocks=true;have_interlock_stamp=true;
 }
 void MobileBoard_Poll(void){
     if(!prepared||!runtime_started)return;
     uint32_t now=HAL_GetTick();
-    if(host_evidence_bound&&!actuator_robot_evidence_fresh(&host_evidence,now,profile.stop.feedback_max_age_ms)){
+    if(!supervisor.transport_only&&host_evidence_bound&&!actuator_robot_evidence_fresh(&host_evidence,now,profile.stop.feedback_max_age_ms)){
         have_interlocks=false;have_load=false;
-        if(output_ready&&!stop_requested)BinaryControl_LatchStop();
+        if(output_ready&&!stop_requested)board_stop(1);
     }
     const actuator_mobile_feedback_reader_t *r=MobileServoFeedback_State();
     const actuator_mobile_axis_sample_t *sample=&r->axes[3];
     bool interlock_fresh=have_interlocks&&now-interlock_ms<profile.lift.feedback_timeout_ms;
-    if(sample->valid&&(!lift.have_sample||sample->observed_ms!=last_lift_sample)){
+    if(!supervisor.transport_only&&sample->valid&&(!lift.have_sample||sample->observed_ms!=last_lift_sample)){
         int32_t pos=sample->position_raw%4096;if(pos<0)pos+=4096;
         uint32_t current=(uint32_t)(sample->current_raw<0?-sample->current_raw:sample->current_raw);
         actuator_lift_feedback_t f={.observed_ms=sample->observed_ms,.position_raw=(uint16_t)pos,
@@ -259,38 +402,300 @@ void MobileBoard_Poll(void){
             .current_ma=(int32_t)(((uint64_t)current*profile.current_microamps_per_raw+999)/1000),
             .healthy=sample->mode_verified&&r->fault==MOBILE_FEEDBACK_OK,
             .hold_verified=interlock_fresh&&lift_hold};
+#if HOST_S4_UNIFIED_CANDIDATE
+        bool drive=sample->drive_valid&&sample->torque_enabled==1&&sample->goal_velocity_raw==0&&
+            now-sample->mode_ms<profile.lift.feedback_timeout_ms&&
+            f.current_ma<=profile.lift.maximum_current_ma;
+        f.bottom_transport_verified=actuator_lift_bottom_transport_observe(&lift,&f,drive,sample->mode_ms,now);
+        f.bottom_drive_observed_ms=sample->mode_ms;
+        if(f.bottom_transport_verified){
+            lift_hold=true;
+        }else{
+            lift_hold=actuator_lift_hold_observe_report(&lift_hold_monitor,&f,drive,sample->moving,
+                lift.state==LIFT_HOLDING,now,
+                profile.lift.feedback_timeout_ms,profile.arm_hold_dwell_ms,2);
+        }
+        f.hold_verified=lift_hold;
+#endif
         (void)actuator_lift_observe(&lift,&f,now);last_lift_sample=sample->observed_ms;
-        actuator_mobile_lift_evidence_t evidence={sample->observed_ms,lift.height_um,lift.homed,
+        actuator_mobile_lift_evidence_t evidence={sample->observed_ms,actuator_lift_base_height(&lift,now),lift.homed,
             f.healthy&&lift.state!=LIFT_FAULT};
         MobileServoFeedback_SetLiftEvidence(&evidence);
     }
+#if HOST_S4_UNIFIED_CANDIDATE
+    if(r->fault!=MOBILE_FEEDBACK_OK){
+        /* A wheel observation failure stops motion, but is not evidence that
+         * the independently held lift has physically failed. Fresh lift age
+         * and its own position/current/hold checks remain mandatory. */
+        if(!stop_requested)board_stop(6);
+        if(r->axis==3)actuator_lift_inhibit(&lift,LIFT_BAD_FEEDBACK);
+    }
+#else
     if(r->fault!=MOBILE_FEEDBACK_OK)actuator_lift_inhibit(&lift,LIFT_BAD_FEEDBACK);
-    actuator_lift_poll(&lift,now);
+#endif
+    if(!supervisor.transport_only)actuator_lift_poll(&lift,now);
+#if HOST_S4_UNIFIED_CANDIDATE
+    if(!supervisor.transport_only&&lift.state==LIFT_FAULT&&!stop_requested)board_stop(2);
+#endif
     bool base_stopped=true,modes=true;
     uint32_t oldest=interlock_fresh?now-interlock_ms:UINT32_MAX;
-    for(unsigned i=0;i<4;i++){
+    for(unsigned i=0;i<(supervisor.transport_only?3u:4u);i++){
         if(!r->axes[i].valid||!r->axes[i].mode_verified||now-r->axes[i].observed_ms>=profile.feedback.sample_timeout_ms)modes=false;
         uint32_t age=now-r->axes[i].observed_ms;if(age>oldest)oldest=age;
         if(i<3&&(r->axes[i].velocity_raw>profile.mobile.stopped_velocity_raw||
                  r->axes[i].velocity_raw<-profile.mobile.stopped_velocity_raw))base_stopped=false;
     }
+#if HOST_S4_UNIFIED_CANDIDATE
+    /* Supported power activation has already written/read back wheel-zero.
+     * Before the first base ARM only, corroborate noisy stationary speed bytes
+     * with the same complete position window used for STOP. Never use this
+     * pre-ARM anchor after a motion session or to hide missing/changed feedback. */
+    if(power_enabled&&!stop_requested&&supervisor.state==ACTUATOR_MOBILE_DISABLED&&!supervisor.session){
+        bool idle_proof=actuator_mobile_wheels_stop_observe(wheel_idle_windows,r,runtime_started_ms,now);
+        base_stopped=base_stopped||idle_proof;
+    }else memset(wheel_idle_windows,0,sizeof(wheel_idle_windows));
+#endif
     lift_endpoint.interlock=(actuator_lift_interlock_t){now-oldest,base_stopped,interlock_fresh&&arms_safe,modes,r->fault==MOBILE_FEEDBACK_OK};
     lift_endpoint.have_interlock=interlock_fresh&&modes;
-    if(!stop_requested&&!output_ready&&actuator_mobile_axes_stopped(&supervisor,now)&&interlock_fresh&&arms_safe){
+    bool configure_allowed=interlock_fresh&&arms_safe;
+#if HOST_S4_UNIFIED_CANDIDATE
+    /* Bind the zero/STOP writer before homing/interlocks; this does not arm
+     * a motion session. AL/AM admission still requires fresh interlocks. */
+    configure_allowed=MobileBoard_PowerReady();
+#endif
+    if(!stop_requested&&!output_ready&&actuator_mobile_axes_stopped(&supervisor,now)&&configure_allowed){
         output_ready=MobileServoOutput_Configure(left_uart,&supervisor,&profile.output,profile.quiet_us,true);
         if(output_ready&&!MobileServoOutput_BindLift(&lift_endpoint)){MobileServoOutput_Stop();output_ready=false;}
     }
     const actuator_mobile_output_t *o=MobileServoOutput_State();
     lift_endpoint.transport_ready=output_ready&&!o->stop_requested&&
         supervisor.state!=ACTUATOR_MOBILE_ACTIVE;
-    actuator_lift_endpoint_poll(&lift_endpoint,now);
-    if(o->configured&&o->stop_requested&&!stop_requested)BinaryControl_LatchStop();
-    if(!stop_requested&&!MobileArmObserver_Poll())BinaryControl_LatchStop();
+    if(!supervisor.transport_only)actuator_lift_endpoint_poll(&lift_endpoint,now);
+    if(o->configured&&o->stop_requested&&!stop_requested)board_stop(3);
+    if(!supervisor.transport_only&&!stop_requested&&!MobileArmObserver_Poll())board_stop(4);
+#if HOST_S4_UNIFIED_CANDIDATE
+    if(stop_requested && o->stop_written){
+        bool position_proof=actuator_mobile_wheels_stop_observe(wheel_stop_windows,r,o->stop_written_ms,now);
+        base_stopped=base_stopped||position_proof;
+    }
+#endif
     poll_stop(now,r,base_stopped,modes);
 }
 
 static uint32_t read32(const uint8_t *p){return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);}
 static void write32(uint8_t *p,uint32_t v){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(v>>(8*i));}
+#if HOST_S4_UNIFIED_CANDIDATE
+static bool wheel_snapshot(const uint8_t d[56],uint8_t expected_torque){
+    uint16_t speed=(uint16_t)(d[39]|((uint16_t)d[40]<<8));
+    return !d[1]&&d[4]==31&&d[26]==expected_torque&&d[36]==1&&
+        d[25]==1&&!d[32]&&!d[33]&&(speed&0x7fff)<=50&&d[47]<=1;
+}
+static bool off_snapshot(const uint8_t d[56],bool wheel){
+    if(wheel)return wheel_snapshot(d,0);
+    return !d[1]&&d[4]==31&&!d[26]&&d[36]==1&&!d[39]&&!d[40]&&!d[47];
+}
+static bool maintenance_axes_quiet(uint8_t torque_mask,unsigned maximum_span){
+    /* Supported maintenance only, all four speed-mode axes: zero goal and six independent position
+     * reads over >=400 ms. Powered admission uses <=2 encoder counts;
+     * torque-OFF wheels retain <=8 counts, lift always <=2. Runtime motion
+     * and STOP admission are unchanged. Never infer rest from one speed byte. */
+    int first[4]={0},low[4]={0},high[4]={0};uint32_t start=HAL_GetTick();
+    for(unsigned pass=0;pass<6;pass++){
+        if(pass)HAL_Delay(80);
+        for(unsigned axis=0;axis<4;axis++){
+            uint8_t q[4]={1,0,ACTUATOR_MOBILE_FIRST_ID+axis,0},d[56];
+            DeviceInventory_Read(q,4,true,d);
+            if(d[17]!=q[2]||((axis==3&&d[25]==0)?
+                (((torque_mask>>axis)&1)||!off_snapshot(d,false)):
+                !wheel_snapshot(d,(torque_mask>>axis)&1)))return false;
+            int pos=d[37]|((int)d[38]<<8);if(pos>4095)return false;
+            if(!pass)first[axis]=pos;
+            int delta=pos-first[axis];if(delta>2048)delta-=4096;if(delta< -2048)delta+=4096;
+            if(delta<low[axis])low[axis]=delta;
+            if(delta>high[axis])high[axis]=delta;
+            if((unsigned)(high[axis]-low[axis])>(axis==3?2:maximum_span))return false;
+        }
+    }
+    return HAL_GetTick()-start>=400;
+}
+static bool wheels_off_quiet(void){return maintenance_axes_quiet(0,8);}
+static bool write_mobile_checked(uint8_t id,uint8_t address,const uint8_t *value,uint8_t size){
+    uint8_t got[2];
+    return Servo_WriteData(id,address,value,size)==HAL_OK&&
+        Servo_ReadData(id,address,size,got)==HAL_OK&&!memcmp(value,got,size);
+}
+static bool secured_mobile_power(bool enable){
+    /* Maintenance-only transaction, before either periodic reader or arms
+     * are enabled. No arm, position-goal, mode, calibration or nonzero speed writes. */
+    uint8_t before[16][56],after[56],torque_mask=0;
+    for(unsigned i=0;i<16;i++){
+        uint8_t req[4]={1,i<10?0:1,i<10?i+1:i-9,0};
+        DeviceInventory_Read(req,4,true,before[i]);
+        bool mobile=i>=6&&i<10;const uint8_t *d=before[i];
+        bool wheel=mobile;
+        if(d[17]!=req[2]||(enable?!off_snapshot(d,wheel):
+           (d[26]>(mobile?1:0)||(wheel?!wheel_snapshot(d,d[26]):
+             (d[1]||d[4]!=31||d[36]!=1||d[47]||d[39]||d[40]))))||
+           (mobile&&(d[25]!=1||d[32]||d[33])))return false;
+        if(wheel&&d[26])torque_mask|=(uint8_t)(1u<<(i-6));
+    }
+    if(!maintenance_axes_quiet(torque_mask,enable?8:2))return false;
+    const uint8_t zero[2]={0,0};bool ok=true;
+    for(uint8_t id=ACTUATOR_MOBILE_FIRST_ID;id<=ACTUATOR_LIFT_ID;id++){
+        uint8_t mode=0;
+        if(Servo_ReadData(id,33,1,&mode)!=HAL_OK||mode!=1||!write_mobile_checked(id,46,zero,2)){ok=false;break;}
+    }
+    if(ok)for(uint8_t id=ACTUATOR_MOBILE_FIRST_ID;id<=ACTUATOR_LIFT_ID;id++){
+        uint8_t value=enable?1:0;
+        if(!write_mobile_checked(id,40,&value,1)){ok=false;break;}
+    }
+    if(ok)for(unsigned i=0;i<16;i++){
+        uint8_t req[4]={1,i<10?0:1,i<10?i+1:i-9,0};
+        DeviceInventory_Read(req,4,true,after);bool mobile=i>=6&&i<10;
+        if(after[1]||after[4]!=31||memcmp(before[i]+12,after+12,14)||after[36]!=1||
+           after[26]!=(mobile&&enable?1:0)||
+           ((i>=6&&i<10)?!wheel_snapshot(after,enable?1:0):(after[47]||after[39]||after[40]))||
+           (mobile&&(after[32]||after[33]))){ok=false;break;}
+    }
+    if(ok)ok=maintenance_axes_quiet(enable?15:0,enable?2:8);
+    if(!ok){
+        /* A failed activation is not proof of torque OFF. Keep support and
+         * best-effort zero only in verified speed mode, never disable a load. */
+        for(uint8_t id=ACTUATOR_MOBILE_FIRST_ID;id<=ACTUATOR_LIFT_ID;id++){
+            uint8_t mode=0;
+            if(Servo_ReadData(id,33,1,&mode)==HAL_OK&&mode==1)(void)write_mobile_checked(id,46,zero,2);
+        }
+    }
+    return ok;
+}
+static bool secured_boot_release(void){
+    /* Only before registration after an explicit reset. A supported empty
+     * mechanism can retain servo torque across MCU reset. Never run this
+     * while a runtime writer/reader owns the bus, or enable any torque. */
+    uint8_t before[16][56],d[56];int first[16]={0},low[16]={0},high[16]={0};
+    uint32_t start=HAL_GetTick();
+    for(unsigned pass=0;pass<6;pass++){
+        if(pass)HAL_Delay(80);
+        for(unsigned i=0;i<16;i++){
+            uint8_t q[4]={1,i<10?0:1,i<10?i+1:i-9,0};bool mobile=i>=6&&i<10;
+            DeviceInventory_Read(q,4,true,d);
+            uint16_t speed=(uint16_t)(d[39]|((uint16_t)d[40]<<8));
+            /* Supported boot release only: include the speed-mode lift in
+             * the existing six-sample, >=400 ms, <=2-count rest proof.
+             * Its retained torque can report +/-50 while holding position.
+             * Zero target, full feedback and torque-OFF position proof still
+             * apply; this does not authorize lift or base motion. */
+            if(d[1]||d[4]!=31||d[17]!=q[2]||d[36]!=1||d[26]>1||
+               d[25]!=(mobile?1:0)||
+               (mobile?((speed&0x7fff)>50||d[47]>1):(speed||d[47]))||
+               (mobile&&(d[32]||d[33])))return false;
+            int pos=d[37]|((int)d[38]<<8);if(pos>4095)return false;
+            if(!pass){memcpy(before[i],d,56);first[i]=pos;}
+            else if(memcmp(before[i]+12,d+12,15))return false;
+            int delta=pos-first[i];if(delta>2048)delta-=4096;if(delta< -2048)delta+=4096;
+            if(delta<low[i])low[i]=delta;
+            if(delta>high[i])high[i]=delta;
+            if(high[i]-low[i]>2)return false;
+        }
+    }
+    if(HAL_GetTick()-start<400)return false;
+    recovery_attempted=true; /* uncertain writes cannot be repeated this boot */
+    const uint8_t zero[2]={0,0};
+    for(uint8_t id=ACTUATOR_MOBILE_FIRST_ID;id<=ACTUATOR_LIFT_ID;id++)
+        if(!write_mobile_checked(id,46,zero,2))return false;
+    for(uint8_t id=ACTUATOR_MOBILE_FIRST_ID;id<=ACTUATOR_LIFT_ID;id++)
+        if(!write_mobile_checked(id,40,zero,1))return false;
+    if(Servo_DisableTorqueAll()!=HAL_OK||RightServoBus_DisableTorqueAll()!=HAL_OK)return false;
+    for(unsigned i=0;i<16;i++){
+        uint8_t q[4]={1,i<10?0:1,i<10?i+1:i-9,0};
+        DeviceInventory_Read(q,4,true,d);
+        if(!off_snapshot(d,i>=6&&i<10)||memcmp(before[i]+12,d+12,14)||
+           (i>=6&&i<10&&(d[32]||d[33])))return false;
+    }
+    return maintenance_axes_quiet(0,8);
+}
+#endif
+bool MobileBoard_Commission(const uint8_t q[36],uint8_t out[64],bool host_idle){
+#if HOST_S4_UNIFIED_CANDIDATE
+    if(!q||!out||memcmp(q,"AC\x01",3)||q[3]<1||q[3]>5||!read32(q+4)||
+       read32(q+32)!=actuator_crc32c(q,32))return false;
+    for(unsigned i=16;i<32;i++)if(q[i])return false;
+    uint32_t now=HAL_GetTick();bool ok=false;
+    if(q[3]==1){
+        if(read32(q+8)||read32(q+12))return false;
+        commission_ticket=0;
+        if(host_idle&&MobileBoard_MaintenanceAllowed()&&
+           ((!prepared&&!commission_attempted)||prepared)){
+            if(commission_sequence==UINT32_MAX)return false;
+            commission_ticket=++commission_sequence;commission_issued=now;
+        }
+        ok=true;
+    }else if(q[3]==5&&host_idle&&MobileBoard_MaintenanceAllowed()&&!prepared&&!commission_attempted&&
+             !recovery_attempted&&commission_ticket&&read32(q+8)==commission_ticket&&
+             now-commission_issued<2000&&read32(q+12)==UINT32_C(0x53454355)){
+        commission_ticket=0;commission_reason=7;
+        ok=secured_boot_release();if(ok)commission_reason=0;
+    }else if(q[3]==2&&host_idle&&MobileBoard_MaintenanceAllowed()&&!prepared&&!commission_attempted&&
+             commission_reason!=7&&
+             commission_ticket&&read32(q+8)==commission_ticket&&now-commission_issued<2000&&
+             read32(q+12)==UINT32_C(0x53454355)){
+        commission_ticket=0;commission_attempted=true;commission_reason=1;
+        uint8_t before[16][56],after[56];bool valid=true;
+        for(unsigned i=0;i<16&&valid;i++){
+            uint8_t req[4]={1,i<10?0:1,i<10?i+1:i-9,0};
+            DeviceInventory_Read(req,4,true,before[i]);
+            valid=before[i][17]==req[2]&&off_snapshot(before[i],i>=6&&i<10&&before[i][25]==1);
+        }
+        if(valid)valid=wheels_off_quiet();
+        /* A rejected READ-only preflight has made no persistent or motor
+         * write. Permit a new explicit ticket, never repeat an uncertain write. */
+        if(!valid)commission_attempted=false;
+        if(valid){
+            commission_reason=2;
+            valid=MobileBoard_ProvisionModes(&commissioned_mobile_profile.devices,true);
+        }
+        if(valid){
+            commission_reason=3;
+            for(unsigned i=0;i<16&&valid;i++){
+                uint8_t req[4]={1,i<10?0:1,i<10?i+1:i-9,0};
+                DeviceInventory_Read(req,4,true,after);
+                valid=after[1]==0&&after[4]==31&&after[26]==0&&after[36]==1&&
+                    !memcmp(before[i]+12,after+12,13); /* ID, baud, limits, offset. */
+                if(i<6||i>=10)valid=valid&&before[i][25]==after[25];
+                else valid=valid&&after[25]==1;
+            }
+        }
+        if(valid){
+            commission_reason=4;
+            MobileBoardProfile candidate=commissioned_mobile_profile;
+            /* Explicit transaction only. Corrupt/nonempty journals cannot reset. */
+            candidate.initialize_erased_boot_storage=true;
+            valid=MobileBoard_Prepare(commission_left,commission_right,&candidate,true);
+        }
+        ok=valid;if(ok)commission_reason=0;
+    }else if((q[3]==3||q[3]==4)&&host_idle&&MobileBoard_MaintenanceAllowed()&&prepared&&
+             commission_ticket&&read32(q+8)==commission_ticket&&
+             now-commission_issued<2000&&read32(q+12)==UINT32_C(0x53454355)&&
+             (q[3]==3?!power_attempted:power_attempted)){
+        commission_ticket=0;power_attempted=true;commission_reason=q[3]==3?5:6;
+        ok=secured_mobile_power(q[3]==3);
+        power_enabled=ok&&q[3]==3;
+        if(ok){commission_reason=0;if(q[3]==4)power_attempted=false;}
+    }
+    if(q[3]==5)commission_ticket=0; /* rejected releases also consume their ticket */
+    memset(out,0,64);memcpy(out,"CS\x01",3);out[3]=ok?q[3]:(uint8_t)(q[3]|128);
+    write32(out+4,read32(q+4));write32(out+8,HAL_GetTick());
+    write32(out+12,prepared?mobile_endpoint.boot_id:0);
+    write32(out+16,commission_ticket);write32(out+20,commission_issued);
+    out[24]=(prepared?1:0)|(runtime_started?2:0)|(output_ready?4:0)|
+        (stop_requested?8:0)|(commission_attempted?16:0)|(power_enabled?32:0)|(power_attempted?64:0);
+    out[25]=commission_reason;
+    write32(out+28,actuator_crc32c((const uint8_t*)&commissioned_mobile_profile,sizeof(commissioned_mobile_profile)));
+    write32(out+60,actuator_crc32c(out,60));return true;
+#else
+    (void)q;(void)out;(void)host_idle;return false;
+#endif
+}
 bool MobileBoard_StopQuery(const uint8_t q[36],uint8_t out[64]){
     if(!prepared||!q||!out||memcmp(q,"AQ\x01\x01",4)||!read32(q+4)||
        read32(q+32)!=actuator_crc32c(q,32))return false;
@@ -305,6 +710,11 @@ bool MobileBoard_StopQuery(const uint8_t q[36],uint8_t out[64]){
         (system_stop.actions_completed?8u:0u)|(last_stop_proof.base_stopped?16u:0u)|
         (last_stop_proof.lift_holding?32u:0u)|(last_stop_proof.arms_holding?64u:0u)|
         (last_stop_proof.load_retained?128u:0u);
+    if(supervisor.transport_only){
+        out[26]=1; /* explicit wheel-only STOP scope; no arm/lift proof claimed */
+        out[24]=(system_stop.actions_completed&&last_stop_proof.base_stopped&&
+            age<profile.stop.feedback_max_age_ms)?SYSTEM_STOP_CONFIRMED:SYSTEM_STOP_UNCONFIRMED;
+    }
     write32(out+28,last_stop_proof.observed_ms);write32(out+32,age);
     write32(out+36,profile.stop.feedback_max_age_ms);
     write32(out+60,actuator_crc32c(out,60));return true;

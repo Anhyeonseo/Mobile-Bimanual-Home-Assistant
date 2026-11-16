@@ -1,6 +1,6 @@
 """Lift AL/LS v1 codec. Uses the resident arm/mobile transport's existing lock."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import struct
 from .mobile_wire import crc32c
 
@@ -23,7 +23,7 @@ class LiftCommand:
     def encode(self):
         if (
             type(self.kind) is not int
-            or not 1 <= self.kind <= 6
+            or not 1 <= self.kind <= 7
             or not _u32(self.session)
             or not _u32(self.boot_id)
         ):
@@ -101,7 +101,7 @@ class LiftStatus:
         ):
             raise ValueError("invalid lift status")
         kind = data[3]
-        if not 1 <= (kind & 127) <= 6 or data[24] > 6 or data[25] > 5 or data[26] & ~31:
+        if not 1 <= (kind & 127) <= 7 or data[24] > 6 or data[25] > 5 or data[26] & ~31:
             raise ValueError("invalid lift state")
         value = cls(
             kind,
@@ -141,14 +141,26 @@ class LiftClient:
         ).encode()
         try:
             reply = LiftStatus.decode(self.mobile.port.exchange(packet))
+            # HOLD_PENDING can finish between the status read and its lease
+            # renewal. Firmware rejects that now-unneeded renewal because the
+            # active operation has ended. Accept only the correlated, fresh,
+            # same-session terminal HOLDING observation; never resend it or
+            # treat another rejection/restart as success.
+            completed_renewal=(kind==5 and reply.kind==(5|128)
+                and reply.boot_id==self.mobile.boot_id
+                and reply.request_sequence==self.sequence and reply.session==session
+                and not reply.flags&2 and reply.command_raw==0 and reply.holding(100))
             if (
                 reply.boot_id != self.mobile.boot_id
-                or reply.kind != kind
+                or (reply.kind != kind and not completed_renewal)
                 or reply.request_sequence != self.sequence
             ):
-                raise RuntimeError("lift rejected or MCU restarted")
+                error=RuntimeError("lift rejected or MCU restarted")
+                error.diagnostics=dict(command=asdict(LiftCommand.decode(packet)),response=asdict(reply))
+                raise error
             if kind != 4 and reply.session != session:
                 raise RuntimeError("lift ownership mismatch")
+            if completed_renewal:self.session=None
             return reply
         except Exception:
             self.session = None
@@ -156,6 +168,14 @@ class LiftClient:
 
     def home(self, session):
         result = self._request(1, session)
+        self.session = session
+        self.last_session = session
+        return result
+
+    def reference_bottom(self, session, *, operator_confirmed=False):
+        if operator_confirmed is not True:
+            raise ValueError('current physical bottom confirmation required')
+        result = self._request(7, session)
         self.session = session
         self.last_session = session
         return result

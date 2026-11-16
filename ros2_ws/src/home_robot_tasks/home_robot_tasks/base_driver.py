@@ -20,8 +20,11 @@ class BaseProfile:
     maximum_command_age_s: float
     maximum_feedback_age_s: float
     maximum_cycle_s: float
+    wait_on_command_gap: bool = False
 
     def __post_init__(self):
+        if type(self.wait_on_command_gap) is not bool:
+            raise InvalidTask('explicit command-gap policy required')
         for vector in (self.raw_per_rad_s,self.maximum_wheel_rad_s,self.maximum_acceleration_rad_s2):
             if len(vector)!=3 or any(number(v,'wheel scale/limit')<=0 for v in vector):
                 raise InvalidTask('three explicit positive wheel scales/limits required')
@@ -42,9 +45,10 @@ class BaseObservation:
 
 
 class MobileBaseDriver:
-    def __init__(self,client,geometry,profile,clock,guard,travel_evidence,request_stop):
+    def __init__(self,client,geometry,profile,clock,guard,travel_evidence,request_stop,*,command_model=None):
         self.client,self.geometry,self.p,self.clock = client,geometry,profile,clock
         self.guard,self.travel_evidence,self.request_stop = guard,travel_evidence,request_stop
+        self.command_model = command_model
         self.odometry = WheelOdometry(geometry,max_gap_s=profile.maximum_feedback_age_s)
         self.owner = self.source = self.epoch = None
         self.command = None
@@ -55,6 +59,7 @@ class MobileBaseDriver:
         self.fault = None
         self.stop_error = None
         self.braking = False
+        self.waiting_for_command = False
 
     def acquire(self,owner,source,epoch):
         if self.owner is not None or self.fault or self.client.session is None:
@@ -153,22 +158,37 @@ class MobileBaseDriver:
             observation = self.observe()
             now = self.clock()
             if self.command is None:
-                if now-self.granted > self.p.maximum_command_age_s:
+                if now-self.granted > self.p.maximum_command_age_s and not self.p.wait_on_command_gap:
                     raise InvalidTask('first base command timed out')
                 requested = (0.,0.,0.)
+                self.waiting_for_command = True
             elif not 0 <= now-self.command[0] <= self.p.maximum_command_age_s:
-                raise InvalidTask('base command expired')
+                if not self.p.wait_on_command_gap:raise InvalidTask('base command expired')
+                requested = (0.,0.,0.)
+                self.waiting_for_command = True
             else:
                 requested = self.command[1]
-            target = self.geometry.wheel_rates(requested,self.p.maximum_wheel_rad_s)
+                self.waiting_for_command = False
+            if self.command_model is None:
+                target = self.geometry.wheel_rates(requested,self.p.maximum_wheel_rad_s)
+            else:
+                # Separate floor command gain from reported encoder speed units.
+                target = tuple(v/s for v,s in zip(self.command_model.raw_command(requested),self.p.raw_per_rad_s))
+                limit = max(1.,*(abs(v)/m for v,m in zip(target,self.p.maximum_wheel_rad_s)))
+                target = tuple(v/limit for v in target)
             # One interpolation factor preserves the wheel-vector direction.
             scale = max(1.,*(abs(b-a)/(limit*dt) for a,b,limit in
                             zip(self.last_rates,target,self.p.maximum_acceleration_rad_s2)))
             rates = tuple(a+(b-a)/scale for a,b in zip(self.last_rates,target))
+            # A missing Nav2 update means zero output while retaining the action
+            # owner, not a reset-required controller fault. Do not keep ramping
+            # an expired motion; hardware observation and guard checks still run.
+            if self.waiting_for_command:rates=(0.,0.,0.)
             raw = tuple(round(rate*factor) for rate,factor in zip(rates,self.p.raw_per_rad_s))
             # Check the quantized command that the board will actually receive.
             applied_rates = tuple(v/s for v,s in zip(raw,self.p.raw_per_rad_s))
-            applied = self.geometry.body_twist(applied_rates)
+            applied = (self.geometry.body_twist(applied_rates) if self.command_model is None
+                       else self.command_model.expected_twist(raw))
             evidence = self.travel_evidence()
             if evidence.epoch != self.epoch:
                 raise InvalidTask('travel mode changed under base owner')
@@ -176,7 +196,8 @@ class MobileBaseDriver:
             now = self.clock()
             if now-self.last_cycle > self.p.maximum_cycle_s:
                 raise InvalidTask('base control processing deadline missed')
-            remaining = self.p.maximum_command_age_s-(now-(self.command[0] if self.command else self.granted))
+            remaining = (self.p.maximum_command_age_s if self.waiting_for_command else
+                         self.p.maximum_command_age_s-(now-self.command[0]))
             lifetime = min(200,math.floor(remaining*1000))
             if lifetime < 1:
                 raise InvalidTask('base command expired during observation')

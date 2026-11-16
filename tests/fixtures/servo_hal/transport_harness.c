@@ -25,6 +25,39 @@ int main(int argc,char **argv){
     uint32_t a=0,b=0,stale;uint8_t bytes[]={255,255,1};uint16_t pose[6]={2048,2048,2048,2048,2048,2048};
     CHECK(argc==2);int scenario=atoi(argv[1]);BimanualServoDispatch_Init(&left,&right);
     switch(scenario){
+    case 17: /* Unsent reservation cancellation preserves STOP and cannot fake a write. */
+    case 18: /* Any attempted TX, including a failed launch, requires real recovery. */
+    {
+        actuator_bus_router_t router;ServoQueuedTransaction transfer={0},stale_transfer;
+        const uint8_t *packet;size_t length;actuator_bus_work_t kind;
+        actuator_bus_router_init(&router);
+        CHECK(actuator_bus_router_submit(&router,ACTUATOR_BUS_WORK_WHEELS,bytes,3,0,1000,100));
+        CHECK(ServoTransport_ClaimQueued(&left,&router,100,&transfer,&packet,&length,&kind));
+        stale_transfer=transfer;stale_transfer.router_token++;
+        CHECK(ServoTransport_CancelUnsentQueued(&stale_transfer)==HAL_ERROR);
+        CHECK(!ServoTransport_DeferUnsentQueued(&stale_transfer));
+        if(scenario==18){
+            left.fail_tx=1;
+            CHECK(ServoTransport_TransmitDMA(&left,transfer.gate_token,packet,length)==HAL_ERROR);
+            CHECK(ServoTransport_CancelUnsentQueued(&transfer)==HAL_ERROR);
+            CHECK(!ServoTransport_DeferUnsentQueued(&transfer));
+            CHECK(transfer.active && router.bus.active);break;
+        }
+        CHECK(ServoTransport_DeferUnsentQueued(&transfer));
+        CHECK(router.jobs[ACTUATOR_BUS_WORK_WHEELS].pending && router.jobs[ACTUATOR_BUS_WORK_WHEELS].deadline_us==1000);
+        CHECK(router.completed_token==0 && !router.bus.active);
+        CHECK(ServoTransport_ClaimQueued(&left,&router,100,&transfer,&packet,&length,&kind));
+        left.wire_busy=1;
+        CHECK(!ServoTransport_DeferUnsentQueued(&transfer));
+        CHECK(ServoTransport_CancelUnsentQueued(&transfer)==HAL_BUSY && transfer.active);
+        left.wire_busy=0;left.fail_abort=1;
+        CHECK(ServoTransport_CancelUnsentQueued(&transfer)==HAL_ERROR && transfer.active);
+        left.fail_abort=0;
+        CHECK(ServoTransport_CancelUnsentQueued(&transfer)==HAL_OK);
+        CHECK(!transfer.active && !router.bus.active && router.bus.stop_pending && router.inhibited);
+        CHECK(router.completed_token==0 && left.sent==0);
+        CHECK(!ServoTransport_Begin(&left,ACTUATOR_BUS_WORK_WHEELS,&a));break;
+    }
     case 15: /* TX callback precedes the final echoed RX bit on either bus. */
         CHECK(BimanualServoDispatch_Launch(pose,pose,0,0)==HAL_OK);
         left.wire_busy=right.wire_busy=1;complete(&left);complete(&right);

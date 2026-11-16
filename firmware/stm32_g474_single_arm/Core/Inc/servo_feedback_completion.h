@@ -7,6 +7,7 @@
 /* A response and the UART lease have different lifetimes. Never end the
  * reader to retire one response. No delays, RX reset or HAL abort here.
  * The caller reserves 4450 us before the next 5 ms output tick. */
+#define SERVO_FEEDBACK_RESPONSE_WINDOW_US 4000U
 #define SERVO_FEEDBACK_RETIRE_LIMIT_US 4200U
 #define SERVO_FEEDBACK_QUIET_US 100U
 typedef struct {
@@ -43,10 +44,18 @@ static inline HAL_StatusTypeDef ServoFeedbackCompletion_Poll(
     if (!s->completing && parsed != HAL_BUSY) {
         s->completing = true;
         s->result = parsed;
-        /* Even a timeout must retire late/partial bytes before another owner. */
-        s->activity_us = now;
+        /* Timeout parsing is not new UART activity. The producer/BUSY/TX
+         * checks above already measure quiet, including late/partial bytes.
+         * Restarting quiet at a late timeout poll can manufacture a retirement
+         * overrun even though the wire has been idle for milliseconds. */
+        if (parsed != HAL_TIMEOUT) s->activity_us = now;
     }
+    /* HAL's millisecond deadline may round down by almost one millisecond.
+     * Keep the full existing 4 ms response window in the monotonic clock;
+     * otherwise bytes arriving near that boundary could meet a new owner. */
     if (!s->completing || !tx_completed ||
+        (s->result == HAL_TIMEOUT &&
+         (uint32_t)(now - s->started_us) < SERVO_FEEDBACK_RESPONSE_WINDOW_US) ||
         (uint32_t)(now - s->activity_us) < SERVO_FEEDBACK_QUIET_US)
         return HAL_BUSY;
     HAL_StatusTypeDef ended = ServoTransport_End(uart, *token, false);

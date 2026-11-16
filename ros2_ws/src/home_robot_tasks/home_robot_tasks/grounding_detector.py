@@ -12,13 +12,17 @@ from .navigation import identifier, number
 
 
 class GroundingSAMDetector:
-    def __init__(self, model, segmenter, *, prompt, object_id, minimum_mask_quality=.5):
+    def __init__(self, model, segmenter, *, prompt, object_id, minimum_mask_quality=.5,
+                 label_resolver=None):
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 256:
             raise InvalidTask('bounded text prompt required')
         if not callable(getattr(model, 'detect', None)) or not callable(getattr(segmenter, 'segment', None)):
             raise InvalidTask('explicit loaded detector and segmenter required')
         self.model, self.segmenter, self.prompt = model, segmenter, prompt.strip()
         self.object_id = identifier(object_id, 'query object id')
+        if label_resolver is not None and not callable(label_resolver):
+            raise InvalidTask('callable label resolver required')
+        self.label_resolver = label_resolver
         self.quality = number(minimum_mask_quality, 'mask threshold')
         if not 0 <= self.quality <= 1:
             raise InvalidTask('mask threshold outside [0,1]')
@@ -62,6 +66,10 @@ class GroundingSAMDetector:
             if quality < self.quality or not mask.any():
                 continue
             # Box orientation is not claimed as a physical grasp orientation.
-            results.append(ImageDetection(self.object_id, detection['score'],
+            object_id = self.object_id if self.label_resolver is None else self.label_resolver(detection.get('label'))
+            if object_id is None:
+                continue
+            identifier(object_id, 'resolved category')
+            results.append(ImageDetection(object_id, detection['score'],
                 ((a,b),(c,b),(c,d),(a,d)), mask.copy()))
         return results

@@ -4,6 +4,7 @@ The injected planner owns collision checking and trajectories. This module has
 no transport or execution interface. One fixed lift and current scene per call.
 """
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 
 import numpy as np
 
@@ -73,6 +74,54 @@ def at_actual_contact(candidate, base_from_tcp):
     return replace(candidate,base_from_grasp_tcp=actual,tcp_from_object=relative,object_constraint=constraint)
 
 
+def fixed_contact_review(arm, candidate, *, tolerance_m=.002):
+    """Validate both sides at the final orientation, independently of target ACM."""
+    import itertools
+    if not np.isfinite(tolerance_m) or not 0 < tolerance_m <= .003:
+        raise ValueError('bounded contact geometry tolerance required')
+    tcp=rigid(candidate.base_from_grasp_tcp)
+    obj=tcp@rigid(candidate.tcp_from_object)
+    vertices=(np.asarray(candidate.payload_mesh['vertices']) if candidate.payload_mesh else
+              np.asarray(list(itertools.product(*[(-s/2,s/2) for s in candidate.object_size_m]))))
+    vertices=vertices@obj[:3,:3].T+obj[:3,3]
+    section=arm.jaw.contact_section(tcp@arm.tcp_from_stock,vertices)
+    held=float(np.interp(candidate.held_jaw_model_rad,arm.jaw.angles,arm.jaw.gaps))
+    opened=float(np.interp(candidate.open_jaw_model_rad,arm.jaw.angles,arm.jaw.gaps))
+    moving_error=arm.jaw.fixed_face_m+held-section['high_m']
+    opening_clearance=arm.jaw.fixed_face_m+opened-section['high_m']
+    section.update(held_gap_m=held,open_gap_m=opened,moving_contact_error_m=moving_error,
+                   open_moving_clearance_m=opening_clearance,tolerance_m=tolerance_m,
+                   accepted=bool(abs(section['fixed_intrusion_m'])<=tolerance_m and
+                                 abs(moving_error)<=tolerance_m and opening_clearance>=.002))
+    return section
+
+
+@dataclass
+class _CandidateEvaluation:
+    """Geometry and preferences for one pose within one planning call.
+
+    Keep the candidate itself: actual contact has the same candidate_id but a
+    different attachment transform and must receive a fresh evaluation.
+    """
+    candidate: GraspRouteCandidate
+    arm: object
+    start: np.ndarray
+    policy: object
+
+    @cached_property
+    def payload(self):
+        c = self.candidate
+        return CarriedGeometry(c.tcp_from_object, c.object_size_m, c.payload_mesh)
+
+    @cached_property
+    def balance(self):
+        return grasp_balance(self.candidate.base_from_grasp_tcp, self.payload)
+
+    @cached_property
+    def preference(self):
+        return grasp_preferences(self.arm, self.start, self.candidate, self.policy)
+
+
 def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
                     lift_distance_m=.02, reference_model_rad=None, policy=CarryPolicy(),
                     maximum_grasps=8, grasp_policy=None):
@@ -92,14 +141,22 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
         if candidate.scene_id != scene_id or candidate.calibration_id != arm.profile['calibration_id']:
             failures.append({'candidate': candidate.candidate_id, 'stage': 'binding', 'reason': 'STALE_SCENE_OR_CALIBRATION'})
             continue
-        if grasp_policy is not None and not contact_posture(candidate.base_from_grasp_tcp,grasp_policy)['accepted']:
+        posture = contact_posture(candidate.base_from_grasp_tcp, grasp_policy) if grasp_policy is not None else None
+        if posture is not None and not posture['accepted']:
             failures.append({'candidate':candidate.candidate_id,'stage':'grasp_posture',
-                'reason':'EXCESSIVE_TABLETOP_CONTACT_TILT','diagnostics':contact_posture(candidate.base_from_grasp_tcp,grasp_policy)})
+                'reason':'EXCESSIVE_TABLETOP_CONTACT_TILT','diagnostics':posture})
             continue
         current.append(candidate)
+    evaluations = {}
+
+    def evaluate(candidate):
+        key = id(candidate)
+        if key not in evaluations:
+            evaluations[key] = _CandidateEvaluation(candidate, arm, start, grasp_policy)
+        return evaluations[key]
+
     def balance(candidate):
-        return grasp_balance(candidate.base_from_grasp_tcp,CarriedGeometry(candidate.tcp_from_object,
-            candidate.object_size_m,candidate.payload_mesh))
+        return evaluate(candidate).balance
     if grasp_policy is not None:
         retained=[]
         for candidate in current:
@@ -109,7 +166,7 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
                     'reason':'CONTACT_TOO_FAR_FROM_PAYLOAD_CENTER','diagnostics':evidence})
             else:retained.append(candidate)
         current=retained
-    def preference(c):return grasp_preferences(arm,start,c,grasp_policy)
+    def preference(c):return evaluate(c).preference
     def balance_cost(c):
         offset=balance(c)['normalized_offset']
         return (offset/grasp_policy.preferred_balance_offset)**2 if grasp_policy else 2*offset**2
@@ -154,7 +211,7 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
             goals = carry_goals(arm, paths[-1].end, candidate.base_from_grasp_tcp,
                                 reference_model_rad=reference_model_rad,
                                 object_constraint=candidate.object_constraint, policy=policy,
-                                payload=CarriedGeometry(candidate.tcp_from_object,candidate.object_size_m,candidate.payload_mesh))
+                                payload=evaluate(candidate).payload)
             if not goals:
                 raise PlanRejected('no carry goal satisfies the requested orientation')
             for goal in goals:
@@ -162,14 +219,13 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
                     carry = planner.connect(paths[-1].end, goal.model_rad, candidate, attached=True, label='carry')
                     # No detector score can override a failed whole-route check.
                     travel = sum(float(np.sum(np.linalg.norm(np.diff(p.joints, axis=0), axis=1))) for p in paths+[carry])
-                    quality=payload_load(arm,goal.model_rad,CarriedGeometry(candidate.tcp_from_object,
-                        candidate.object_size_m,candidate.payload_mesh))
+                    quality=payload_load(arm,goal.model_rad,evaluate(candidate).payload)
                     clearance=planner.payload_clearance(goal.model_rad,candidate) if hasattr(planner,'payload_clearance') else None
                     quality['payload_clearance_probe']=clearance
                     quality['grasp_balance']=balance(candidate)
                     quality['grasp_preference']=preference(candidate)
                     quality['carry_grasp_balance']=grasp_balance(arm.fk(goal.model_rad)[0],
-                        CarriedGeometry(candidate.tcp_from_object,candidate.object_size_m,candidate.payload_mesh))
+                        evaluate(candidate).payload)
                     # Clearance is a soft preference after the original full-path
                     # collision test, not a larger hard obstacle/payload shell.
                     penalty=.4*(1-clearance['passed_margin_m']/.02) if clearance else 0.
@@ -200,3 +256,93 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
         selection['policy']='near_best_feasible_balance_then_tabletop_ease_and_carry_cost'
     return PickCarryPlan('OFFLINE_ROUTE_FOUND', candidate.candidate_id, paths, goal, failures,
                         resolved_grasp=candidate,carry_quality=quality,selection=selection)
+
+
+@dataclass
+class PlaceCarryPlan:
+    status: str
+    stages: list = field(default_factory=list)
+    released_grasp: object = None
+    failures: list = field(default_factory=list)
+    motion_authorized: bool = False
+    physical_task_completed: bool = False
+    support_observation_id: str = ''
+    runtime_release_verification_required: bool = True
+
+
+def plan_place_carry(arm, planner, start_model_rad, held, *, scene_id,
+                     base_from_object, support_bounds_m, support_observation_id,
+                     support_observed_s, now_s, empty_transport_model_rad,
+                     clearance_m=.03, maximum_age_s=2.):
+    """Carry -> above support -> vertical lower -> release -> rise -> transport.
+
+    Reuses the pick planner's full STL/payload collision checks. The rectangular
+    horizontal support is a fresh observation, not a configured furniture name.
+    A 0..2 mm bottom gap is a geometric proposal; only the runtime's independent
+    release/support observation may claim that the object was actually placed.
+    """
+    import itertools
+    from scipy.spatial.transform import Rotation
+    from .carry_cartesian import validate_vertical_descent
+    from .navigation import identifier, number
+    result = PlaceCarryPlan('NO_COMPLETE_ROUTE')
+    stage = 'binding'
+    try:
+        identifier(support_observation_id, 'support observation')
+        now, observed = number(now_s, 'clock'), number(support_observed_s, 'support time')
+        if (not 0 < number(maximum_age_s, 'support age limit') <= 5
+                or not 0 <= now-observed <= maximum_age_s
+                or held.scene_id != scene_id or held.calibration_id != arm.profile['calibration_id']):
+            raise PlanRejected('stale support, scene or calibration')
+        if not .01 <= number(clearance_m, 'place clearance') <= .05:
+            raise PlanRejected('bounded vertical placement clearance required')
+        support = np.asarray(support_bounds_m, dtype=float)
+        if (support.shape != (2,3) or not np.isfinite(support).all()
+                or np.any(support[1,:2] <= support[0,:2])
+                or abs(support[1,2]-support[0,2]) > 1e-8):
+            raise PlanRejected('horizontal observed support bounds required')
+        desired = rigid(base_from_object)
+        vertices = (np.asarray(held.payload_mesh['vertices']) if held.payload_mesh is not None else
+                    np.asarray(list(itertools.product(*[(-v/2,v/2) for v in held.object_size_m]))))
+        world = vertices@desired[:3,:3].T+desired[:3,3]
+        if (np.any(world[:,:2].min(axis=0) < support[0,:2]+.003)
+                or np.any(world[:,:2].max(axis=0) > support[1,:2]-.003)
+                or not 0 <= float(world[:,2].min()-support[0,2]) <= .002):
+            raise PlanRejected('payload outside support or bottom gap exceeds 2 mm')
+        start = checked_joints(arm,start_model_rad)
+        empty_transport = checked_joints(arm,empty_transport_model_rad)
+        contact = desired@np.linalg.inv(rigid(held.tcp_from_object))
+        preplace = contact.copy(); preplace[2,3] += clearance_m
+        stage = 'preplace_ik'
+        q, _, _ = arm.solve(preplace,start)
+        actual = arm.fk(q)[0]
+        if (np.linalg.norm(actual[:3,3]-preplace[:3,3]) > .001
+                or Rotation.from_matrix(actual[:3,:3].T@preplace[:3,:3]).magnitude() > np.deg2rad(2)):
+            raise PlanRejected('preplace IK exceeds Cartesian handoff tolerance')
+        stage = 'preplace'
+        paths = [planner.connect(start,q,held,attached=True,label='place_preplace')]
+        stage = 'lower'
+        lower = planner.cartesian(paths[-1].end,contact,held,attached=True,label='place_lower')
+        validate_vertical_descent([arm.fk(q)[0] for q in lower.joints])
+        paths.append(lower)
+        # Keep the object at the actual release pose; never teleport to the
+        # ideal target while checking the open jaw and retreat collision sweep.
+        released = replace(held,base_from_grasp_tcp=arm.fk(lower.end)[0])
+        actual_object = released.base_from_grasp_tcp@released.tcp_from_object
+        actual_vertices=vertices@actual_object[:3,:3].T+actual_object[:3,3]
+        if (np.any(actual_vertices[:,:2].min(axis=0) < support[0,:2])
+                or np.any(actual_vertices[:,:2].max(axis=0) > support[1,:2])
+                or not -.0001 <= float(actual_vertices[:,2].min()-support[0,2]) <= .003):
+            raise PlanRejected('actual release misses observed support')
+        stage = 'release_geometry'
+        paths.append(planner.release(paths[-1].end,released))
+        stage = 'retreat'
+        retreat = released.base_from_grasp_tcp.copy();retreat[2,3] += clearance_m
+        paths.append(planner.cartesian(paths[-1].end,retreat,released,attached=False,label='place_retreat'))
+        stage = 'empty_transport'
+        paths.append(planner.connect(paths[-1].end,empty_transport,released,attached=False,label='empty_transport'))
+        return PlaceCarryPlan('OFFLINE_ROUTE_FOUND',paths,released,
+                              support_observation_id=support_observation_id)
+    except (ValueError, PlanRejected) as error:
+        result.failures.append(dict(stage=stage,reason=str(error),diagnostics=getattr(error,'diagnostics',None)))
+        return result

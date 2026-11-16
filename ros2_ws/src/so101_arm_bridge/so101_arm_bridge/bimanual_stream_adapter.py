@@ -273,6 +273,11 @@ class ResidentBimanualStreamAdapter:
         return self._prepared
 
     @property
+    def motion_limits(self) -> OperationalLimits:
+        """Immutable limits used to admit and monitor this adapter's motion."""
+        return self._limits
+
+    @property
     def heartbeat_required(self) -> bool:
         """Return whether enabled torque currently depends on host keepalive."""
         return self._armed and self._state in (

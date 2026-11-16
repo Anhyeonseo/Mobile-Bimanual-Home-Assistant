@@ -65,6 +65,7 @@ class RobotStateStore:
         self.boot = None; self.fault = None; self.revision = 0
         self.since = self.hold_since = None; self.last_hold_height = None
         self.catalog = None
+        self.transport_program = None
         self.lift_target_um = profile["lift_transport_um"]
 
     def observe(self, value):
@@ -128,11 +129,31 @@ class RobotStateStore:
     def motion(self):
         return self.motion_at(self.clock())
 
+    def bind_transport_program(self, program):
+        """A checked target is compared with measured state; never becomes proof."""
+        from .task_route_program import TaskRouteProgram
+        if (not isinstance(program,TaskRouteProgram) or program.operation not in ('loaded','place')
+                or not program.stages or program.stages[-1].name not in ('carry','empty_transport')
+                or len(program.stages[-1].points[-1].positions_rad)!=self.joint_count):
+            raise InvalidTask('complete checked dynamic transport target required')
+        self.transport_program=program
+
+    def reset_transport_target(self):
+        self.transport_program=None
+
     def conditions(self):
         if not self.fresh(): return {}
         v, p = self.latest, self.p
         safe = all(a <= j <= b for a,j,b in zip(p['safe_minimum_rad'],v.joints_rad,p['safe_maximum_rad']))
-        arm_transport = all(abs(a-b)<=p['joint_tolerance_rad'] for a,b in zip(v.joints_rad,p['transport_joints_rad']))
+        expected=p['transport_joints_rad'];transport_height=p['lift_transport_um'];contact=None
+        if self.transport_program is not None:
+            program=self.transport_program
+            expected=program.stages[-1].points[-1].positions_rad
+            transport_height=round(program.lift_m*1e6)
+            contact=program.contact_envelope if program.operation=='loaded' else None
+        arm_transport=all((contact.minimum_rad-1e-6<=a<=contact.maximum_rad+1e-6
+                           if contact is not None and i==contact.axis else abs(a-b)<=p['joint_tolerance_rad'])
+                          for i,(a,b) in enumerate(zip(v.joints_rad,expected)))
         arrival = False
         if self.catalog and self.catalog.navigation_goal:
             g = self.catalog.navigation_goal
@@ -156,7 +177,7 @@ class RobotStateStore:
                     pass
         return dict(hardware_ready=v.healthy, localized=v.localized,
             base_stopped=self.motion().base_stopped,lift_stopped=self.motion().lift_stopped,
-            arm_in_transport_pose=arm_transport,lift_in_transport_position=abs(v.lift_um-p['lift_transport_um'])<=p['lift_tolerance_um'],
+            arm_in_transport_pose=arm_transport,lift_in_transport_position=abs(v.lift_um-transport_height)<=p['lift_tolerance_um'],
             arms_safe_for_lift=safe,arms_safe_for_alignment=safe,lift_homed=v.lift_homed,
             lift_hold_verified=self.hold_since is not None and v.observed_s-self.hold_since>=p['hold_dwell_s'],
             localized_in_source_room=arrival,localized_at_destination=arrival,localized_at_view=arrival,

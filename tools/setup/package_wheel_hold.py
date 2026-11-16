@@ -27,7 +27,7 @@ def package(output):
     files={'wheel-hold.pyz':memory.getvalue(),
         'firmware.hex':(ROOT/'build/wheel-hold-teleop/stm32_g474_single_arm.hex').read_bytes()}
     hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources.values()}
-    for name in ('mobile_base_teleop_app.c','wheel_hold_monitor.c','wheel_hold_setup.c','servo_transport.c','right_servo_bus.c','main.c'):
+    for name in ('mobile_base_teleop_app.c','wheel_hold_monitor.c','wheel_hold_setup.c','servo_transport.c','servo_bus.c','right_servo_bus.c','main.c'):
         path=ROOT/'firmware/stm32_g474_single_arm/Core/Src'/name
         hashes[str(path.relative_to(ROOT))]=hashlib.sha256(path.read_bytes()).hexdigest()
     files['build.json']=(json.dumps(dict(source_sha256=hashes,
@@ -47,7 +47,7 @@ case "${1:-status}" in
   stop-wheels) exec python3 wheel-hold.pyz --port "$port" --stop-wheels ;;
   hold-here) exec python3 wheel-hold.pyz --port "$port" --prepare-hold --execute ;;
   keyboard) exec python3 wheel-hold.pyz --port "$port" --preserve-hold --run ;;
-  web) exec python3 wheel-hold.pyz --port "$port" --preserve-hold --web --bind 127.0.0.1 --web-port 18766 ;;
+  web) exec python3 wheel-hold.pyz --port "$port" --preserve-hold --web --bind 127.0.0.1 --web-port 18766 --record-dir /home/hyper/robot/shared/diagnostics/teleop-sessions ;;
   *) echo 'status | help | info | stop-wheels | plan-hold (read only) | hold-here (torque ON at current pose) | check | keyboard | web' >&2; exit 2 ;;
 esac
 '''

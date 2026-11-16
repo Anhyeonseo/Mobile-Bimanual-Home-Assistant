@@ -13,6 +13,7 @@ import math
 from ..fetch import InvalidTask
 from ..navigation import NavigationMap, identifier
 from ..navigation_fusion import fuse_navigation_map
+from .. import depth_archive
 from .contracts import Context, Stamp, document, finite, text, make_entity
 
 ROOM_EVIDENCE = {
@@ -214,20 +215,34 @@ class ScanManager:
             rows=result['map_document']['rows'], envelope=asdict(envelope),
             calibration_id=self.context.calibration_id)).encode()).hexdigest()
         result['map_document']['revision'] = 'body-map-'+digest[:24]
+        archive, chunks = depth_archive.encode(volume, clock_id=self.context.clock_id)
         value['navigation_map_document'] = result.pop('map_document')
         value['navigation_build'] = dict(result, envelope=asdict(envelope),
             source_map_sha256=hashlib.sha256(document(value['map_document']).encode()).hexdigest(),
             navigation_map_sha256=hashlib.sha256(document(value['navigation_map_document']).encode()).hexdigest(),
             generated_during_scan=True, physical_map_verified=False,
-            accumulated_3d_volume_persisted=False,
+            accumulated_3d_volume_persisted=True,
+            depth_archive=archive, depth_archive_sha256=depth_archive.digest(archive),
             projection_height_m=[volume.p.minimum_height_m, volume.p.maximum_height_m])
         value['navigation_ready'] = True  # Available for software planning; not commissioned hardware.
         value['coverage']['body_grid_known_fraction'] = sum(c != '?' for row in value['navigation_map_document']['rows'] for c in row)/(len(value['navigation_map_document']['rows'])*len(value['navigation_map_document']['rows'][0]))
-        with self.store.lock:
+        with self.store.lock, self.store.db:
             if self.get(session_id) != checkpoint:
                 raise InvalidTask('scan_changed_during_navigation_build')
-            self.store.save_record('scan', session_id, value)
+            depth_archive.persist(self.store.db, chunks)
+            self.store.db.execute('UPDATE assistant_records SET body=? WHERE kind=? AND id=?',
+                                 (document(value), 'scan', session_id))
         return value
+
+    def archived_volume(self, session_id):
+        value = self.get(session_id)
+        self.navigation_document(session_id)
+        build = value['navigation_build']
+        archive = build.get('depth_archive')
+        if not archive or depth_archive.digest(archive) != build.get('depth_archive_sha256'):
+            raise InvalidTask('scan_depth_archive_missing_or_changed')
+        return depth_archive.restore(self.store, archive, expected_epoch=self.depth_epoch(session_id),
+                                     calibration_id=self.context.calibration_id)
 
     def navigation_document(self, session_id, *, required=True):
         value = self.get(session_id)

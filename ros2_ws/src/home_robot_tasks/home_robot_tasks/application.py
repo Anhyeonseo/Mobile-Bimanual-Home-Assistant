@@ -26,6 +26,7 @@ class RobotApplication:
         task_timeout_s=DEFAULT_TASK_TIMEOUT_S,
         lease=None,
         admission=None,
+        planning_in_skill=False,
     ):
         if adapter.mode != "simulation":
             raise InvalidTask("physical application is not commissioned")
@@ -38,6 +39,8 @@ class RobotApplication:
             raise InvalidTask("admission callback required")
         self.admission = admission
         self.exact_goal_simulation = exact_goal_simulation
+        if type(planning_in_skill) is not bool: raise InvalidTask("explicit skill planning policy required")
+        self.planning_in_skill = planning_in_skill
         navigation_map._cell(*initial_xy)
         self.world, self.map, self.adapter = deepcopy(world), navigation_map, adapter
         self.xy = tuple(initial_xy)
@@ -108,7 +111,7 @@ class RobotApplication:
                 or request["schema_version"] != 1
             ):
                 raise InvalidTask("invalid fetch envelope")
-            plan = plan_fetch(FetchRequest.from_dict(request["request"]), self.world)
+            plan = plan_fetch(FetchRequest.from_dict(request["request"]), self.world, planning_in_skill=self.planning_in_skill)
             steps = plan["steps"]
         else:
             raise InvalidTask("unsupported operation")

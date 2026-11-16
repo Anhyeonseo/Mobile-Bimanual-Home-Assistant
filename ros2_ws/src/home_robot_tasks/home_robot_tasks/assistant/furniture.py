@@ -15,13 +15,17 @@ from .perception import TransformSample
 
 
 FURNITURE_CATEGORIES = ('bed', 'sofa', 'desk', 'table', 'coffee_table', 'chair',
-                        'wardrobe', 'bookshelf', 'nightstand', 'cabinet')
-FURNITURE_PROMPT = ' . '.join(c.replace('_', ' ') for c in FURNITURE_CATEGORIES) + ' .'
+                        'wardrobe', 'bookshelf', 'nightstand', 'cabinet', 'refrigerator', 'unclassified_furniture')
+# Major household landmarks only. Native depth keeps every obstacle, including
+# unnamed small objects; semantic filtering never changes collision geometry.
+# Distractor classes prevent baskets/fans being forced into a furniture label.
+# They are deliberately absent from FURNITURE_CATEGORIES and are not mapped.
+FURNITURE_PROMPT = 'table . chair . sofa . bed . cabinet . bookshelf . wardrobe . refrigerator . nightstand . storage basket . appliance .'
 
 
 def masked_furniture(*, category, detector_score, detection_id, mask, depth_m,
                      intrinsics, stamp, context, transform, now_s,
-                     voxel_size_m=.05, minimum_depth_m=.3, maximum_depth_m=5.):
+                     voxel_size_m=.05, minimum_depth_m=.3, maximum_depth_m=5., floor_z_m=None):
     """Deproject an instance mask with rectified, RGB-aligned metric depth.
 
     Any model may provide the mask; SAM is one existing adapter. Use the RGB
@@ -71,6 +75,13 @@ Native depth remains a separate input to the collision pipeline.
     points = camera @ matrix[:3, :3].T + matrix[:3, 3]
     if not np.isfinite(points).all() or np.abs(points).max() > 10000:
         raise InvalidTask('invalid mapped furniture geometry')
+    if floor_z_m is not None:
+        floor=finite(floor_z_m,'mapped floor height',-10,10)
+        above=points[:,2]>floor+.06
+        # Semantic geometry only. Native depth collision evidence is untouched.
+        if np.mean(~above)>.65 or np.count_nonzero(above)<8:
+            raise InvalidTask('floor_dominated_furniture_mask_reobserve')
+        points=points[above]
     cells = np.unique(np.floor(points/size).astype(np.int64), axis=0)
     if not 4 <= len(cells) <= 4096:
         raise InvalidTask('furniture_geometry_budget_or_extent_invalid')
@@ -136,7 +147,9 @@ simple association deliberately does not claim learned visual re-identification.
                 if (previous['category'], previous['source'], previous['voxel_size_m']) != (
                         obs['category'], obs['source'], obs['voxel_size_m']):
                     continue
-                other = {tuple(c) for c in previous['observed_voxels']}
+                other = {tuple(c) for c in previous.get('current_observed_voxels', previous['observed_voxels'])}
+                if not other:
+                    continue
                 overlap = len(cells & other)/min(len(cells), len(other))
                 if overlap >= .35:
                     candidates.append(previous)
@@ -163,6 +176,10 @@ simple association deliberately does not claim learned visual re-identification.
                     association_method='unique_voxel_overlap_estimate', identity_verified=False,
                     geometry_freshness='accumulated_history_not_current_occupancy',
                     placement_surface_verified=False)
+                if previous and 'current_observed_voxels' in previous:
+                    current = cells | {tuple(c) for c in previous['current_observed_voxels']}
+                    instance.update(current_observed_voxels=[list(c) for c in sorted(current)],
+                                    location_state='observed_again', reobserve_required=True)
             result = dict(status='ASSOCIATED_ESTIMATE' if candidates and instance else
                           ('NEW_ESTIMATE' if instance else 'AMBIGUOUS'),
                           instance_id=instance['instance_id'] if instance else None,
@@ -178,3 +195,45 @@ simple association deliberately does not claim learned visual re-identification.
                     self.store.db.execute('INSERT INTO assistant_records VALUES (?,?,?) ON CONFLICT(kind,id) DO UPDATE SET body=excluded.body',
                                           ('furniture_instance', instance['instance_id'], encoded_instance))
             return result
+
+    def reconcile_local_geometry(self, update):
+        """Retire current shape only where independent sensor clearing succeeded.
+
+        Historical voxels stay available for audit. A newly observed far-away
+        desk remains a new estimate; appearance re-identification is not claimed.
+        """
+        from ..navigation import NavigationMap
+        from dataclasses import replace
+        import math
+        nav = NavigationMap(update['map_document'])
+        if (nav.map_id, nav.frame_id, update['previous_revision']) != (
+                self.context.map_id, self.context.frame_id, self.context.map_revision):
+            raise InvalidTask('furniture_change_context_mismatch')
+        if (update['calibration_id'], update['clock_id']) != (self.context.calibration_id, self.context.clock_id):
+            raise InvalidTask('furniture_change_calibration_or_clock_mismatch')
+        cleared = {tuple(c) for c in update['cleared_cells']}
+        updated_context = replace(self.context, map_revision=nav.revision)
+        affected = []
+        for item in self.instances():
+            size = item['voxel_size_m']
+            old = item.get('current_observed_voxels', item['observed_voxels'])
+            remaining = []
+            for c in old:
+                # Retire only when every overlapped 2D cell is verified clear.
+                left = math.floor((c[0]*size-nav.ox)/nav.resolution)
+                right = math.ceil(((c[0]+1)*size-nav.ox)/nav.resolution)-1
+                bottom = math.floor((c[1]*size-nav.oy)/nav.resolution)
+                top = math.ceil(((c[1]+1)*size-nav.oy)/nav.resolution)-1
+                if not all((x,y) in cleared for x in range(left,right+1) for y in range(bottom,top+1)):
+                    remaining.append(c)
+            if len(remaining) != len(old):
+                item.update(current_observed_voxels=remaining,
+                    location_state='vacated' if not remaining else 'partially_vacated',
+                    reobserve_required=True, geometry_change_capture=update['capture_id'])
+                affected.append(item['instance_id'])
+            # A local occupancy patch preserves the coordinate frame; it does
+            # not refresh the original capture time or approve a placement.
+            item['context'] = updated_context.to_dict()
+            self.store.save_record('furniture_instance', item['instance_id'], item)
+        self.context = updated_context
+        return dict(affected_instances=affected, identity_reassociation_required=bool(affected))

@@ -16,6 +16,7 @@ uint8_t BimanualTrackingFeedback_Active(void){return active;}
 uint8_t BimanualTrackingFeedback_CanStart(void){return active&&!pending&&quiet;}
 void BimanualTrackingFeedback_End(void){if(!fail_end){active=false;pending=false;}}
 HAL_StatusTypeDef BimanualTrackingFeedback_Begin(void){CHECK(!active);active=true;return HAL_OK;}
+HAL_StatusTypeDef BimanualTrackingFeedback_BeginObservation(void){return BimanualTrackingFeedback_Begin();}
 HAL_StatusTypeDef BimanualTrackingFeedback_Start(uint8_t j,uint32_t ms,const uint16_t l[6],const uint16_t r[6],int32_t lp,int32_t rp){
  (void)l;(void)r;(void)lp;(void)rp;CHECK(active&&!pending);joint=j;stamp=ms;pending=true;return HAL_OK;
 }

@@ -8,8 +8,8 @@ from so101_arm_bridge.mobile_wire import MobileStatus
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture(scope="module")
-def feedback_runtime(tmp_path_factory):
+@pytest.fixture(scope="module",params=[0,1],ids=['legacy-mode','unified-drive-readback'])
+def feedback_runtime(tmp_path_factory,request):
     binary = tmp_path_factory.mktemp("mobile-feedback") / "reader"
     fake = ROOT / "tests/fixtures/servo_hal"
     board = ROOT / "firmware/stm32_g474_single_arm/Core"
@@ -21,6 +21,7 @@ def feedback_runtime(tmp_path_factory):
             "-Wall",
             "-Wextra",
             "-Werror",
+            '-DHOST_S4_UNIFIED_CANDIDATE='+str(request.param),
             "-I",
             str(fake),
             "-I",
@@ -64,7 +65,7 @@ def feedback_runtime(tmp_path_factory):
     return binary
 
 
-@pytest.mark.parametrize("scenario", [*range(19), *range(20, 25)])
+@pytest.mark.parametrize("scenario", [*range(19), *range(20, 38)])
 def test_mobile_feedback_runtime(feedback_runtime, scenario):
     subprocess.run([str(feedback_runtime), str(scenario)], check=True)
 

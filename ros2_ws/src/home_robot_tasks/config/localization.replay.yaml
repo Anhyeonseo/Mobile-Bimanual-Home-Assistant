@@ -1,0 +1,33 @@
+# Saved-map localization candidate for recorded data. No controller is launched.
+# Alpha values are Nav2 defaults, not fitted physical wheel-noise measurements.
+/**:
+  ros__parameters:
+    use_sim_time: false
+    global_frame_id: map
+    odom_frame_id: odom
+    base_frame_id: base_link
+    scan_topic: scan
+    map_topic: map
+    robot_model_type: nav2_amcl::OmniMotionModel
+    alpha1: 0.2
+    alpha2: 0.2
+    alpha3: 0.2
+    alpha4: 0.2
+    alpha5: 0.2
+    laser_model_type: likelihood_field
+    laser_max_range: 3.5
+    laser_min_range: 0.12
+    laser_likelihood_max_dist: 2.0
+    max_beams: 90
+    min_particles: 500
+    max_particles: 2000
+    update_min_d: 0.02
+    update_min_a: 0.02
+    resample_interval: 1
+    transform_tolerance: 0.2
+    set_initial_pose: false
+    always_reset_initial_pose: true
+    first_map_only: true
+    tf_broadcast: true
+    save_pose_rate: -1.0
+    random_seed: 7

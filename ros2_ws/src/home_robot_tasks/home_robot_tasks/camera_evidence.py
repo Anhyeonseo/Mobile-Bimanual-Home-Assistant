@@ -67,6 +67,38 @@ def near_depth_profile(profile, baseline, measured):
     return near
 
 
+def wide_color_profile(profile, baseline, measured):
+    """Bind independently measured 1280x720 RGB without changing arm/extrinsics.
+
+    Never infer intrinsics by stretching the old 4:3 image. The SDK evidence
+    must come from an actual wide-mode exposure on the same physical camera.
+    """
+    if profile['camera_device']!=baseline['camera_device'] or profile.get('motion_authorized') is not False:
+        raise ValueError('read-only baseline camera profile required')
+    for evidence in (baseline,measured):
+        if (evidence['camera_device']['factory_calibration_sha256']!=s2.digest(evidence['sdk_calibration'])
+            or evidence['camera_device']['stream_profile_id']!='rgbd-v1-'+s2.digest(evidence['profiles'])):
+            raise ValueError('camera evidence fingerprint mismatch')
+    if baseline['camera_device']['device_id_hash']!=measured['camera_device']['device_id_hash']:
+        raise ValueError('wide profile must use the same camera')
+    if measured['profiles']['color']!=dict(width=1280,height=720,fps=30,format='bgr8'):
+        raise ValueError('measured 1280x720 RGB at 30fps required')
+    a,b=measured['sdk_calibration'],baseline['sdk_calibration']
+    if (measured['profiles']['depth']!=baseline['profiles']['depth']
+        or a['native_depth_intrinsics']!=b['native_depth_intrinsics']
+        or a['depth_scale_m']!=b['depth_scale_m']
+        or not np.allclose(a['color_optical_from_depth_optical'],b['color_optical_from_depth_optical'],rtol=0,atol=2e-9)):
+        raise ValueError('wide color must preserve native depth and sensor extrinsics')
+    if a['aligned_depth_intrinsics']!=a['color_intrinsics'] or (a['color_intrinsics']['width'],a['color_intrinsics']['height'])!=(1280,720):
+        raise ValueError('measured wide aligned intrinsics required')
+    wide=deepcopy(profile)
+    wide['base_profile_id']=wide.pop('calibration_id')
+    wide['wide_color_reference_sha256']=s2.digest(measured)
+    wide['camera_device']=deepcopy(measured['camera_device'])
+    wide['calibration_id']='s2-dev-'+s2.digest(wide)[:24]
+    return wide
+
+
 def intrinsics(value):
     result = {}
     for key in ('width', 'height'):
@@ -148,3 +180,18 @@ def from_metadata(metadata):
             'frame_evidence': deepcopy(frame_evidence),
             'image_quality_validated': False, 'timestamps_synchronized_to_robot': False, 'camera_mount_calibrated': False,
             'coordinate_use_allowed': False, 's2_complete': False, 'motion_authorized': False}
+
+
+def load_capture_profile(root, mode='wide'):
+    """Select measured live profiles without rewriting historical camera evidence."""
+    import json
+    from pathlib import Path
+    if mode not in ('wide', 'legacy'):
+        raise ValueError('unknown camera mode')
+    folder=Path(root)/'config/home_assistant'
+    suffix='.wide' if mode=='wide' else ''
+    profile=json.loads((folder/('s2_coordinates'+suffix+'.development.json')).read_text())
+    reference=json.loads((folder/('camera_device'+suffix+'.observed.json')).read_text())
+    if profile['camera_device']!=reference['camera_device']:
+        raise ValueError('live camera profile and evidence mismatch')
+    return profile, reference

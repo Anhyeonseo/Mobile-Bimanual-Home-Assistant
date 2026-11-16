@@ -62,8 +62,9 @@ class StateTravelEvidence:
     clearance() returns (original_monotonic_stamp, epoch, is_clear). It is not
     inferred from arm pose, LiDAR floor clearance or a successful Nav2 result.
     """
-    def __init__(self,state,volume,clearance):
+    def __init__(self,state,volume,clearance,health=None):
         self.state,self.volume,self.clearance=state,volume,clearance
+        self.health=health
 
     def __call__(self):
         from .navigation_depth import TravelEvidence
@@ -75,12 +76,14 @@ class StateTravelEvidence:
             raise InvalidTask('stale or future initial-envelope evidence')
         ready=all(c.get(k) is True for k in ('hardware_ready','arm_in_transport_pose',
             'lift_in_transport_position','lift_stopped','lift_homed','lift_hold_verified'))
+        if self.health is not None:
+            ready=ready and self.health.ready()
         observed=min(stamp,self.state.latest.observed_s) if self.state.latest else stamp
         return TravelEvidence(observed,epoch,ready,c.get('localized') is True,clear)
 
 
 def build_guarded_navigation(*,node,client,geometry,profile,guard,state,clearance,clock,
-                             request_stop,io_parameters,reset_observations,action_name='/offline_nav2/navigate_to_pose'):
+                             request_stop,io_parameters,reset_observations,action_name='/offline_nav2/navigate_to_pose',health=None,follow_path_action=None,command_model=None):
     """Wire once, then inject returned port/maintenance into build_ros_runtime.
 
     client is the existing single-owner MobileClient; request_stop MUST use the
@@ -90,15 +93,22 @@ def build_guarded_navigation(*,node,client,geometry,profile,guard,state,clearanc
     """
     from .base_driver import MobileBaseDriver,RosBaseIO
     from .nav2_port import Nav2Port
-    evidence=StateTravelEvidence(state,guard.volume,clearance)
-    driver=MobileBaseDriver(client,geometry,profile,clock,guard,evidence,lambda reason:request_stop())
+    evidence=StateTravelEvidence(state,guard.volume,clearance,health)
+    driver=MobileBaseDriver(client,geometry,profile,clock,guard,evidence,lambda reason:request_stop(),command_model=command_model)
     io=RosBaseIO(node,driver,**io_parameters)
     def stopped(after):
         c=state.conditions()
         return (state.latest is not None and state.latest.observed_s>after
                 and c.get('base_stopped') is True and c.get('hardware_ready') is True)
-    port=GuardedNavigationPort(Nav2Port(node,action_name),driver,clock,lambda:guard.volume.epoch,stopped)
-    session=TravelSessionPort(port,guard,evidence,clock,reset_observations)
+    action=Nav2Port(node,action_name)
+    if follow_path_action is not None:
+        from .nav2_port import Nav2FollowPathPort,Nav2MotionPort
+        action=Nav2MotionPort(action,Nav2FollowPathPort(node,follow_path_action))
+    port=GuardedNavigationPort(action,driver,clock,lambda:guard.volume.epoch,stopped)
+    def reset(epoch):
+        reset_observations(epoch)
+        if health is not None:health.reset(epoch)
+    session=TravelSessionPort(port,guard,evidence,clock,reset)
     return session,io,lambda:port.maintain(io)
 
 

@@ -28,6 +28,9 @@ typedef struct
 
 /* Non-consuming, atomic observation of the last real timer interrupt. */
 bool ControlTick_PeekEpoch(uint32_t *epoch_us);
+/* Read both clocks in one critical section: an ISR between separate reads can
+ * otherwise make a newly advanced epoch appear later than the sampled now. */
+bool ControlTick_PeekClock(uint32_t *now_us, uint32_t *epoch_us);
 /* Read admission only: never consumes or postpones an output event. */
 bool ControlTick_ReadWindowAvailable(uint32_t budget_us);
 void ControlTick_Init(void);

@@ -24,6 +24,15 @@ HAL_StatusTypeDef HAL_UART_Receive(UART_HandleTypeDef *u,uint8_t *p,uint16_t n,u
     *p=*input++;return HAL_OK;
 }
 static bool held(unsigned bus,unsigned id){return id>=1 && (id<=6 || (!bus && id==10));}
+static int position_target(unsigned b,unsigned id){
+    int pos=regs[b][id][56]|regs[b][id][57]<<8;
+    if(!b && id==10 && regs[b][id][33]==1){
+        unsigned raw=regs[b][id][31]|regs[b][id][32]<<8;
+        int offset=(raw&2048)?-(int)(raw&2047):(int)raw;
+        pos-=offset;
+    }
+    return pos;
+}
 HAL_StatusTypeDef HAL_UART_Transmit(UART_HandleTypeDef *u,const uint8_t *p,uint16_t n,uint32_t wait){
     (void)wait;tick++;
     if(u==&host){assert(strlen(output)+n<sizeof(output));strncat(output,(const char *)p,n);return HAL_OK;}
@@ -35,16 +44,24 @@ HAL_StatusTypeDef HAL_UART_Transmit(UART_HandleTypeDef *u,const uint8_t *p,uint1
          * measured position. Setup must never rewrite or disable them. */
         assert((!b && id==10) || original[b][id][40]==0);
         assert((addr==40 && len==1 && (p[6]==1 || (!b && id==10 && p[6]==0))) ||
-               (addr==42 && len==2 && p[6]==regs[b][id][56] && p[7]==regs[b][id][57]) ||
+               (addr==42 && len==2 && (int)(p[6]|p[7]<<8)==position_target(b,id)) ||
                (!b && id==10 && len==1 && ((addr==55 && p[6]<=1) || (addr==33 && p[6]==0))));
         if(write_fail && held_writes==write_fail)return HAL_ERROR;
     }else wheel_writes++;
     if(held(b,id) && addr==33){
         assert(regs[b][id][40]==0 && regs[b][id][55]==0);
-        assert(abs((int)(regs[b][id][42]|regs[b][id][43]<<8)-(int)(regs[b][id][56]|regs[b][id][57]<<8))<=8);
+        assert(abs((int)(regs[b][id][42]|regs[b][id][43]<<8)-position_target(b,id))<=8);
     }
+    int converted=position_target(b,id);
     memcpy(regs[b][id]+addr,p+6,len);
-    if(!b && id==10 && addr==33){regs[b][id][58]=regs[b][id][59]=0;}
+    if(!b && id==10 && addr==33){
+        regs[b][id][58]=regs[b][id][59]=0;
+        if(scenario>=39 && scenario!=45){
+            converted+=scenario==43?9:scenario==47?8:0;
+            regs[b][id][56]=(uint8_t)converted;regs[b][id][57]=(uint8_t)(converted>>8);
+        }
+        if(scenario==44)regs[b][id][31]++;
+    }
     if(scenario==35 && !b && id==10 && addr==33)return HAL_TIMEOUT; /* applied, ACK lost */
     if(addr==42 || addr==46){
         if(scenario!=1)regs[b][id][40]=1; /* goal-write torque side effect */
@@ -69,6 +86,7 @@ static HAL_StatusTypeDef transmit(unsigned b,uint8_t id,uint8_t addr,uint8_t op,
 }
 static HAL_StatusTypeDef read_bus(unsigned b,uint8_t id,uint8_t addr,uint8_t n,uint8_t *v){
     if(read_fail && id==read_fail)return HAL_TIMEOUT;
+    if(scenario==46 && !b && id==10 && addr==31)return HAL_TIMEOUT;
     if(transmit(b,id,addr,2,&n,1)!=HAL_OK)return HAL_ERROR;
     if(!b && id==10 && addr==56 && n==4){
         if(scenario==24)regs[b][id][56]+=4;
@@ -103,6 +121,13 @@ int main(int argc,char **argv){
     if(scenario==2){regs[0][6][40]=1;regs[1][6][40]=1;}
     if(scenario==12)regs[0][10][33]=0;
     if(scenario==14)for(unsigned b=0;b<2;b++)for(unsigned id=1;id<=10;id++)if(held(b,id))regs[b][id][40]=1;
+    if(scenario>=39){
+        unsigned raw=scenario==40||scenario==49?2048+85:scenario==42?4096:85;
+        unsigned pos=scenario==41?50:scenario==49?4050:3778;
+        regs[0][10][31]=raw&255;regs[0][10][32]=raw>>8;
+        regs[0][10][56]=pos&255;regs[0][10][57]=pos>>8;
+        if(scenario==48){regs[0][10][11]=3700&255;regs[0][10][12]=3700>>8;}
+    }
     memcpy(original,regs,sizeof(regs));
     SingleArmApp_Init(&host,&huart1);assert(writes==0);forbidden();
     if(scenario==3)regs[0][2][58]=30;
@@ -140,6 +165,13 @@ int main(int argc,char **argv){
     if(scenario==13){assert(!WheelSetup_Apply(999));assert(!WheelSetup_Apply(123));assert(writes==0);forbidden();return 0;}
     if(scenario>=28 && scenario<=34)write_fail=(scenario-28)+13;
     bool good=WheelSetup_Apply(123);
+    if(scenario>=39){
+        char report[2048];WheelSetup_Describe(report,sizeof(report),good);puts(report);
+        if(scenario!=39 && scenario!=40 && scenario!=47 && scenario!=48){
+            assert(!good && regs[0][10][40]==0 && regs[0][10][55]==1);
+            assert(regs[0][7][40]==0);forbidden();return 0;
+        }
+    }
     if(scenario>=26 && scenario<=35){assert(!good);assert(regs[0][7][40]==0);
         if(scenario==35)assert(regs[0][10][55]==1 && regs[0][10][40]==0);
         forbidden();return 0;}

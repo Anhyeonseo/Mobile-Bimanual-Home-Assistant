@@ -84,7 +84,7 @@ class ResolvedPort:
 
 
 def compose_fetch_adapter(*, backends, resolve, monitor, phase_monitor,
-                          stop_backend, clock, capture_sink, before_start=None, alignment_transport=None):
+                          stop_backend, clock, capture_sink, before_start=None, alignment_transport=None, resolver_factory=None):
     """Use real or mocked ports, retaining the simulation-only execution gate.
 
     Required roles: arm, lift, navigation, alignment, search, capture,
@@ -103,8 +103,9 @@ def compose_fetch_adapter(*, backends, resolve, monitor, phase_monitor,
             raise InvalidTask("asynchronous skill port required")
     if not callable(getattr(backends["capture"], "result", None)):
         raise InvalidTask("capture must return validated observations")
+    make_resolved = resolver_factory or ResolvedPort
     ports = {
-        skill: ResolvedPort(skill, backends[role], resolve, clock, before=before_start,
+        skill: make_resolved(skill, backends[role], resolve, clock, before=before_start,
                             result_sink=capture_sink if role == "capture" else None)
         for skill, role in ROLES.items()
     }
@@ -124,25 +125,26 @@ def compose_fetch_adapter(*, backends, resolve, monitor, phase_monitor,
                       ("lift_stopped", "lift_in_transport_position", *load), 20),
             )
         sequence = SequencePort(phases, phase_monitor, clock)
-        ports[skill] = ResolvedPort(skill, sequence, resolve, clock, before=before_start)
+        ports[skill] = make_resolved(skill, sequence, resolve, clock, before=before_start)
     if alignment_transport is not None:
         for skill in ("align_for_pick", "align_for_place"):
             def alignment_phases(plan, carrying=skill == "align_for_place"):
+                transport = alignment_transport(plan, carrying) if callable(alignment_transport) else alignment_transport
                 load = ("load_retained",) if carrying else ()
                 stationary = ("base_stopped", "lift_stopped", *load)
                 travel = ("localized", "arm_in_transport_pose", "lift_in_transport_position", "lift_stopped", *load)
                 return (
-                    Phase("alignment_arm_transport", backends["arm"], alignment_transport["arm"],
+                    Phase("alignment_arm_transport", backends["arm"], transport["arm"],
                           stationary, stationary, ("arm_in_transport_pose", *load), 20),
                     Phase("alignment_lift_transport", backends["lift"],
-                          {"height_um": alignment_transport["height_um"]},
+                          {"height_um": transport["height_um"]},
                           (*stationary, "arms_safe_for_lift", "lift_homed"),
                           ("base_stopped", "arms_safe_for_lift", *load),
                           ("lift_stopped", "lift_in_transport_position", *load), 20),
                     Phase("alignment_navigate", backends["alignment"], plan,
                           ("base_stopped", *travel), travel, ("base_stopped", *load), 60),
                 )
-            ports[skill] = ResolvedPort(skill, SequencePort(alignment_phases, phase_monitor, clock),
+            ports[skill] = make_resolved(skill, SequencePort(alignment_phases, phase_monitor, clock),
                                        resolve, clock, before=before_start)
     def composed_monitor(goal_id, step, now_s):
         evidence = monitor(goal_id, step, now_s)
@@ -150,7 +152,7 @@ def compose_fetch_adapter(*, backends, resolve, monitor, phase_monitor,
         skill = step["skill"]
         if skill in {"search", "prepare_navigation", "prepare_transport"}:
             port = ports[skill]
-            if goal_id in port.entries and port.entries[goal_id]["attempted"]:
+            if goal_id in port.entries and (port.entries[goal_id]["attempted"] or "future" in port.entries[goal_id]):
                 safe = port.phase_safe(goal_id)
             else:
                 safe = port.ready() and all(conditions.get(k) is True
@@ -160,7 +162,7 @@ def compose_fetch_adapter(*, backends, resolve, monitor, phase_monitor,
             port = ports[skill]
             if alignment_transport is None:
                 safe = all(conditions.get(k) is True for k in ("lift_stopped", "arms_safe_for_alignment"))
-            elif goal_id in port.entries and port.entries[goal_id]["attempted"]:
+            elif goal_id in port.entries and (port.entries[goal_id]["attempted"] or "future" in port.entries[goal_id]):
                 safe = port.phase_safe(goal_id)
             else:
                 safe = port.ready() and all(conditions.get(k) is True for k in ("base_stopped", "lift_stopped"))

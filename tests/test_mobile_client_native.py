@@ -33,6 +33,7 @@ def library(tmp_path_factory):
             "-Werror",
             "-shared",
             "-fPIC",
+            "-DPC_MOBILE_MAX_WHEEL_RAW=100",
             "-I",
             str(core / "include"),
             str(core / "tests/pc_mobile_simulator.c"),
@@ -101,6 +102,28 @@ def test_deadline_expiry_latches_and_requires_new_session(library):
     assert c.session is None
 
 
+def test_installed_100_limit_reproduces_rejection_and_bounded_nav2_is_accepted(library):
+    from so101_arm_bridge.mobile_client import MobileReplyError
+    from home_robot_tasks.base_motion import TeleopCommandModel
+    import json
+    model=TeleopCommandModel(json.loads((ROOT/'config/home_assistant/s4_base.command-candidate.json').read_text()))
+    c,p,t=client(library);c.synchronize();c.arm(1)
+    for _ in range(6):
+        t[0]+=30;c.velocity((0,0,0,0),lifetime_ms=150)
+    raw=tuple(round(v) for v in model.raw_command((.016,0,0)))+(0,)
+    t[0]+=30
+    with pytest.raises(MobileReplyError,match='controller rejected') as error:c.velocity(raw,lifetime_ms=150)
+    assert error.value.diagnostics['response']['kind']==130
+    assert error.value.diagnostics['response']['state']==2
+    assert error.value.diagnostics['command']['velocity_raw']==raw
+    assert c.session is None
+    # New isolated simulated boot, never an automatic physical retry.
+    c,p,t=client(library);c.synchronize();c.arm(1);model.limit=100
+    for twist in ((.016,0,0),(.016,.013,.09),(-.016,-.013,-.09)):
+        t[0]+=30;raw=tuple(round(v) for v in model.raw_command(twist))+(0,)
+        assert c.velocity(raw,lifetime_ms=150).ready_for_motion(1)
+
+
 def test_reboot_and_transport_loss_do_not_rearm(library):
     c, p, t = client(library)
     c.synchronize()
@@ -120,3 +143,35 @@ def test_reboot_and_transport_loss_do_not_rearm(library):
     with pytest.raises(TimeoutError):
         c.velocity((1, 2, 3, 0))
     assert c.session is None
+
+
+def test_late_clock_refresh_reuses_only_original_live_bound(library):
+    c,p,t=client(library);c.synchronize();previous=c.clock.sample;exchange=p.exchange
+    def delayed(q):
+        result=exchange(q);t[0]+=25;return result
+    p.exchange=delayed;t[0]=1500
+    assert c.refresh_clock() is previous[2]
+    assert c.clock.sample is previous and c.clock_refresh_deferred==1
+    assert c.clock.deadline(t[0],150)==(1675,42)
+    t[0]=1970;c.refresh_clock();assert c.clock.sample is previous
+    t[0]=1980
+    with pytest.raises(ValueError,match='delayed'):c.refresh_clock()
+    with pytest.raises(ValueError,match='stale'):c.clock.deadline(t[0],150)
+
+
+def test_late_clock_refresh_never_accepts_reboot(library):
+    c,p,t=client(library);c.synchronize();exchange=p.exchange
+    def delayed(q):
+        result=exchange(q);t[0]+=25;return result
+    p.exchange=delayed;p.library.pc_mobile_reset(43);t[0]=1500
+    with pytest.raises(RuntimeError,match='restarted'):c.refresh_clock()
+    assert c.clock.sample is None and c.session is None
+
+
+def test_initial_clock_still_requires_a_precise_exchange(library):
+    c,p,t=client(library);exchange=p.exchange
+    def delayed(q):
+        result=exchange(q);t[0]+=25;return result
+    p.exchange=delayed
+    with pytest.raises(ValueError,match='delayed'):c.synchronize()
+    assert c.clock.sample is None and c.session is None

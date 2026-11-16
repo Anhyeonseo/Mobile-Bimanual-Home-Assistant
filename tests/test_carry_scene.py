@@ -114,3 +114,13 @@ def test_rejects_broken_binding(scene,change):
     if change=='nan_box':data['observed_scene']['support_boxes_m'][0][1][0]=float('nan')
     if change=='wrong_frame':data['observed_scene']['frame']='base_link'
     with pytest.raises(ValueError):from_prepared_capture(data,p)
+
+
+def test_six_millimetre_sdk_quantization_at_inclusive_scene_boundary():
+    import numpy as np
+    from home_robot_tasks.carry_rgbd import StationarySceneCheck
+    image=np.full((20,20,3),100,dtype=np.uint8)
+    scale=float(np.float32(.001));depth=np.full((20,20),500*scale)
+    mask=np.ones((20,20),dtype=bool);guard=StationarySceneCheck(image,depth,mask)
+    assert guard.compare(image,depth+6*scale,target_only=True)['unchanged']
+    assert not guard.compare(image,depth+7*scale,target_only=True)['unchanged']

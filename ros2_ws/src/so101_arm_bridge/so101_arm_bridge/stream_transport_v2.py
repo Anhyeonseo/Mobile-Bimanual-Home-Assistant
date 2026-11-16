@@ -146,7 +146,14 @@ class StreamValidationTransportV2:
             packet = bytes(self._rx_residual[: index + 1])
             del self._rx_residual[: index + 1]
             return packet
-        chunk = self._port.read_until(b"\x00")
+        # pyserial.read_until loops over single-byte reads in Python. Under
+        # concurrent image/JSON processing that can repeatedly yield the GIL
+        # while an entire reply is already buffered. Drain available bytes in
+        # one bounded read; retain partial and subsequent frames below.
+        if hasattr(self._port, 'in_waiting') and callable(getattr(self._port, 'read', None)):
+            chunk = self._port.read(max(1, min(self._port.in_waiting, 4096)))
+        else:
+            chunk = self._port.read_until(b"\x00")
         if not chunk:
             return None
         self._rx_residual.extend(chunk)
@@ -307,20 +314,31 @@ class StreamValidationTransportV2:
             expected_joint_count=self._physical_joint_count,
         )
 
+    def _checked_exchange(self, request_type, response_type, parser, label,
+                          payload=b"", **parse_options):
+        """Check both request echoes after matching the outer frame.
+
+        Callers hold the transaction lock. A mismatch is an error, never a
+        reason to resend a command whose delivery may already have occurred.
+        """
+        sequence, sender_time_ms = self._send(request_type, payload)
+        response = parser(self._receive(sequence, response_type).payload,
+                          **parse_options)
+        if response.request_sequence != sequence:
+            raise StreamTransportV2Error(f"{label} sequence echo mismatch")
+        if response.sender_time_ms_echo != sender_time_ms:
+            raise StreamTransportV2Error(f"{label} sender-time echo mismatch")
+        return response
+
     def _stream_exchange(
         self,
         message_type: StreamMessageTypeV2,
         payload: bytes,
     ) -> StreamStatusV2:
-        sequence, sender_time_ms = self._send(message_type, payload)
-        status = parse_stream_status_v2(
-            self._receive(sequence, StreamMessageTypeV2.STREAM_STATUS).payload
+        return self._checked_exchange(
+            message_type, StreamMessageTypeV2.STREAM_STATUS,
+            parse_stream_status_v2, "STREAM_STATUS", payload,
         )
-        if status.request_sequence != sequence:
-            raise StreamTransportV2Error("STREAM_STATUS sequence echo mismatch")
-        if status.sender_time_ms_echo != sender_time_ms:
-            raise StreamTransportV2Error("STREAM_STATUS sender-time echo mismatch")
-        return status
 
     @_serialized
     def open_stream(self, policy: StreamPolicyV2) -> StreamStatusV2:
@@ -345,76 +363,36 @@ class StreamValidationTransportV2:
 
     @_serialized
     def get_executor_diagnostics(self) -> StreamExecutorDiagnosticsV2:
-        sequence, sender_time_ms = self._send(
-            StreamMessageTypeV2.GET_EXECUTOR_DIAGNOSTICS
+        return self._checked_exchange(
+            StreamMessageTypeV2.GET_EXECUTOR_DIAGNOSTICS,
+            StreamMessageTypeV2.EXECUTOR_DIAGNOSTICS,
+            parse_executor_diagnostics_v2, "executor diagnostics",
         )
-        diagnostics = parse_executor_diagnostics_v2(
-            self._receive(
-                sequence,
-                StreamMessageTypeV2.EXECUTOR_DIAGNOSTICS,
-            ).payload
-        )
-        if diagnostics.request_sequence != sequence:
-            raise StreamTransportV2Error("executor diagnostics sequence echo mismatch")
-        if diagnostics.sender_time_ms_echo != sender_time_ms:
-            raise StreamTransportV2Error(
-                "executor diagnostics sender-time echo mismatch"
-            )
-        return diagnostics
 
     @_serialized
     def get_dispatch_diagnostics(self) -> BimanualDispatchDiagnosticsV2:
-        sequence, sender_time_ms = self._send(
-            StreamMessageTypeV2.GET_DISPATCH_DIAGNOSTICS
+        return self._checked_exchange(
+            StreamMessageTypeV2.GET_DISPATCH_DIAGNOSTICS,
+            StreamMessageTypeV2.DISPATCH_DIAGNOSTICS,
+            parse_dispatch_diagnostics_v2, "dispatch diagnostics",
         )
-        diagnostics = parse_dispatch_diagnostics_v2(
-            self._receive(
-                sequence,
-                StreamMessageTypeV2.DISPATCH_DIAGNOSTICS,
-            ).payload
-        )
-        if diagnostics.request_sequence != sequence:
-            raise StreamTransportV2Error("dispatch diagnostics sequence echo mismatch")
-        if diagnostics.sender_time_ms_echo != sender_time_ms:
-            raise StreamTransportV2Error(
-                "dispatch diagnostics sender-time echo mismatch"
-            )
-        return diagnostics
 
     @_serialized
     def get_tracking_diagnostics(self) -> BimanualTrackingDiagnosticsV2:
-        sequence, sender_time_ms = self._send(
-            StreamMessageTypeV2.GET_TRACKING_DIAGNOSTICS
+        return self._checked_exchange(
+            StreamMessageTypeV2.GET_TRACKING_DIAGNOSTICS,
+            StreamMessageTypeV2.TRACKING_DIAGNOSTICS,
+            parse_tracking_diagnostics_v2, "tracking diagnostics",
         )
-        diagnostics = parse_tracking_diagnostics_v2(
-            self._receive(
-                sequence,
-                StreamMessageTypeV2.TRACKING_DIAGNOSTICS,
-            ).payload
-        )
-        if diagnostics.request_sequence != sequence:
-            raise StreamTransportV2Error("tracking diagnostics sequence echo mismatch")
-        if diagnostics.sender_time_ms_echo != sender_time_ms:
-            raise StreamTransportV2Error(
-                "tracking diagnostics sender-time echo mismatch"
-            )
-        return diagnostics
 
     @_serialized
     def get_feedback_snapshot(self) -> BimanualFeedbackSnapshotV2:
-        sequence, sender_time_ms = self._send(StreamMessageTypeV2.GET_FEEDBACK_SNAPSHOT)
-        snapshot = parse_feedback_snapshot_v2(
-            self._receive(
-                sequence,
-                StreamMessageTypeV2.FEEDBACK_SNAPSHOT,
-            ).payload,
+        return self._checked_exchange(
+            StreamMessageTypeV2.GET_FEEDBACK_SNAPSHOT,
+            StreamMessageTypeV2.FEEDBACK_SNAPSHOT,
+            parse_feedback_snapshot_v2, "feedback snapshot",
             expected_joint_count=self._physical_joint_count,
         )
-        if snapshot.request_sequence != sequence:
-            raise StreamTransportV2Error("feedback snapshot sequence echo mismatch")
-        if snapshot.sender_time_ms_echo != sender_time_ms:
-            raise StreamTransportV2Error("feedback snapshot sender-time echo mismatch")
-        return snapshot
 
     @_serialized
     def prepare_shadow(
@@ -458,12 +436,15 @@ class StreamValidationTransportV2:
         if (
             not isinstance(packet, bytes)
             or len(packet) != 36
-            or packet[:3] not in (b"AM\x01", b"AL\x01", b"AQ\x01", b"AE\x01")
+            or packet[:3] not in (b"AM\x01", b"AL\x01", b"AQ\x01", b"AE\x01", b"AC\x01")
         ):
             raise StreamTransportV2Error("invalid mobile payload")
         if struct.unpack_from("<I", packet, 32)[0] != crc32c(packet[:32]):
             raise StreamTransportV2Error("invalid mobile payload CRC")
-        if packet[:3] == b"AE\x01":
+        if packet[:3] == b"AC\x01":
+            from .unified_commissioning import validate_request
+            validate_request(packet)
+        elif packet[:3] == b"AE\x01":
             from .robot_evidence import validate_request
             validate_request(packet)
         elif packet[:3] == b"AQ\x01":

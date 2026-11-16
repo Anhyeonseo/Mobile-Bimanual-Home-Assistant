@@ -148,7 +148,7 @@ def annotate(rgb, report, masks=None):
 
 
 class GroundingRGBD:
-    def __init__(self, device="auto", box_threshold=0.30, text_threshold=0.25, use_sam=False):
+    def __init__(self, device="auto", box_threshold=0.30, text_threshold=0.25, use_sam=False, *, cache_dir=None):
         import torch
         import transformers
         from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
@@ -159,7 +159,7 @@ class GroundingRGBD:
         self.box_threshold, self.text_threshold = box_threshold, text_threshold
         self.use_sam, self.segmenter = use_sam, None
         self.versions = {"torch": torch.__version__, "transformers": transformers.__version__}
-        options = {"revision": MODEL_REVISION, "cache_dir": str(ROOT / "artifacts/models/huggingface")}
+        options = {"revision": MODEL_REVISION, "cache_dir": str(cache_dir or ROOT / "artifacts/models/huggingface")}
         print(f"Loading {MODEL_ID} on {self.device} ...", flush=True)
         self.processor = AutoProcessor.from_pretrained(MODEL_ID, **options)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(

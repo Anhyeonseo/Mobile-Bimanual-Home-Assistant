@@ -53,13 +53,14 @@ def validate_native(program, inputs, mesh_dir, output):
     from moveit_msgs.msg import RobotState
     from home_robot_tasks.carry_model import parameters
     from home_robot_tasks.carry_moveit import MoveItCarryPlanner
-    from home_robot_tasks.carry_planning import GraspRouteCandidate
+    from home_robot_tasks.carry_planning import GraspRouteCandidate, fixed_contact_review, at_actual_contact
     from home_robot_tasks.carry_posture import ObjectAxisConstraint
     from home_robot_tasks.carry_scene import apply_boxes
     from tools.diagnostics.carry_moveit_session import session
     report, profile, geometry, arms, boxes = inputs
     surface_audit=audit_native_surfaces(program,profile,arms['left'],boxes,
-                                      approach_mode=report.get('approach_mode','tool_axis'))
+                                      approach_mode=report.get('approach_mode','tool_axis'),
+                                      support_plane=report.get('observed_support_plane_base'))
     posture_spec=report.get('grasp_posture_policy')
     posture_policy=TabletopGraspPolicy(**posture_spec) if posture_spec else None
     joints = report['initial_model_joint_positions_si']
@@ -72,6 +73,14 @@ def validate_native(program, inputs, mesh_dir, output):
     if candidate['object_constraint']:
         candidate['object_constraint'] = ObjectAxisConstraint(**candidate['object_constraint'])
     candidate = GraspRouteCandidate(**candidate)
+    # Audit the rounded wire endpoint too, not only the intended grasp pose.
+    contact_point=next(s for s in program.stages if s.name=='approach').points[-1]
+    control=np.round(contact_point.positions_rad,6)
+    contact_q=np.array([geo.model_from_control(float(control[i]),profile['arms']['left']['alignment'][n])
+                        for i,n in enumerate(geo.JOINTS[:5])])
+    contact_audit=fixed_contact_review(arms['left'],at_actual_contact(candidate,arms['left'].fk(contact_q)[0]))
+    if not contact_audit['accepted']:
+        raise ValueError('wire fixed-finger contact binding failed: '+str(contact_audit))
     config = parameters(ROOT, profile, geometry, arms, mesh_dir)
     output.mkdir(parents=True, exist_ok=True)
     results = []
@@ -128,10 +137,10 @@ def validate_native(program, inputs, mesh_dir, output):
         planner.valid(model[:5],candidate,True,jaw=jaw)
     return dict(status='PASSED', stages=results, continuous_collision_proof=False,
                 independent_obstacle_rejected=rejected,scene_restored_and_rechecked=True,
-                stock_finger_surfaces=surface_audit)
+                stock_finger_surfaces=surface_audit,fixed_finger_contact=contact_audit)
 
 
-def audit_native_surfaces(program,profile,arm,boxes, *, approach_mode='tool_axis'):
+def audit_native_surfaces(program,profile,arm,boxes, *, approach_mode='tool_axis',support_plane=None):
     """Reuse the verified STL, checking wire FK and actual commanded jaw sweep.
 
     The plane is extended only for local descent/closure/lift acceptance. A
@@ -140,9 +149,21 @@ def audit_native_surfaces(program,profile,arm,boxes, *, approach_mode='tool_axis
     """
     from home_robot_tasks.carry_cartesian import validate_vertical_descent
     if approach_mode not in ('tool_axis','vertical'):raise ValueError('unknown approach mode')
-    box=next(b for b in boxes if b.role=='support')
-    support=box.base_pose.copy()
-    support[:3,3]+=support[:3,2]*box.size_m[2]/2
+    if support_plane is None:
+        box=next(b for b in boxes if b.role=='support')
+        if box.mesh is not None:
+            raise ValueError('mesh support requires its explicitly observed plane')
+        support=box.base_pose.copy()
+        support[:3,3]+=support[:3,2]*box.size_m[2]/2
+    else:
+        plane=np.asarray(support_plane,dtype=float)
+        if plane.shape!=(4,) or not np.isfinite(plane).all() or np.linalg.norm(plane[:3])<1e-9:
+            raise ValueError('finite nonzero observed support plane required')
+        plane=plane/np.linalg.norm(plane[:3]);normal=plane[:3]
+        if normal[2]<.9:raise ValueError('upward tabletop support plane required')
+        x=np.array([1.,0.,0.]);x-=normal*(x@normal);x/=np.linalg.norm(x)
+        support=np.eye(4);support[:3,:3]=np.column_stack((x,np.cross(normal,x),normal))
+        support[:3,3]=-plane[3]*normal
     results=[]
     for stage in program.stages:
         minima={name:dict(clearance_m=float('inf')) for name in ('fixed','moving')}

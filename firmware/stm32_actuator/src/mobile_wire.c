@@ -1,13 +1,7 @@
+#include "actuator_core/wire_bytes.h"
 #include "actuator_core/mobile_wire.h"
 #include "actuator_core/crc32c.h"
 #include <string.h>
-static uint32_t read32(const uint8_t *p) {
-    return (uint32_t)p[0] | ((uint32_t)p[1]<<8) | ((uint32_t)p[2]<<16) | ((uint32_t)p[3]<<24);
-}
-static void write32(uint8_t *p, uint32_t value) {
-    p[0]=(uint8_t)value; p[1]=(uint8_t)(value>>8);
-    p[2]=(uint8_t)(value>>16); p[3]=(uint8_t)(value>>24);
-}
 static bool valid(const actuator_mobile_message_t *m) {
     unsigned i;
     if (m == NULL || m->session == 0u || m->opcode < ACTUATOR_MOBILE_WIRE_ARM ||
@@ -25,10 +19,10 @@ bool actuator_mobile_wire_encode(const actuator_mobile_message_t *message,
     unsigned i;
     if (packet == NULL || !valid(message)) return false;
     candidate[0]='A'; candidate[1]='M'; candidate[2]=1u; candidate[3]=(uint8_t)message->opcode;
-    write32(candidate+4,message->session); write32(candidate+8,message->sequence);
-    write32(candidate+12,message->valid_until_ms);
-    for (i=0u;i<4u;i++) write32(candidate+16+4*i,(uint32_t)message->velocity_raw[i]);
-    write32(candidate+32,actuator_crc32c(candidate,32));
+    actuator_write_u32_le(candidate+4,message->session); actuator_write_u32_le(candidate+8,message->sequence);
+    actuator_write_u32_le(candidate+12,message->valid_until_ms);
+    for (i=0u;i<4u;i++) actuator_write_u32_le(candidate+16+4*i,(uint32_t)message->velocity_raw[i]);
+    actuator_write_u32_le(candidate+32,actuator_crc32c(candidate,32));
     memcpy(packet,candidate,sizeof(candidate));
     return true;
 }
@@ -38,12 +32,12 @@ bool actuator_mobile_wire_decode(const uint8_t *packet, size_t length,
     unsigned i;
     if (packet == NULL || message == NULL || length != ACTUATOR_MOBILE_WIRE_SIZE ||
         packet[0]!='A' || packet[1]!='M' || packet[2]!=1u ||
-        read32(packet+32) != actuator_crc32c(packet,32)) return false;
+        actuator_read_u32_le(packet+32) != actuator_crc32c(packet,32)) return false;
     candidate.opcode=(actuator_mobile_opcode_t)packet[3];
-    candidate.session=read32(packet+4); candidate.sequence=read32(packet+8);
-    candidate.valid_until_ms=read32(packet+12);
+    candidate.session=actuator_read_u32_le(packet+4); candidate.sequence=actuator_read_u32_le(packet+8);
+    candidate.valid_until_ms=actuator_read_u32_le(packet+12);
     for (i=0u;i<4u;i++) {
-        uint32_t word=read32(packet+16+4*i);
+        uint32_t word=actuator_read_u32_le(packet+16+4*i);
         candidate.velocity_raw[i] = word <= INT32_MAX ? (int32_t)word :
             (int32_t)((int64_t)word - INT64_C(4294967296));
     }

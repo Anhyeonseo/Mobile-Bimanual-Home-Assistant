@@ -186,7 +186,7 @@ def main():
                 report['round_trip_capture_id']=route['capture_id']
             check=s.StationaryPickAdapter(t,args.release/'config/home_assistant/arm_ranges.development.json')
             adapter=s.StationaryPickAdapter(t,args.release/'config/home_assistant/arm_ranges.development.json',
-                authorized_limits=replace(check._limits,hardware_authorized=True),motion_authorized=True)
+                authorized_limits=replace(check.motion_limits,hardware_authorized=True),motion_authorized=True)
             adapter.prepare()
             report['status']='CONFIGURING_CURRENT_POSITION_HOLD';save()
             enabling=True

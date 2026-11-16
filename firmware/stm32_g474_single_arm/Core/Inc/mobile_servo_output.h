@@ -21,6 +21,8 @@ bool MobileServoOutput_CommandAllowed(const actuator_mobile_supervisor_t *superv
 bool MobileServoOutput_Recover(bool rx_quiet_verified);
 bool MobileServoOutput_Rearm(uint32_t session,bool whole_stop_confirmed);
 const actuator_mobile_output_t *MobileServoOutput_State(void);
+/* Cached first output fault plus timing/queue context; no hardware access. */
+void MobileServoOutput_Diagnostics(uint32_t values[8]);
 /* Only the whole-stop coordinator may enqueue a left-arm hold after zero. */
 actuator_bus_router_t *MobileServoOutput_StopRouter(void);
 #endif

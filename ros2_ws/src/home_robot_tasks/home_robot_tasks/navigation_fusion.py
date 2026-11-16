@@ -55,8 +55,10 @@ def fuse_navigation_map(lidar_document, volume, envelope, *, calibration_id,
     if not volume.fresh(number(now_s, 'projection time')):
         raise InvalidTask('fresh_depth_required_for_traversability')
     depth = projected_grid(volume, origin_xy=(nav.ox, nav.oy), width=nav.width,
+                           resolution_m=nav.resolution,
                            height=nav.height, now=now_s,
-                           historical_free=purpose == 'global_route_proposal')
+                           historical_free=purpose == 'global_route_proposal',
+                           height_interval_m=(nav.floor_z,nav.floor_z+envelope.height_m))
     rows = []
     for y, row in enumerate(nav.rows):
         merged = []
@@ -73,4 +75,6 @@ def fuse_navigation_map(lidar_document, volume, envelope, *, calibration_id,
                 depth_observed_s=volume.last_stamp, geometry_id=envelope.geometry_id,
                 purpose=purpose, live_travel_guard_required=True,
                 policy='occupied_union_free_intersection_full_height',
-                semantic_label_required=False, physical_path_verified=False)
+                semantic_label_required=False, physical_path_verified=False,
+                robot_height_interval_m=[nav.floor_z,nav.floor_z+envelope.height_m],
+                robot_radius_m=envelope.radius_m)

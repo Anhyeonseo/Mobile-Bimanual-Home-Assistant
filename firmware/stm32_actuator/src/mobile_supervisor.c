@@ -13,11 +13,11 @@ static bool fresh(const actuator_mobile_supervisor_t *s, uint32_t now_ms) {
 }
 static bool healthy(const actuator_mobile_supervisor_t *s, uint32_t now_ms) {
     return fresh(s, now_ms) && s->feedback.hardware_ok &&
-        s->feedback.velocity_modes_verified && s->feedback.lift_homed;
+        s->feedback.velocity_modes_verified && (s->transport_only || s->feedback.lift_homed);
 }
 static bool lift_inside(const actuator_mobile_supervisor_t *s) {
-    return s->feedback.lift_position_um >= s->config.lift_min_um &&
-        s->feedback.lift_position_um <= s->config.lift_max_um;
+    return s->transport_only || (s->feedback.lift_position_um >= s->config.lift_min_um &&
+        s->feedback.lift_position_um <= s->config.lift_max_um);
 }
 bool actuator_mobile_init(actuator_mobile_supervisor_t *s,
     const actuator_mobile_config_t *config) {
@@ -61,7 +61,7 @@ bool actuator_mobile_feedback(actuator_mobile_supervisor_t *s,
 }
 bool actuator_mobile_axes_stopped(const actuator_mobile_supervisor_t *s,uint32_t now_ms) {
     if(s==NULL||!s->configured||!fresh(s,now_ms)||!s->feedback.hardware_ok||!s->feedback.velocity_modes_verified)return false;
-    for(unsigned i=0;i<4;i++)if(s->feedback.velocity_raw[i]>s->config.stopped_velocity_raw||
+    for(unsigned i=0;i<(s->transport_only?3u:4u);i++)if(s->feedback.velocity_raw[i]>s->config.stopped_velocity_raw||
         s->feedback.velocity_raw[i]<-s->config.stopped_velocity_raw)return false;
     return true;
 }
@@ -70,7 +70,7 @@ bool actuator_mobile_measured_stopped(const actuator_mobile_supervisor_t *s,
     unsigned i;
     if (s == NULL || !s->configured || !healthy(s, now_ms) || !lift_inside(s))
         return false;
-    for (i = 0u; i < ACTUATOR_MOBILE_AXES; i++) {
+    for (i = 0u; i < (s->transport_only ? 3u : ACTUATOR_MOBILE_AXES); i++) {
         if (s->feedback.velocity_raw[i] > s->config.stopped_velocity_raw ||
             s->feedback.velocity_raw[i] < -s->config.stopped_velocity_raw) return false;
     }
@@ -110,7 +110,7 @@ bool actuator_mobile_command(actuator_mobile_supervisor_t *s, uint32_t session,
     unsigned i;
     if (s == NULL) return false;
     actuator_mobile_poll(s, now_ms);
-    if (velocity_raw == NULL || !s->configured || session != s->session ||
+    if (velocity_raw == NULL || !s->configured || (s->transport_only && velocity_raw[3] != 0) || session != s->session ||
         (s->state != ACTUATOR_MOBILE_READY && s->state != ACTUATOR_MOBILE_ACTIVE) ||
         (s->have_sequence && sequence <= s->sequence)) return false;
     for (i = 0u; i < ACTUATOR_MOBILE_AXES; i++) {

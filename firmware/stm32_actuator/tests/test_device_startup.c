@@ -69,7 +69,7 @@ static bool exchange(actuator_lift_endpoint_t *e,uint8_t op,uint32_t seq,uint32_
 static int lift(void){
  actuator_lift_t l;actuator_lift_endpoint_t e;uint8_t out[64];
  actuator_lift_config_t c={409600,500000,100,100,20,2,10000,500,1000,100,1000,20,200,1};
- actuator_lift_feedback_t f={0,1000,0,0,true,false};
+ actuator_lift_feedback_t f={0,1000,0,0,true,false,false,false,0};
  CHECK(actuator_lift_init(&l,&c));CHECK(actuator_lift_endpoint_init(&e,&l,42,200));
  CHECK(actuator_lift_observe(&l,&f,0));
  CHECK(!exchange(&e,1,1,0,42,0,out));
