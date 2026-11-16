@@ -37,7 +37,13 @@ args = ap.parse_args()
 if args.camera and not args.attachment:
     sys.exit('--camera needs --attachment (a new name each time the marker is re-taped)')
 out = args.out
-out.mkdir(parents=True, exist_ok=False)
+# a run that failed its start checks leaves an empty folder (or a header-only log): reuse it
+_log = out/'sweep.jsonl'
+if out.exists() and (any(p for p in out.iterdir() if p.name != 'sweep.jsonl') or
+                     (_log.exists() and sum(1 for _ in _log.open()) > 1)):
+    sys.exit(f'{out} already holds a sweep; use another name')
+if _log.exists(): _log.unlink()
+out.mkdir(parents=True, exist_ok=True)
 RANGES = sp.read('arm_ranges.development.json')
 DIR = {(a, j): RANGES['arms'][a][j]['positive_raw_direction'] for a in ('left', 'right') for j in JOINTS}
 KEYS = [f'{a}/{j}' for a in ('left', 'right') for j in JOINTS]
