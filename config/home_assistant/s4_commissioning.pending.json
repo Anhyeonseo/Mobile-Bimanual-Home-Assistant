@@ -150,7 +150,7 @@
     "controller_firmware": "mobile-base-hold-teleop-v7",
     "controller_reset_or_flashed": true,
     "motor_commands_sent": null,
-    "report": "docs/S4_JETSON_PREPARATION.md",
+    "report": "docs/history/S4_JETSON_PREPARATION.md",
     "lidar_stream_received": true,
     "lidar_checked_on": "2026-11-12",
     "lidar_evidence": "config/home_assistant/lidar_device.connected.observed.json",
@@ -231,7 +231,7 @@
       "full_runner_after_host_fix_retested": false,
       "moving_stop_verified": false,
       "physical_task_completed": false,
-      "preexperiment_runbook": "docs/S4_PREEXPERIMENT.md"
+      "preexperiment_runbook": "docs/history/S4_PREEXPERIMENT.md"
     },
     {
       "date_kst": "2026-11-14",
@@ -246,7 +246,7 @@
       "full_runner_after_host_fix_retested": true,
       "moving_stop_verified": false,
       "physical_task_completed": false,
-      "preexperiment_runbook": "docs/S4_PREEXPERIMENT.md",
+      "preexperiment_runbook": "docs/history/S4_PREEXPERIMENT.md",
       "release": "s4-unified-297747f34206",
       "bounded_base_pulse_stop_verified": true,
       "moving_stop_scope": "one short supported pulse; general braking/distance/rotation not qualified",
@@ -271,7 +271,7 @@
       "physical_goal_trial_started": false,
       "physical_task_completed": false,
       "moving_stop_verified": false,
-      "preexperiment_runbook": "docs/S4_PREEXPERIMENT.md",
+      "preexperiment_runbook": "docs/history/S4_PREEXPERIMENT.md",
       "next_scope": "operator starts supervised 20cm saved-map goal trial in prepared screen; no repeated pulse test"
     },
     {
@@ -314,7 +314,7 @@
       "physical_goal_trial_started": false,
       "physical_task_completed": false,
       "moving_stop_verified": false,
-      "preexperiment_runbook": "docs/S4_PREEXPERIMENT.md",
+      "preexperiment_runbook": "docs/history/S4_PREEXPERIMENT.md",
       "next_scope": "operator starts supervised 20cm saved-map goal trial in prepared screen; no repeated pulse test"
     },
     {
@@ -336,7 +336,7 @@
       "physical_goal_trial_started": true,
       "physical_task_completed": false,
       "moving_stop_verified": false,
-      "preexperiment_runbook": "docs/S4_PREEXPERIMENT.md",
+      "preexperiment_runbook": "docs/history/S4_PREEXPERIMENT.md",
       "next_scope": "implement/review recoverable pause and read-only stop observation; no retry before current motor readings and supported preparation",
       "physical_test_ready": false,
       "integrated_stop_confirmed": false,
@@ -365,7 +365,7 @@
       "calibration_hashes_preserved": true,
       "full_firmware_backup_verified_on_pc": true,
       "next_scope": "Motor ON and fresh supported preparation needed before supervised S4 retry; no motion automatically starts.",
-      "preexperiment_runbook": "docs/S4_PREEXPERIMENT.md"
+      "preexperiment_runbook": "docs/history/S4_PREEXPERIMENT.md"
     },
     {
       "date_kst": "2026-11-14",

@@ -121,7 +121,7 @@ def package_s4(destination, *, host_only=False):
             and '.local.' not in p.name and not p.name.startswith('.env')
             and not any(part in ('__pycache__','.pytest_cache','node_modules','.git','build','install','log') for part in p.relative_to(ROOT/root).parts)
             and (p.suffix in allowed or p.name in ('CMakeLists.txt','setup.cfg','LICENSE') or p.parent.name=='resource'))
-    paths.extend(p for p in (ROOT/'docs').glob('*.md'))
+    paths.extend(p for p in (ROOT/'docs').rglob('*.md'))
     paths.extend(p for name in ('LICENSE','README.md') if (p:=ROOT/name).is_file())
     # Retain the established controller sources for a later measured-profile
     # build, but do not present an uncommissioned binary as installed firmware.
@@ -143,7 +143,7 @@ def package_s4(destination, *, host_only=False):
         no_firmware_binary=True,files_sha256=fingerprints,
         controller_sources_included=not host_only,
         commissioning_profile='config/home_assistant/s4_commissioning.pending.json',
-        instructions='docs/S4_LOCAL_PREPARATION.md')
+        instructions='docs/history/S4_LOCAL_PREPARATION.md')
     files['release.json']=(json.dumps(manifest,indent=2)+'\n').encode()
     files['SHA256SUMS']=''.join(f'{checksum(raw)}  {key}\n' for key,raw in sorted(files.items())).encode()
     destination.mkdir(parents=True)
@@ -200,7 +200,7 @@ tools=/home/hyper/robot-archive/20261029-cleanup/home-assistant-s0-debug-4_vjtnw
 test "$(id -u)" = 1000
 exec 9<> /run/user/1000/so101-backend.lock
 flock -n 9
-if fuser /dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_005100393235511438363730-if02 >/dev/null 2>&1; then
+if fuser /dev/ttyACM0 >/dev/null 2>&1; then
   echo 'Serial port is in use; owner was not stopped.' >&2; exit 2
 fi
 cd "$release"
@@ -224,7 +224,7 @@ echo 'Installed with no automatic preparation, torque enable or homing.'
     files['control.sh']=b'''#!/bin/sh
 set -eu
 cd @RELEASE@
-exec /home/hyper/robot/shared/venvs/room-scan-bag/bin/python tools/run/prepare_unified_controller.py --port /dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_005100393235511438363730-if02 "$@"
+exec /home/hyper/robot/shared/venvs/room-scan-bag/bin/python tools/run/prepare_unified_controller.py --port /dev/ttyACM0 "$@"
 '''
     firmware_sources={str(p.relative_to(ROOT)):checksum(p.read_bytes())
         for base in ('firmware/stm32_actuator','firmware/stm32_g474_single_arm')

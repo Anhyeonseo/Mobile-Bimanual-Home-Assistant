@@ -1,5 +1,7 @@
 # S1 장치 조회 계약
 
+장치 조회의 입력·응답·실패 표현을 확인하는 계약이다.
+
 이 조회는 L1(STM32)의 고정 레지스터 읽기를 L2(호스트)가 해석하는 유지보수 기능이다.
 자연어·인지·동작 계획 계층에서 모터 레지스터에 직접 접근하지 않는다.
 `home-assistant-s1-inventory` preset의 펌웨어 식별값은 `0x00024909`다.
@@ -7,11 +9,9 @@
 
 ## 사용
 
-오른팔 UART4는 STM32 PC10(TX)/PC11(RX), NUCLEO-G474RE의 **CN7 1/2번**이다.
-CN10 1/2번(PC9/PC8)과 혼동하지 않는다.
-Waveshare Bus Servo Adapter (A)는 일반 UART의 교차 배선 설명을 적용하지 않고,
-제조사 표기대로 **어댑터 TX → CN7 1번(TX), RX → CN7 2번(RX), GND → GND**로 연결한다.
-점퍼는 A 위치다. 배선 변경은 전원을 끈 상태에서 한다.
+오른팔 UART4는 STM32 PC10(TX)/PC11(RX), NUCLEO-G474RE의 **CN7 1/2번**이다. CN10 1/2번(PC9/PC8)과 혼동하지 않는다. Waveshare Bus Servo Adapter (A)는 일반 UART의 교차 배선 설명을 적용하지 않고,
+제조사 표기대로 **어댑터 TX → CN7 1번(TX), RX → CN7 2번(RX), GND → GND**로 연결한다. 점퍼는 A 위치다. 배선 변경은 전원을 끈 상태에서 한다.
+
 근거: [Waveshare 공식 배선](https://docs.waveshare.com/Bus_Servo_Adapter_A/Product-Wiring-Example),
 [ST UM2505 핀 배치](https://www.st.com/resource/en/user_manual/um2505-getting-started-with-stm32g4-series-nucleo64-board-stmicroelectronics.pdf),
 `Core/Src/stm32g4xx_hal_msp.c`의 UART4 설정.

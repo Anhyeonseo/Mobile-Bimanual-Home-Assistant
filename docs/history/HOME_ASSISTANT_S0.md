@@ -1,5 +1,7 @@
 # S0 — 설치 조사와 다음 단계
 
+이 문서는 당시 구현·실험의 근거다. 현재 상태와 개발 우선순위는 [현재 상태](../CURRENT_STATUS.md)와 [로드맵](../ROADMAP.md)을 따른다.
+
 2026-10-29 기준. **환경·센서 연결과 현재 펌웨어를 확인했으며, 제어 통신과 실측 보정은 남아 있다.**
 이 문서는 공유용 요약이다. IP·장치 고유 번호·전체 로그는 Git에서 제외한
 `output/home-assistant/s0/`에 보관한다. 조사 결과를 실행용 보정 프로필로 사용하지 않는다.
@@ -64,7 +66,7 @@ Jetson의 CP2102 `/dev/ttyUSB0`, 230400 baud에서 이미 송출 중인 데이�
 `output/home-assistant/lidar/`와 Jetson `robot/shared/diagnostics/lidar/`에 보관한다.
 장착 좌표·ROS `/scan` 발행·SLAM은 이번 점검 범위에 포함하지 않았다.
 
-개발 순서와 계층 책임은 [시스템 설계](MOBILE_MANIPULATION_DESIGN.md),
-파일 분류와 GitHub 기준은 [저장소 관리](REPOSITORY_MANAGEMENT.md)를 따른다.
+개발 순서와 계층 책임은 [시스템 설계](../MOBILE_MANIPULATION_DESIGN.md),
+파일 분류와 GitHub 기준은 [저장소 관리](../REPOSITORY_MANAGEMENT.md)를 따른다.
 
 후속 기준 빌드와 조회 도구는 [S1 공통 제어 연결](HOME_ASSISTANT_S1.md)에 기록한다.
