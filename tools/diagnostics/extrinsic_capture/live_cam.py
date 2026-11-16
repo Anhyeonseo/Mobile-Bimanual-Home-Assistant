@@ -1,7 +1,7 @@
 """Live D415 preview in the browser + named shots typed in the terminal. Read-only.
 
 Run on the Jetson from inside the installed release folder:  python live_cam.py
-Laptop:   ssh -N -L 18765:127.0.0.1:8765 hyper@<jetson>   then open http://127.0.0.1:18765
+Laptop:   ssh -N -L 18766:127.0.0.1:8766 hyper@<jetson>   then open http://127.0.0.1:18766  (port: LIVECAM_PORT)
 Terminal: NAME          -> camera-only shot   (floor, table, checkerboard)
           NAME LIFT_M   -> shot + raw joint encoders read before/after (arm marker)
           q             -> quit
@@ -22,7 +22,10 @@ try:
 except Exception:
     cv2 = None
 
-CAL = Path.home()/'cal_20261113'
+import os
+# capture folder and preview port: CAL / LIVECAM_PORT environment variables (helpers.sh exports CAL)
+CAL = Path(os.environ.get('CAL', str(Path.home()/'cal_20261116'))).expanduser()
+PORT = int(os.environ.get('LIVECAM_PORT', '8766'))
 MAX_MOVE_RAW = 3
 latest = dict(frame=None, t=0.0, jpeg=b'', info='camera starting...')
 lock = threading.Lock(); stop = threading.Event(); errors = []
@@ -159,9 +162,9 @@ def shot(name, lift_m):
 
 def main():
     camera = threading.Thread(target=camera_loop, daemon=True); camera.start()
-    server = ThreadingHTTPServer(('127.0.0.1', 8765), Handler)
+    server = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print('live view: on the laptop run  ssh -N -L 18765:127.0.0.1:8765 hyper@<jetson>  and open http://127.0.0.1:18765')
+    print(f'saving to {CAL}; live view: on the laptop run  ssh -N -L 1{PORT}:127.0.0.1:{PORT} hyper@<jetson>  and open http://127.0.0.1:1{PORT}')
     print('type: NAME (camera only) | NAME LIFT_M (with arm joints) | q (quit)')
     try:
         while not stop.is_set():

@@ -30,7 +30,7 @@ rawshot() {
 echo "also: rawshot NAME LIFT_M  (use this if shot keeps saying 'outside recorded range')"
 
 # livecam : browser preview + type shot names in this terminal (q to quit)
-livecam() { "$PY" $CAL/live_cam.py; }
+livecam() { CAL="$CAL" "$PY" $CAL/live_cam.py; }
 echo "also: livecam  (live preview; take shots by typing names)"
 
 # sweep NAME ARM LIFT_M [--camera --attachment TL1] : hand-guided free-space log (torque off, read-only)
