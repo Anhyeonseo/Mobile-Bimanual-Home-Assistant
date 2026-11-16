@@ -113,6 +113,27 @@ ls ~/cal_work/calib_1113.json                                 # 11/13 보정 결
 
 **오른팔이 계속 응답하지 않으면 오른팔은 오늘 뺀다.** 왼팔만으로도 카메라와 왼팔 보정은 끝낼 수 있다.
 
+### 3-1. 노트북에서 Jetson에 접속이 안 될 때 (2026-11-16 현장 확인)
+
+증상: 같은 와이파이(`SK_WiFiGIGAE498`)인데 노트북에서 `ping 192.168.35.2`와 `ssh`가 응답이 없다.
+Jetson에서 노트북으로 보내는 ping도 안 된다. 현서 오빠 PC(`192.168.35.164`)에서는 된다.
+
+원인: Jetson은 **2.4GHz**(2452MHz), 노트북은 **5GHz**에 붙어 있었고, 공유기가 두 대역 사이 통신을 막는다.
+Jetson 쪽 방화벽은 없다(iptables 전부 ACCEPT).
+
+해결: 노트북을 2.4GHz로 고정한다.
+
+```bash
+nmcli connection modify "SK_WiFiGIGAE498" 802-11-wireless.band bg
+nmcli connection up "SK_WiFiGIGAE498"
+ping -c 3 192.168.35.2
+# 끝나고 되돌리기
+nmcli connection modify "SK_WiFiGIGAE498" 802-11-wireless.band ""
+nmcli connection up "SK_WiFiGIGAE498"
+```
+
+다른 방법: 오빠 PC를 거쳐 접속(`ssh -J an-hyeonseo@192.168.35.164 hyper@192.168.35.2`), 랜선, Jetson USB-C 직결(`192.168.55.1`).
+
 ---
 
 ## 4. 실측 (로봇 안 움직임, 토크 끔, 펌웨어 상관없음)
@@ -153,14 +174,44 @@ ls ~/cal_work/calib_1113.json                                 # 11/13 보정 결
 도구는 깊이 노출을 16ms로 고정하고 3초 기다린 뒤 10초 동안 여러 장을 저장한다.
 
 ```bash
-# Jetson
+# Jetson (2026-11-16 확인: S4 파이썬은 s4-jazzy)
+cd /home/hyper/robot/releases/s4-unified-pick-20261116
 mkdir -p ~/cal_20261116
-cd /home/hyper/robot/releases/<S4 release>          # 3장에서 확인한 폴더
-W() { <S4 파이썬> tools/diagnostics/capture_height_window.py --output ~/cal_20261116/"$1" --camera-mode wide --seconds 10; }
-W W-F-1
+PY4=/home/hyper/robot/shared/venvs/s4-jazzy/bin/python
+W() { "$PY4" tools/diagnostics/capture_height_window.py --output ~/cal_20261116/"$1" --camera-mode wide --seconds 10; }
+W W-F-1                 # W 와 이름 사이에 한 칸 띄운다
 ```
 
 결과가 `HEIGHT_WINDOW_RECORDED`면 성공이다. `RETRY_CAPTURE`면 이름 끝에 `b`를 붙여 다시 찍는다.
+실패하면서 폴더만 생긴 경우(`File exists`)는 `report.json`이 `CAPTURE_FAILED`인지 보고 지우거나 새 이름으로 찍는다.
+
+**실시간 화면으로 구도 맞추기** (노트북 터미널 하나로 서버와 터널을 같이 켠다):
+
+```bash
+ssh -t -L 18766:127.0.0.1:8766 hyper@192.168.35.2 "cd ~/realsense-grounding && HF_HUB_OFFLINE=1 .venv/bin/python tools/diagnostics/realsense_web.py --profile near --port 8766"
+# 브라우저: http://127.0.0.1:18766   (8765는 이미 쓰는 중이었다)
+```
+
+화면은 640×480이라 광각 사진보다 좌우가 좁게 보인다. **찍기 전에 화면을 꺼야 카메라가 풀린다**
+(`Device or resource busy`가 나오면 아직 켜져 있는 것). Jetson 창에서 끄고 바로 찍는 한 줄:
+
+```bash
+pkill -f realsense_web.py; sleep 2; W W-T80-1
+```
+
+찍은 결과는 첫 프레임을 PNG로 뽑아 확인한다:
+
+```bash
+"$PY4" -c "
+import numpy as np, sys, glob
+from PIL import Image
+f=sorted(glob.glob(sys.argv[1]+'/*.npz'))[0]; Image.fromarray(np.load(f)['color_bgr'][:, :, ::-1]).save(sys.argv[1]+'/preview.png')" ~/cal_20261116/W-F-1
+```
+
+`W-T80`은 80cm 탁자(분석 코드가 80.0cm로 아는 기준면), `W-T32`는 약 31.8cm 낮은 협탁(집기 장소)이다.
+카메라는 몸체 고정이라 **리프트 높이는 바꾸지 않아도 된다.** 접힌 팔이 상판을 가리지만 않으면 된다.
+체커보드(`W-IN-*`)는 상자나 의자에 **기대 세워** 손을 뗀 상태로 찍는다(13초 동안 움직이면 안 된다).
+화면 위쪽 모서리 = 로봇에서 먼 곳, 아래쪽 = 가까운 곳이다.
 
 | 이름 | 장면 | 로봇·리프트 |
 |---|---|---|
@@ -178,10 +229,34 @@ W W-F-1
 ## 6. 펌웨어를 S3(0x24911)로 교체 (팀원이 수행)
 
 촬영 도구(`sweep`, `tour`, `rawshot`, `pose`)는 S3 펌웨어 0x24911만 받는다.
-11/13에도 같은 방법으로 바꿨다. **팀원이 평소 설치 절차대로 한다.**
+11/13에도 같은 release로 바꿨다. 현서 오빠 동의를 받고, 되돌리는 방법(14장)을 먼저 확인한 뒤 한다.
+
+**안전 구조**: `flash.sh`는 펌웨어 해시를 검사하고, `program.cfg`가 **지금 펌웨어 전체(512KB)를 먼저 백업**
+(`dump_image ... preflash-full.bin 0x08000000 0x80000`)한 다음에 쓰고 검증한다. 백업이 실패하면 쓰기로 넘어가지 않는다.
+설치는 ST-LINK로 하므로 중간에 실패해도 다시 쓸 수 있다. 모터 전원이 꺼져 있어 로봇은 움직이지 않는다.
+
+**스크립트가 메시지 없이 멈추는 조건** (먼저 확인):
+
+```bash
+L=/home/hyper/robot/shared/diagnostics/s3/stationary/s3-stationary-9d2fd662e718/flash
+ls -la "$L" 2>&1 | head                         # 있으면 멈춘다 → 지우지 말고 이름을 바꿔 보존
+ls /home/hyper/robot-archive/20261029-cleanup/home-assistant-s0-debug-4_vjtnwn/root/usr/bin/openocd
+fuser -v /dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_005100393235511438363730-if02 2>&1   # 아무것도 없어야 한다
+cd /home/hyper/robot/releases/s3-stationary-9d2fd662e718 && sha256sum -c <<< "81c8d58998e4aaa8228e1c6802f4005a0b7cc794795c919cce36d97492edc054  firmware.hex"
+```
+
+2026-11-16: 11/13 설치 기록 폴더(11/13 백업 포함)가 남아 있어 `flash-before-20261116`으로 옮겼다.
 
 1. 시작 조건: 리프트를 최하단에 둔다. 양팔과 리프트를 받친다. **모터 전원 OFF.** Jetson과 STM32 USB는 켜 둔다.
-2. 팀원이 S3 release 폴더의 설치 스크립트를 실행한다. 설치 전에 전체 flash 백업(524,288바이트)이 남는지 확인한다.
+2. 설치한다. `S2 authentication:`에 `hyper` 비밀번호. 끝날 때까지 케이블·전원을 건드리지 않는다.
+
+   ```bash
+   mv "$L" "$L-before-20261116"            # 위 확인에서 폴더가 있었을 때만
+   cd /home/hyper/robot/releases/s3-stationary-9d2fd662e718
+   ./flash.sh --motor-power-off-confirmed; echo "exit code: $?"
+   ls -la "$L"; cat "$L/backup-verification.json"     # 오늘 시각의 preflash-full.bin 524288바이트 = 0x2492D 백업
+   ```
+
 3. 모터 전원을 켠다(이 단계에서 **토크는 꺼진 상태**다). 연결을 검사한다.
 
    ```bash
@@ -431,8 +506,21 @@ tour ~/cal_20261116/tour.json T05 0.05 TL1 TR1
    du -sh ~/cal_20261116 && ls ~/cal_20261116 | wc -l
    ```
 
-2. **펌웨어를 0x2492D로 되돌린다.** 팀원이 평소 S4 설치 절차대로 한다.
-   리프트 최하단, 양팔·리프트 받침, 모터 전원 OFF에서 시작한다. 설치 후 팀원의 읽기 전용 확인으로 0x2492D와 보정 해시를 확인한다.
+2. **펌웨어를 0x2492D로 되돌린다.** 리프트 최하단, 양팔·리프트 받침, 모터 전원 OFF에서 시작한다.
+   2026-11-16 확인: `/home/hyper/robot/releases/s4-unified-e004bef4f622`에 `install.sh`가 있고 `release.json`의 펌웨어는 `0x0002492D`다.
+   이 스크립트는 비밀번호를 직접 묻지 않으므로 `sudo -v`를 먼저 한다. 예전 설치 기록 폴더가 있으면 메시지 없이 멈추므로 이름을 바꿔 보존한다.
+
+   ```bash
+   D=/home/hyper/robot/shared/diagnostics/s4-unified/s4-unified-e004bef4f622/install
+   mv "$D" "$D-before-20261116"
+   sudo -v
+   cd /home/hyper/robot/releases/s4-unified-e004bef4f622
+   ./install.sh --motor-power-off-confirmed; echo "exit code: $?"
+   ```
+
+   `Installed with no automatic preparation...`와 `exit code: 0`이면 된다. 그 뒤 현서 오빠의 읽기 전용 확인으로 0x2492D와 보정 해시를 본다.
+   **비상용**: 6장 설치 때 만든 `.../s3-stationary-9d2fd662e718/flash/preflash-full.bin`이 오늘 아침 0x2492D 전체 이미지다.
+   `install.sh`가 안 되면 이 파일을 openocd로 `0x08000000`에 다시 쓰면 그대로 돌아간다(명령은 그때 만든다).
 3. 마커 판은 떼서 보관한다. 다음 측정에 같은 판을 쓰면 비교하기 좋다.
 4. 기록표 사진을 찍어 둔다.
 
