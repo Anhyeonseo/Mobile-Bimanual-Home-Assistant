@@ -14,7 +14,7 @@ independent=importlib.util.module_from_spec(spec);spec.loader.exec_module(indepe
 @pytest.fixture
 def setup():
     g=s2.load_geometry(ROOT/'config/home_assistant/official_geometry.json')
-    p=dev.build(ROOT)
+    p=dev.build(ROOT, measured=False)  # nominal path; measured calibration: tests/test_measured_calibration.py
     raw={side:deepcopy(p['arms'][side]['reference_raw']) for side in s2.ARMS}
     evidence={'calibration_id':p['calibration_id'],'session_id':'test-session','controller_boot_id':'test-boot',
         'origin_id':'test-bottom','arm_anchor_id':'test-arm-anchor','clock_id':'test-clock',
@@ -99,7 +99,7 @@ def test_operator_camera_height_shift_is_base_z_only_and_applied_once(setup):
         delta=adjusted@np.r_[point,1]-nominal@np.r_[point,1]
         np.testing.assert_allclose(delta,[0,0,-.0091,0],atol=1e-12)
     np.testing.assert_allclose(p['base_from_optical'],adjusted,atol=1e-12)
-    np.testing.assert_allclose(dev.build(ROOT)['base_from_optical'],adjusted,atol=1e-12)
+    np.testing.assert_allclose(dev.build(ROOT, measured=False)['base_from_optical'],adjusted,atol=1e-12)
     assert not p['strict_commissioning_passed'] and not p['camera_height_adjustment']['measured_extrinsic']
     bad=deepcopy(p);bad['base_from_optical'][2][3]-=.0091
     bad['calibration_id']='s2-dev-'+s2.digest({k:v for k,v in bad.items() if k!='calibration_id'})[:24]

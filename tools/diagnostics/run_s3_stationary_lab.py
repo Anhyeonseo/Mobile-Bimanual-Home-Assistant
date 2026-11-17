@@ -22,6 +22,9 @@ from home_robot_tasks.stationary_trial import simulate_pick, simulate_trial
 from review_s3_capture import select_observation
 
 CONFIG=ROOT/'config/home_assistant'
+# Profile for model(); tests pin the archived nominal profile their synthetic scenes were designed for.
+PROFILE=CONFIG/'s2_coordinates.development.json'
+PAD_RECORD=CONFIG/'left_pad_gap.observed.json'
 CASES=[(.180,.100,-12),(.183,.105,8),(.186,.109,-5),(.190,.116,17),(.194,.112,-20)]
 DEST=[.188,.092,.852]
 SCENE=[([.126,.055,.808],[.245,.131,.840])]
@@ -37,7 +40,7 @@ def stock_jaw():
 
 def model(lift, side="left", *, profile=None):
     if profile is None:
-        profile=read(CONFIG/'s2_coordinates.development.json')
+        profile=read(PROFILE)
     return StationaryArm(profile,geo.load_geometry(CONFIG/'official_geometry.json'),
                          read(CONFIG/'arm_ranges.development.json'), lift, stock_jaw(), side)
 
@@ -189,7 +192,12 @@ def main(argv=None):
                         help='default pick-lift producer: original Yeoeun rule followed by checked surface variants')
     parser.add_argument('--marker-length-mm', type=float, help='synthetic marker long dimension; default 28 mm (old fixture 14 mm)')
     parser.add_argument('--input', type=Path, help='plan only: review, bound candidate group and scene_boxes_m')
+    parser.add_argument('--profile', type=Path, help='coordinate profile (default: the released profile)')
+    parser.add_argument('--pad-record', type=Path, help='left jaw record bound to that profile (default: released)')
     a = parser.parse_args(argv)
+    global PROFILE, PAD_RECORD
+    if a.profile: PROFILE = a.profile
+    if a.pad_record: PAD_RECORD = a.pad_record
     if (a.task != 'pick-lift' or a.input) and (a.candidate_source is not None or a.marker_length_mm is not None):
         parser.error('synthetic candidate options apply only to pick-lift without --input')
     source = a.candidate_source or ('yeoeun-surface' if a.task == 'pick-lift' else 'fixture')
@@ -205,7 +213,7 @@ def main(argv=None):
             data = read(a.input)
             inputs = (model(data['review']['lift_height_m']), data['review'], data['group'])
             if a.task == 'pick-lift':
-                pad_record = CONFIG / 'left_pad_gap.observed.json'
+                pad_record = PAD_RECORD
                 measured = None
                 if data['review']['mode'] == 'offline_capture_review' and pad_record.is_file():
                     record = read(pad_record)

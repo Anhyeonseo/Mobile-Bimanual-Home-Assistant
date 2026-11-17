@@ -77,7 +77,7 @@ def test_clock_correction_does_not_hide_discontinuities(failure):
 
 
 def fixture():
-    p=dev.build(ROOT)
+    p=dev.build(ROOT, measured=False)
     samples=[]
     for bus,i in acq.EXPECTED:
         raw=2048 if i==10 else p['arms']['left' if bus==0 else 'right']['reference_raw'][acq.s2.JOINTS[i-1]]

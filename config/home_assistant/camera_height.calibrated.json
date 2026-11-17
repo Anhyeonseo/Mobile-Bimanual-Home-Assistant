@@ -3,25 +3,23 @@
   "mode": "absolute_optical_height_only",
   "source_frame": "color_camera_optical_frame",
   "target": "height_above_floor_m",
-  "profile_calibration_id": "s2-dev-5bfc28c62078dfb0377bfdb7",
+  "profile_calibration_id": "s2-dev-4683680db9f74ce58184eced",
   "ground_z_m": -0.0702,
   "base_z_from_optical": [
-    -0.021361692866709636,
-    -0.6932331285434488,
-    -0.7203967709309439,
-    1.0100224280799914
+    -0.022936716471693874,
+    -0.6970511865128175,
+    -0.7166544149159837,
+    1.0080046980550093
   ],
   "legacy_z_adjustment_applied": false,
   "source": {
-    "branch": "yeoeun/extrinsic-calibration",
-    "commit": "836d799c3b0a7d250c03ff4caf90b3fd744d8af4",
-    "path": "fit_best.json",
-    "sha256": "a5bd28999f67d12e2e9fa723f7ad345d7e8ed6754f9bfccd88cbe44eaf8ccecf",
-    "selection": "3 +right mount +zeros(shared)"
+    "record": "config/home_assistant/measured_calibration.development.json",
+    "sha256": "f6eec82fe6d17d9aa0abc5a63c5347fbfa3ffd665d25fca8abc3952109167c0f",
+    "note": "z row of the measured base_from_optical (same camera as the profile)"
   },
-  "adoption_scope": "Stopped surface/object height from raw optical XYZ only; no arm, lift scale, map XY or rigid TF changes",
+  "adoption_scope": "Surface/object height from raw optical XYZ with the measured camera of the profile",
   "assumption": "Stopped upright base and unchanged fixed D415 mount",
-  "status": "candidate_height_component_with_independent_stationary_table_check",
+  "status": "measured_joint_calibration_pending_physical_grasp_check",
   "physical_grasp_accuracy_verified": false,
-  "model_id": "height-2b4512f39d52caae4cae1a10"
+  "model_id": "height-accbcb85329e6564ef266208"
 }

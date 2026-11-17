@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "arm": "left",
+  "motor_id": 6,
+  "section": "installed_left_front_opposing_contact_faces",
+  "calibration_id": "s2-dev-5bfc28c62078dfb0377bfdb7",
+  "assembly_revision": "mini1-fixed-d415-official-home-20261110",
+  "samples": [
+    {
+      "section": "installed_left_front_opposing_contact_faces",
+      "gap_mm": 5.0,
+      "raw": 1926.5,
+      "raw_min": 1925,
+      "raw_max": 1928,
+      "samples": 8,
+      "release": "s3-left-grip-77474cdaabaa",
+      "captures": [
+        {
+          "sha256": "cddc67f51dbff42b8a1bf085c25bedd1c6444a06fe828466f5e9d5266a4385ac",
+          "observed_at": "2026-11-06T18:09:35.189733+00:00",
+          "firmware_tick_ms": [
+            1633070,
+            1633373
+          ],
+          "writes": 60
+        },
+        {
+          "sha256": "b62f9c47a48bef8e1a5a479f7a77ebe44cbe278ff2dd0b2064668c618d42d7ae",
+          "observed_at": "2026-11-06T18:10:56.183727+00:00",
+          "firmware_tick_ms": [
+            1714334,
+            1714637
+          ],
+          "writes": 60
+        }
+      ]
+    },
+    {
+      "section": "installed_left_front_opposing_contact_faces",
+      "gap_mm": 30.0,
+      "raw": 2144.0,
+      "raw_min": 2144,
+      "raw_max": 2144,
+      "samples": 8,
+      "release": "s3-left-grip-77474cdaabaa",
+      "captures": [
+        {
+          "sha256": "f56bfcfddac3488c0a992720af654c091d96bef0c8c7378a746ea110b37c01db",
+          "observed_at": "2026-11-06T18:13:48.630299+00:00",
+          "firmware_tick_ms": [
+            1887350,
+            1887656
+          ],
+          "writes": 60
+        },
+        {
+          "sha256": "778b5d88511753443b3599caeb08563b3bf498d0c90c0fd5e62344510689fbee",
+          "observed_at": "2026-11-06T18:15:30.442576+00:00",
+          "firmware_tick_ms": [
+            1989497,
+            1989803
+          ],
+          "writes": 60
+        }
+      ]
+    },
+    {
+      "section": "installed_left_front_opposing_contact_faces",
+      "gap_mm": 60.0,
+      "raw": 2366.0,
+      "raw_min": 2366,
+      "raw_max": 2366,
+      "samples": 4,
+      "release": "s3-left-grip-77474cdaabaa",
+      "captures": [
+        {
+          "sha256": "ca8991a33c034c5ee91718cf5ec9274a9a22abefd09cfbacfab7133d47e3662d",
+          "observed_at": "2026-11-06T18:18:39.865705+00:00",
+          "firmware_tick_ms": [
+            2179558,
+            2179861
+          ],
+          "writes": 60
+        }
+      ]
+    }
+  ],
+  "check": {
+    "measurement": {
+      "section": "installed_left_front_opposing_contact_faces",
+      "gap_mm": 44.6,
+      "raw": 2255.0,
+      "raw_min": 2255,
+      "raw_max": 2255,
+      "samples": 4,
+      "release": "s3-left-grip-77474cdaabaa",
+      "captures": [
+        {
+          "sha256": "2560ca953618d1ba5403c035f83c7261e6c46792991b0ac77340ea8736652030",
+          "observed_at": "2026-11-06T18:19:48.059952+00:00",
+          "firmware_tick_ms": [
+            2247987,
+            2248291
+          ],
+          "writes": 60
+        }
+      ]
+    },
+    "predicted_gap_mm": 45.0,
+    "absolute_error_mm": 0.3999999999999986,
+    "tolerance_mm": 2.0
+  },
+  "status": "CHECK_PASSED",
+  "motion_authorized": false,
+  "calibration_basis": "historical_measured_gaps_rebased_by_verified_eeprom_delta",
+  "physical_gap_remeasurement": false,
+  "coordinate_rebase": {
+    "method": "signed_eeprom_offset_delta_without_wrap",
+    "raw_shift": -25,
+    "physical_assumption": "same installed pads and geartrain; only Home offset changed",
+    "source_record": {
+      "schema_version": 1,
+      "arm": "left",
+      "motor_id": 6,
+      "section": "installed_left_front_opposing_contact_faces",
+      "calibration_id": "s2-dev-915725002f696896b30ec32b",
+      "assembly_revision": "mini1-fixed-d415-selected-home-20261105",
+      "samples": [
+        {
+          "section": "installed_left_front_opposing_contact_faces",
+          "gap_mm": 5.0,
+          "raw": 1951.5,
+          "raw_min": 1950,
+          "raw_max": 1953,
+          "samples": 8,
+          "release": "s3-left-grip-77474cdaabaa",
+          "captures": [
+            {
+              "sha256": "cddc67f51dbff42b8a1bf085c25bedd1c6444a06fe828466f5e9d5266a4385ac",
+              "observed_at": "2026-11-06T18:09:35.189733+00:00",
+              "firmware_tick_ms": [
+                1633070,
+                1633373
+              ],
+              "writes": 60
+            },
+            {
+              "sha256": "b62f9c47a48bef8e1a5a479f7a77ebe44cbe278ff2dd0b2064668c618d42d7ae",
+              "observed_at": "2026-11-06T18:10:56.183727+00:00",
+              "firmware_tick_ms": [
+                1714334,
+                1714637
+              ],
+              "writes": 60
+            }
+          ]
+        },
+        {
+          "section": "installed_left_front_opposing_contact_faces",
+          "gap_mm": 30.0,
+          "raw": 2169.0,
+          "raw_min": 2169,
+          "raw_max": 2169,
+          "samples": 8,
+          "release": "s3-left-grip-77474cdaabaa",
+          "captures": [
+            {
+              "sha256": "f56bfcfddac3488c0a992720af654c091d96bef0c8c7378a746ea110b37c01db",
+              "observed_at": "2026-11-06T18:13:48.630299+00:00",
+              "firmware_tick_ms": [
+                1887350,
+                1887656
+              ],
+              "writes": 60
+            },
+            {
+              "sha256": "778b5d88511753443b3599caeb08563b3bf498d0c90c0fd5e62344510689fbee",
+              "observed_at": "2026-11-06T18:15:30.442576+00:00",
+              "firmware_tick_ms": [
+                1989497,
+                1989803
+              ],
+              "writes": 60
+            }
+          ]
+        },
+        {
+          "section": "installed_left_front_opposing_contact_faces",
+          "gap_mm": 60.0,
+          "raw": 2391.0,
+          "raw_min": 2391,
+          "raw_max": 2391,
+          "samples": 4,
+          "release": "s3-left-grip-77474cdaabaa",
+          "captures": [
+            {
+              "sha256": "ca8991a33c034c5ee91718cf5ec9274a9a22abefd09cfbacfab7133d47e3662d",
+              "observed_at": "2026-11-06T18:18:39.865705+00:00",
+              "firmware_tick_ms": [
+                2179558,
+                2179861
+              ],
+              "writes": 60
+            }
+          ]
+        }
+      ],
+      "check": {
+        "measurement": {
+          "section": "installed_left_front_opposing_contact_faces",
+          "gap_mm": 44.6,
+          "raw": 2280.0,
+          "raw_min": 2280,
+          "raw_max": 2280,
+          "samples": 4,
+          "release": "s3-left-grip-77474cdaabaa",
+          "captures": [
+            {
+              "sha256": "2560ca953618d1ba5403c035f83c7261e6c46792991b0ac77340ea8736652030",
+              "observed_at": "2026-11-06T18:19:48.059952+00:00",
+              "firmware_tick_ms": [
+                2247987,
+                2248291
+              ],
+              "writes": 60
+            }
+          ]
+        },
+        "predicted_gap_mm": 45.0,
+        "absolute_error_mm": 0.3999999999999986,
+        "tolerance_mm": 2.0
+      },
+      "status": "CHECK_PASSED",
+      "motion_authorized": false
+    },
+    "source_record_sha256": "ea4a8eb72e6ca11b4e382c3b6bcf666d40812b4d1f06d51ff5a52c66c886eafa",
+    "source_coordinate_sha256": "626fff352adb8802e35f84b1aed50f4b8de7a539dd862e888a300bf52fe0123b",
+    "target_coordinate_sha256": "5429c4baf86c127df9f5668d959a7e0ad411ad2d014fa0e4376a3fdd53dd11df",
+    "center_sha256": "f25b7fc5d901903b567a177b1d6331749e897099be020411d49517ed49d2e45d",
+    "persistence_sha256": "f1e415973f2091f7dc6cc5237689cd95769d9982d1a9aefcbee779f6233177ff"
+  },
+  "camera_only_profile_rebind": {
+    "previous_profile_id": "s2-dev-2f48bba0751f549d3f70773b",
+    "current_profile_id": "s2-dev-5bfc28c62078dfb0377bfdb7",
+    "arm_and_jaw_mapping_changed": false,
+    "new_measurements": false,
+    "reason": "camera base-Z only; preserve historical measured jaw evidence"
+  }
+}
