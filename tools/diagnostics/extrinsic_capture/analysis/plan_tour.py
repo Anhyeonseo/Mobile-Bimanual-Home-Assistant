@@ -35,6 +35,8 @@ ap.add_argument('--tol', type=float, default=0.015, help='allowed distance outsi
 ap.add_argument('--seed', type=int, default=11)
 ap.add_argument('--rest-sweeps', nargs='+', default=None,
                 help='only these sweeps define where the other arm rests (use the latest ones when the supports moved)')
+ap.add_argument('--rest-own', action='store_true',
+                help='with --rest-sweeps: each arm rests where its OWN rest sweep started (place the arms there before the tour)')
 args = ap.parse_args()
 if os.path.exists(args.out): sys.exit('output exists: ' + args.out)
 
@@ -80,7 +82,9 @@ for d in (args.rest_sweeps or []):
     rest_src.setdefault(head['arm'], []).extend(samples)
 for arm in ARMS:
     other = 'right' if arm == 'left' else 'left'
-    if args.rest_sweeps is not None:
+    if args.rest_sweeps is not None and args.rest_own:
+        resting = [rest_src[arm][0]['raw']] if rest_src.get(arm) else []
+    elif args.rest_sweeps is not None:
         resting = [s['raw'] for s in rest_src.get(other, [])]
     else:
         resting = [s['raw'] for (a, _), v in sweeps.items() if a == other for samples in v for s in samples]
