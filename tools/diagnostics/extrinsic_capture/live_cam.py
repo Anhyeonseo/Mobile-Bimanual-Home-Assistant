@@ -12,6 +12,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 spec = importlib.util.spec_from_file_location('sp', Path.cwd()/'tools/run/stationary_pick.py')
 sp = importlib.util.module_from_spec(spec); spec.loader.exec_module(sp)
+
+def read_identity(transport):
+    """Firmware identity for a read-only, torque-off shot. A latched stop (normal after a tour) does
+    not affect reading encoders, so it is recorded instead of refused; any other mismatch still refuses."""
+    try:
+        return sp.identity(transport)
+    except ValueError as exc:
+        if 'stop_latched=True' not in str(exc): raise
+        return dict(stop_latched=True, identity_error=str(exc))
+
 import numpy as np
 import serial
 from PIL import Image
@@ -144,7 +154,7 @@ def shot(name, lift_m):
         raise RuntimeError(f'{name} already exists; use another name')
     with sp.acquire_backend_lease('stm32', 87), sp.open_exclusive_serial(serial, sp.DEVICE, 921600, .02) as port:
         transport = sp.StreamValidationTransportV2(port, response_timeout_s=.12)
-        hello = sp.identity(transport)
+        hello = read_identity(transport)
         start = time.time(); before = read_all(transport); mark = time.monotonic()
         record, images = wait_frame(mark)
         after = read_all(transport); end = time.time()

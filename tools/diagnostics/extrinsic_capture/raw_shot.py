@@ -13,6 +13,16 @@ import importlib.util, json, sys, time
 from pathlib import Path
 spec = importlib.util.spec_from_file_location('sp', Path.cwd()/'tools/run/stationary_pick.py')
 sp = importlib.util.module_from_spec(spec); spec.loader.exec_module(sp)
+
+def read_identity(transport):
+    """Firmware identity for a read-only, torque-off shot. A latched stop (normal after a tour) does
+    not affect reading encoders, so it is recorded instead of refused; any other mismatch still refuses."""
+    try:
+        return sp.identity(transport)
+    except ValueError as exc:
+        if 'stop_latched=True' not in str(exc): raise
+        return dict(stop_latched=True, identity_error=str(exc))
+
 import serial
 from PIL import Image
 from so101_arm_bridge.limit_manifest import JOINTS
@@ -38,7 +48,7 @@ def read_all(t):
 raw = lambda rows: {k: r['feedback']['position_raw'] for k, r in rows.items()}
 with sp.acquire_backend_lease('stm32', 87), sp.open_exclusive_serial(serial, sp.DEVICE, 921600, .02) as port:
     t = sp.StreamValidationTransportV2(port, response_timeout_s=.12)
-    hello = sp.identity(t)
+    hello = read_identity(t)
     before_t = time.time(); before = read_all(t)
     with sp.Capture(sp.camera_profile(), sp.read('camera_device.near.observed.json'), retain_frame=True) as camera:
         end = time.monotonic() + 1.0
