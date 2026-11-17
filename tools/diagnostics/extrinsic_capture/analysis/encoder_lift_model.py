@@ -1,4 +1,4 @@
-"""Shared pieces of the encoder-lift calibration (calib_encoder_lift.py, make_candidate_profile.py).
+"""Shared pieces of the encoder-lift calibration (calib_encoder_lift.py, export_measured_calibration.py).
 
 Lift height of a shot = (bottom_raw - raw) * |m/count| + 0.084 m * turns, turns chosen nearest to the operator
 height; the model places the arms at h * (1 + lscale) + loff along the (optionally tilted) lift axis.
