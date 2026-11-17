@@ -35,6 +35,9 @@ ap.add_argument('--tol', type=float, default=0.015, help='allowed distance outsi
 ap.add_argument('--seed', type=int, default=11)
 ap.add_argument('--rest-sweeps', nargs='+', default=None,
                 help='only these sweeps define where the other arm rests (use the latest ones when the supports moved)')
+ap.add_argument('--plan-lift', type=float, default=None,
+                help='plan every sweep at this lift height instead of the one it was recorded at (only when the '
+                     'fixed body parts stay clear at the new height; check the printed camera clearance)')
 ap.add_argument('--rest-own', action='store_true',
                 help='with --rest-sweeps: each arm rests where its OWN rest sweep started (place the arms there before the tour)')
 args = ap.parse_args()
@@ -63,6 +66,7 @@ sources = []
 for d in args.sweeps:
     head, samples = load_sweep(os.path.join(d, 'sweep.jsonl'))
     lift = round(float(head['lift_m_operator']), 2)
+    if args.plan_lift is not None: lift = round(args.plan_lift, 2)
     if not 0.05 <= lift <= LIFT_TRAVEL - 0.05: sys.exit(f'{d}: lift {lift} m outside 0.05..{LIFT_TRAVEL - 0.05:.2f}')
     sweeps.setdefault((head['arm'], lift), []).append(samples)
     sources.append(dict(folder=os.path.abspath(d), arm=head['arm'], lift_m=lift, samples=len(samples),
