@@ -31,6 +31,7 @@ ap.add_argument('--left-attachment', required=True); ap.add_argument('--right-at
 ap.add_argument('--auto', action='store_true', help='do not pause before each move (still pauses at start/end)')
 ap.add_argument('--simulate', action='store_true', help='in-memory controller, no camera, no hardware')
 ap.add_argument('--max-steps', type=int, default=0, help='simulate: stop after this many tour steps')
+ap.add_argument('--only-arm', choices=('left', 'right'), help="run only this arm's block (rest -> its shots -> rest), e.g. to redo it after a fault")
 args = ap.parse_args()
 
 tour_bytes = args.tour.read_bytes(); TOUR_SHA = hashlib.sha256(tour_bytes).hexdigest()
@@ -267,7 +268,13 @@ def interpolate(a, b, speed_deg_s=10.0, point_ms=40):
 
 
 # ---------------------------------------------------------------- main
-steps = level['steps'][:args.max_steps] if args.max_steps else level['steps']
+steps = level['steps']
+if args.only_arm:
+    # each arm's block starts with a move from REST and ends with a move back to REST, so it runs on its own
+    steps = [s for s in steps if s['arm'] == args.only_arm]
+    if not steps or steps[0].get('from_name') != 'REST' or steps[-1].get('to_name') != 'REST':
+        sys.exit(f'tour has no self-contained block for the {args.only_arm} arm')
+steps = steps[:args.max_steps] if args.max_steps else steps
 moves = [s for s in steps if s['kind'] == 'move']
 print(f'tour {args.tour.name} sha256 {TOUR_SHA[:12]}  lift {args.lift_m:.2f} m: '
       f'{sum(s["kind"] == "shot" for s in steps)} shots, {sum(m["duration_s"] for m in moves) / 60:.1f} min of motion'
