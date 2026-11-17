@@ -15,7 +15,11 @@ RANGES = sp.read('arm_ranges.development.json')
 NAMES = {7: 'wheel 7', 8: 'wheel 8', 9: 'wheel 9', 10: 'lift 10'}
 with sp.acquire_backend_lease('stm32', 87), sp.open_exclusive_serial(serial, sp.DEVICE, 921600, .02) as port:
     t = sp.StreamValidationTransportV2(port, response_timeout_s=.12)
-    sp.identity(t)
+    try:
+        sp.identity(t)
+    except ValueError as exc:
+        if 'stop_latched=True' not in str(exc): raise
+        print('note: controller stop is latched (normal after a tour); reading anyway\n')
     for bus, side in enumerate(('left', 'right')):
         for i, name in enumerate(JOINTS):
             row = t.read_device_inventory(bus, i + 1)
