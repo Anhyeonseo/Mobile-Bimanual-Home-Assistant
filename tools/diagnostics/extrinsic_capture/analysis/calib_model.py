@@ -101,9 +101,9 @@ class Context:
         levels = seen('lvl')
         self.ref_level = 'L1' if 'L1' in levels else levels[0]
         self.levels = tuple(l for l in levels if l != self.ref_level)
-        self.test = self.shots[2::5]; self.train = [s for s in self.shots if s not in self.test]
+        self.test = self.shots[2::5]; _t = {id(s) for s in self.test}; self.train = [s for s in self.shots if id(s) not in _t]
         self.ptest = [p for p in self.planes if p['name'].endswith('-3')]
-        self.ptrain = [p for p in self.planes if p not in self.ptest]
+        _pt = {id(p) for p in self.ptest}; self.ptrain = [p for p in self.planes if id(p) not in _pt]
 
     # ---------- data ----------
     def _load_shots(self):
