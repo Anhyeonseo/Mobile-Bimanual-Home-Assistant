@@ -153,7 +153,7 @@
 
 - 리프트: +3.9~5.1% 더 이동, 영점 −6~−16mm(모델에 따라). 팔이 프로필보다 낮다.
 - 카메라 x·y·yaw는 모델 간 5mm·0.5° 이내로 식별됐다.
-- 적용용 후보 프로필은 `config/home_assistant/candidates/`에 있다. 적용 방법과 기존 문제 대응표는 [인계 문서](EXTRINSIC_CALIBRATION_HANDOFF_20261117.md) 3·4·9절.
+- 영점 + 리프트 모델을 이 브랜치의 프로필에 반영했다(`measured_calibration.development.json`, 새 `calibration_id` `s2-dev-4683680db9f74ce58184eced`). 반영 구조, 실물 시험 절차, 기존 문제 대응표는 [인계 문서](EXTRINSIC_CALIBRATION_HANDOFF_20261117.md) 2·4·9절.
 
 ## 6. 남은 일
 

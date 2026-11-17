@@ -8,71 +8,128 @@
 - 토크 ON 자동 투어로 리프트 2개 높이에서 120장을 촬영했다(재투영 RMS 1.1–1.6px, 11/13은 4–5px). 카메라 6자유도, 양팔 관절 영점, 오른팔 장착, **리프트 배율·영점**을 동시에 추정했다.
 - 계통 오차의 주원인은 리프트 환산이다. 런타임은 `h = (raw − origin) × meters_per_count`(84mm/rev)로 계산하는데, 실제 리프트는 **+3.4~5.1% 더 이동**하고 **영점이 −6~−16mm**다. 팔이 프로필보다 낮게 위치하므로, S3에서 관찰한 "목표보다 약 8mm 아래"와 방향이 일치한다.
 - 카메라 x·y·yaw는 이번에 식별됐다. 모델 간 편차가 x·y 약 5mm, yaw 0.5°다(11/14는 x가 10–29mm 범위). 기준은 왼팔 CAD 장착과 왼팔 base 영점이며, 바퀴 기준 절대값은 측정 불가다.
-- 런타임 필드에 그대로 들어가는 모델(영점 + 장착 + 리프트, 처짐 없음)로 **후보 프로필 3개**를 생성했다(`config/home_assistant/candidates/`). `s2_development.validate` 통과, 런타임 식으로 재계산한 TCP가 보정 모델과 **≤0.24mm** 일치한다. **기존 프로필은 변경하지 않았다.**
-- 마커 기준 5겹 교차 검증 중앙값은 리프트 미보정 15.8mm → **후보 10.5mm** → 처짐 포함 5.1mm(런타임 미지원)다. 화면 평면(lateral) 오차는 0.7–3mm다.
-- 실물 집기 검증은 아직 안 했다.
+- 런타임 필드에 그대로 들어가는 모델(영점 + 장착 + 리프트, 처짐 없음)을 **이 브랜치의 프로필에 반영했다**(커밋 `bc105c4`). 새 `calibration_id`는 `s2-dev-4683680db9f74ce58184eced`이고, 이전 프로필은 `config/home_assistant/historical/pre-extrinsic-20261117/`에 보존했다. 런타임 식으로 재계산한 TCP는 보정 모델과 ≤0.24mm 일치한다.
+- 마커 기준 5겹 교차 검증 중앙값은 리프트 미보정 15.8mm → **적용 모델 10.5mm** → 처짐 포함 5.1mm(런타임 미지원)다. 화면 평면(lateral) 오차는 0.7–3mm다.
+- 전체 테스트: 4,411 통과. 기존부터 실패하던 `test_s2_lift_contacts` 4개는 그대로다. **Jetson 설치본은 아직 이전 프로필이고, 실물 집기 검증도 아직이다**(4절).
 
-## 2. 후보 프로필 변경 내용
+## 2. 반영 구조와 변경 내용
 
-| 필드 | 현재 | 후보 |
+**원본**: `config/home_assistant/measured_calibration.development.json`(새 파일). 실측값과, 보정할 때 기준으로 삼은 명목값이 들어 있다.
+
+**빌드**: `s2_development.build(root)`
+1. 기존 명목 프로필을 만든다(`build_nominal`).
+2. 보정 파일의 기준 명목값과 수치로 비교한다(허용 1e-9). id가 아니라 수치로 비교하는 이유는, 재빌드하면 1e-16 차이로 id가 바뀌기 때문이다.
+3. 기준이 일치할 때만 `apply_measured_calibration`을 적용하고, 다르면 오류를 낸다.
+- `build(root, measured=False)`는 기존 명목 경로를 그대로 쓴다.
+
+**배포 파일 생성**: `tools/diagnostics/extrinsic_capture/apply_measured_calibration.py`
+1. 보존된 명목 프로필에 보정을 적용한다.
+2. 광각 프로필을 만든다(`camera_evidence.wide_color_profile`).
+3. 높이 모델을 만든다(같은 카메라의 z행).
+4. 집게 기록의 바인딩을 갱신한다(집게 매핑 변화 없음).
+5. 런타임 로더로 확인한다.
+
+| 필드 | 이전(명목) | 현재(실측) |
 |---|---|---|
 | `base_from_optical` pitch / roll / yaw | 45.00 / 0.00 / −0.68° | 45.78 / −1.31 / +0.30° |
 | `base_from_optical` t (mm) | 100.7, 33.2, 1007.1 | 121.9, 34.8, 1008.0 |
-| `camera_height_adjustment` (−9.1mm) | 있음 | 삭제(validator가 nominal+adjustment = 카메라 일치를 요구) |
+| `camera_height_adjustment` (−9.1mm) | 있음 | 없음(카메라 실측에 포함) |
 | left `home_model_rad` Δ (shoulder/elbow/wrist_flex) | 0 | +5.37 / +0.91 / −0.03° |
 | right `home_model_rad` Δ | 0 | +7.69 / +3.18 / −4.64° |
-| `reference_model_rad` | – | 위와 같은 Δ(validator: `model_angles(reference_raw) == reference_model_rad`) |
-| right `base_from_arm_at_lift_zero` | CAD | `CAD @ rm`, rm t ≈ (10.2, 1.2, −1.2)mm, 회전 ≈ 3° |
-| 양팔 `base_from_arm_at_lift_zero` t | – | `+= axis_base × (−5.74mm)` (리프트 영점) |
+| `reference_model_rad` | 0 | 위 Δ와 같음(Home 자세의 모델각 = 측정 영점) |
+| right `base_from_arm_at_lift_zero` | CAD | `CAD @ right_mount_correction`, t ≈ (10.2, 1.2, −1.2)mm, 회전 ≈ 3° |
+| 양팔 `base_from_arm_at_lift_zero` t | CAD | `+= axis_base × (−5.74mm)`(리프트 영점) |
 | `lift.meters_per_count` | −2.0508e-05 | −2.1310e-05 (×1.0391) |
-| `calibration_id` | `s2-dev-5bfc28c62078dfb0377bfdb7` | `s2-dev-74cf69505343b9cef8a76199` |
-| wide `base_profile_id` / `calibration_id` | – | 위 id 기준으로 재계산 |
-| `camera_height` `base_z_from_optical`, `model_id` | 11/14 높이 행 | 후보 카메라 z행, `height-` id 재계산 |
+| `calibration_id` | `s2-dev-5bfc28c62078dfb0377bfdb7` | `s2-dev-4683680db9f74ce58184eced` |
+| wide `calibration_id` | `s2-dev-28078929a9113a0c7b4a4559` | `s2-dev-d705d579ede27011cb5c0785` |
+| 높이 모델 `model_id` | `height-2b4512f39d52caae4cae1a10` | `height-accbcb85329e6564ef266208` |
+| `left_pad_gap.observed.json` | 이전 id | 새 id, `measured_calibration_profile_rebind` 기록 추가(측정값 동일) |
 
-- base 영점은 게이지라 변경하지 않는다(오른팔 base 영점은 `rm`에 포함).
-- `source_files_sha256`은 그대로다. `released_profile()`은 파일을 그대로 읽고 소스 해시만 확인하므로 로드된다. **단, `installation.development.json` 등 소스에서 프로필을 다시 빌드하면 보정값이 사라진다.** 영구 반영하려면 소스 쪽에도 같은 값을 넣는 별도 작업이 필요하다(6절).
-- 승인 플래그(`coordinate_use_allowed`, `motion_authorized` 등)는 `false` 그대로다.
+- base 영점은 게이지라 바꾸지 않았다(오른팔 base는 `right_mount_correction`에 포함). 집게 매핑도 그대로다.
+- 승인 플래그(`coordinate_use_allowed`, `motion_authorized` 등)는 `false`다.
 
-## 3. 적용 범위
+**테스트 변경**
+- 명목 경로를 검사하는 테스트(`test_s2_development`, `test_s2_acquisition`)는 `build(ROOT, measured=False)`를 쓰게 했다.
+- 명목값을 하드코딩한 기대값(높이 행, Home 자세 0°, 카메라 높이 보정 재바인딩)은 실측 기록이나 보존본을 기준으로 바꿨다.
+- 가상 장면 회귀 테스트(stationary lab 계열)는 명목 카메라 기준으로 설계된 장면이다. 그래서 `tests/conftest.py`에서 보존된 명목 프로필과 집게 기록으로 고정했다. `run_s3_stationary_lab.py`에 `PROFILE`, `PAD_RECORD`, `--profile`, `--pad-record`를 추가했다.
+- 실측 보정 전용 테스트: `tests/test_measured_calibration.py`
+  - 배포본 재현
+  - 항목별 반영 위치
+  - 기준이 다른 명목값 거부(8가지)
+  - 높이 모델·광각 일치
+  - 집게 측정값 보존
 
-**바꾸는 것은 설정 파일 3개뿐이다.** 코드와 문서에 값을 옮겨 적을 필요는 없다. 아래 모듈이 모두 같은 프로필을 읽으므로, 교체하면 자동으로 반영된다.
+## 3. 영향 범위
 
-| 영역 | 프로필 사용처(예) | 영향 |
+프로필을 읽는 모든 모듈에 자동 반영된다. 코드와 문서에 값을 옮겨 적을 필요는 없다.
+
+| 영역 | 사용처(예) | 영향 |
 |---|---|---|
 | 집기 좌표·계획 | `unified_pick.py`, `carry_live_inputs.py`, `carry_scene*.py`, `stationary_pick.py` | 물체 → base 변환, 팔 FK·IK, 리프트 높이 |
-| 높이 판정 | `stationary_rgbd.load_surface_height_model` (`camera_height.calibrated.json`) | 탁자·물체 높이 |
-| 센서 TF | `s4_sensor_frames.py`(base_link → color optical) | 주행·지도의 RGB-D 투영 |
+| 높이 판정 | `stationary_rgbd.load_surface_height_model` | 탁자·물체 높이 |
+| 센서 TF | `s4_sensor_frames.py` | 주행·지도의 RGB-D 투영 |
 | 정렬 후보 | `assistant/object_alignment.py` | 리프트 높이별 도달성 |
 
-**교체 시 함께 처리할 것**
-- `calibration_id`가 바뀌므로, 이전 id에 바인딩된 산출물은 재생성해야 한다. 그대로 쓰면 거부된다.
-  - 저장된 집기 bundle(`--bundle`), `installed_jaw` 기록, `mission_catalog` 대상, `mobile_manipulation` 프로그램
-- 기존 지도(RGB-D 융합층)는 이전 카메라 TF로 만들어졌다. 카메라 앞뒤가 약 2cm, roll이 1.3° 바뀌므로 RGB-D 장애물·시멘틱 층에 cm 단위 차이가 생길 수 있다. 라이다 2D 지도는 무관하다.
-- 리프트 원점은 지금처럼 **최하단 등록**을 전제로 한다.
-- **기존 문서는 수정하지 않는다.** 예전 값을 인용한 문서(`CALIBRATION_GUIDE.md` 12.3, 이력 문서)는 그 시점의 기록이다. 적용한 뒤에는 `CURRENT_STATUS.md`의 좌표·높이 항목만 갱신하면 된다.
-- 카메라 값만 따로 가져가면 안 된다. 카메라, 팔 영점, 장착, 리프트는 함께 추정된 묶음이다. 11/14에는 카메라만 바꿔서 왼팔 오차가 11.1mm로 악화된 적이 있다.
+- **이전 id에 묶인 산출물은 거부된다.** 저장된 집기 bundle(`validate_installed_binding`이 프로필 digest를 비교), 미션 대상, 이동 조작 프로그램은 새 관측·계획으로 다시 만든다.
+- 기존 지도의 RGB-D 층은 이전 카메라 TF로 만들어졌다. 카메라 앞뒤 약 2cm, roll 1.3° 차이만큼 cm 단위로 어긋날 수 있다. 라이다 2D 지도는 상관없다.
+- 리프트 원점은 지금처럼 최하단에서 등록한다(리프트 영점과 배율은 "최하단 = 원점"이 전제).
+- 이력 문서(`CALIBRATION_GUIDE.md` 12.3, `history/*`)는 그 시점의 기록이라 수정하지 않았다. `CURRENT_STATUS.md`의 좌표·높이 항목만 갱신했다.
 
-## 4. 적용과 검증 절차
+## 4. Jetson 반영과 실물 집기 시험
+
+### 4-1. 설치본 복사본에 반영 (기존 설치본은 그대로)
+
+노트북(브랜치 체크아웃 상태)에서:
 
 ```bash
-cd config/home_assistant
-F="s2_coordinates.development.json s2_coordinates.wide.development.json camera_height.calibrated.json"
-for f in $F; do cp "$f" "$f.before-20261117"; done                    # 백업
-cp candidates/s2_coordinates.development.candidate-20261117.json      s2_coordinates.development.json
-cp candidates/s2_coordinates.wide.development.candidate-20261117.json s2_coordinates.wide.development.json
-cp candidates/camera_height.calibrated.candidate-20261117.json        camera_height.calibrated.json
-# 롤백: for f in $F; do cp "$f.before-20261117" "$f"; done
+R=/home/hyper/robot/releases/s4-unified-pick-20261116
+ssh hyper@192.168.35.2 "cp -a $R ${R}-cal1117"
+cd ~/Mobile-Bimanual-Home-Assistant/config/home_assistant
+scp s2_coordinates.development.json s2_coordinates.wide.development.json camera_height.calibrated.json \
+    left_pad_gap.observed.json measured_calibration.development.json hyper@192.168.35.2:${R}-cal1117/config/home_assistant/
 ```
 
-Jetson release에도 같은 세 파일을 배포한 뒤, 이전 id에 묶인 산출물을 재생성한다.
+Jetson에서 로더 확인(모터 접근 없음):
 
-| 검증 | 기준 |
+```bash
+cd /home/hyper/robot/releases/s4-unified-pick-20261116-cal1117
+/home/hyper/robot/shared/venvs/s4-jazzy/bin/python - <<'PY'
+import sys, json; from pathlib import Path
+sys.path[:0]=['ros2_ws/src/home_robot_tasks','ros2_ws/src/so101_arm_bridge']
+from home_robot_tasks import s2_development as dev, s2_geometry as s2, camera_evidence as ce
+from home_robot_tasks.stationary_rgbd import load_surface_height_model
+from home_robot_tasks.installed_jaw import InstalledLeftJaw
+g=s2.load_geometry(Path('config/home_assistant/official_geometry.json')); p=dev.released_profile(Path('.'),g)
+w,_=ce.load_capture_profile(Path('.'),'wide'); h=load_surface_height_model(Path('.'))
+InstalledLeftJaw(json.loads(Path('config/home_assistant/left_pad_gap.observed.json').read_text()),p)
+print('OK', p['calibration_id'], p['provenance'], w['calibration_id'], h.model_id)
+PY
+```
+
+`OK s2-dev-4683680db9f74ce58184eced measured_joint_camera_arm_lift_calibration ...`이 나오면 된다.
+
+### 4-2. 시험 순서
+
+| 단계 | 내용 |
 |---|---|
-| 적용 전 기준 기록 | 현재 프로필로 수납장 흰 리모컨 정지 집기. 접촉 위치 오프셋(상하·좌우, mm)을 사진이나 자로 기록 |
-| 적용 후 같은 조건 | 상하 오프셋 감소 여부(목표: 아래쪽 치우침 제거) |
-| 반복 2–3회 | 산포 |
-| 리프트 상승 상태(80cm 책상) | 리프트 배율 보정의 효과 |
-| 왼팔 우선 | 오른팔은 신뢰도가 낮음(5절) |
+| 1. 기준(이전 프로필) | 기존 설치본(`s4-unified-pick-20261116`)으로 평소 절차대로 수납장 흰 리모컨 정지 집기. 새 촬영 → 계획 → bundle → 실행 |
+| 2. 새 프로필 | 리모컨, 베이스, 리프트를 그대로 두고, **복사본(`-cal1117`)에서** 같은 절차를 처음부터 진행. 새 촬영과 재계획이 필요하다(이전 bundle은 거부됨) |
+| 3. 반복 | 2를 2–3회 |
+| 4. (선택) 리프트 상승 | 80cm 책상에서 1·2 비교. 리프트 배율 보정 효과 확인 |
+
+각 실행은 **닫힌 직후, 들기 전**에 기록한다.
+- 사진: 정면, 옆면, 위. 자를 같이 대고 찍는다.
+- 측정 4가지:
+  - 고정 손가락 접촉점의 높이 차이(목표 단면 대비, 위 +, 아래 −, mm)
+  - 좌우 차이
+  - 길이 방향 차이
+  - 닫힘 선 기울기
+- 실행 로그 폴더 이름
+- 판정 기준: 이전 대비 **아래쪽 치우침이 줄었는지**가 핵심이다. S3에서는 약 8mm 아래였다.
+
+### 4-3. 되돌리기
+
+복사본을 쓰지 않으면 된다. 기존 설치본은 바꾸지 않았다. 저장소에서는 `historical/pre-extrinsic-20261117/`의 파일 4개를 되돌리고 `measured_calibration.development.json`을 지우면 이전 상태가 된다.
 
 ## 5. 근거와 한계
 
@@ -97,10 +154,9 @@ Jetson release에도 같은 세 파일을 배포한 뒤, 이전 id에 묶인 산
 
 ## 6. 후속 작업
 
-1. 후보 적용 → 집기 전후 비교
+1. Jetson 복사본 반영 → 집기 전후 비교(4절)
 2. 런타임 FK(`MeasuredFK`, 계획 모델)에 처짐 항 추가 → 처짐 모델 적용
 3. 명령 보정: `settle_error_raw`를 관절별 중력 토크에 회귀시켜 목표각에 오프셋 적용
-4. 소스(`installation.development.json`, `arm_model_alignment.development.json`, `arm_mounts`, 리프트) 반영 → 재빌드 시에도 유지되게
 5. 리프트 배율 확정: 높은 높이 추가 측정(55cm는 카메라와 약 6cm 근접 → 해당 높이 훑기 필요)
 6. 오른팔 원인 조사, 광각 평면(`W2-*`) 반영, 렌즈 왜곡(모서리 데이터 보강)
 
@@ -127,7 +183,7 @@ S3(0x24911)로 임시 교체 후 **0x2492D 복구 설치 완료**(`install.sh` e
 
 ## 9. 기존 문제 목록과의 대응
 
-기준 문서: `history/PROJECT_HISTORY_AND_DECISIONS_2026-11-15.md`(TalkFile)의 항목 번호. "적용 시"는 후보 프로필을 교체했을 때를 뜻한다.
+기준 문서: `history/PROJECT_HISTORY_AND_DECISIONS_2026-11-15.md`(TalkFile)의 항목 번호. "적용 시"는 이 브랜치의 실측 프로필이 Jetson에 반영됐을 때를 뜻한다.
 
 | 항목 | 문제 | 이번 결과 | 상태 |
 |---|---|---|---|
@@ -138,7 +194,7 @@ S3(0x24911)로 임시 교체 후 **0x2492D 복구 설치 완료**(`install.sh` e
 | G01 | Home 영점 정확도 미검증 | 양팔 영점 보정값 실측. 처짐 포함 여부에 따라 수 도 차이 | 부분 |
 | G05 | 손가락이 탁자를 끎, 모델·실물 높이 차이 | 높이 차이의 주요인(리프트) 확인 | 관련 원인 해소 |
 | H04 | 다른 바닥 영역 −10.7mm 잔차 | 전체 카메라 자세 보정 후 near 평면 4mm 이내 | 개선(광각 재확인 필요) |
-| H06 | 광각 실측 미완 | 광각 후보 프로필 생성(외부 보정 동일). 광각 렌즈 왜곡은 촬영만 하고 미분석 | 부분 |
+| H06 | 광각 실측 미완 | 광각 프로필도 같은 실측 카메라로 재생성. 광각 렌즈 왜곡은 촬영만 하고 미분석 | 부분 |
 | §11 | 자세·하중에 따른 처짐 평가 | 처짐 계수, 서보 추종 오차 실측(투어 전 샷 기록) | 측정 완료, 런타임 미반영 |
 | C01 | 오른팔 응답 누락 원인 미확정 | 투어 중 정지 2회가 명령 송신 중 UART 오류(dispatch failure), 모두 오른팔 이동 중 | 단서 추가, 미해결 |
 | B01–B03 | 정차 후보 정확도·시간 | 리프트 높이 계산이 맞아져 도달성 평가 정확도 향상. 시간 문제는 그대로 | 간접 |
@@ -169,7 +225,9 @@ S3(0x24911)로 임시 교체 후 **0x2492D 복구 설치 완료**(`install.sh` e
 ```bash
 PY=~/.venvs/calib/bin/python; A=tools/diagnostics/extrinsic_capture/analysis; C=~/cal_20261116; T=$C/T05b,$C/T05d,$C/T05f,$C/T30
 $PY $A/calib_encoder_lift.py . $C $T ~/cal_work/calib_enc_20261117.json --cv 5
-$PY $A/make_candidate_profile.py . $C $T ~/cal_work/calib_enc_20261117.json "AL zeros + lift" config/home_assistant/candidates
+$PY $A/export_measured_calibration.py . $C $T ~/cal_work/calib_enc_20261117.json "AL zeros + lift" \
+    config/home_assistant/historical/pre-extrinsic-20261117/s2_coordinates.development.json NEW_measured_calibration.json
+$PY tools/diagnostics/extrinsic_capture/apply_measured_calibration.py --check-only   # 배포 파일 검사
 ```
 
 환경: `python3 -m venv ~/.venvs/calib && ~/.venvs/calib/bin/pip install numpy scipy opencv-contrib-python pillow`.
