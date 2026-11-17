@@ -281,7 +281,11 @@ print(f'tour {args.tour.name} sha256 {TOUR_SHA[:12]}  lift {args.lift_m:.2f} m: 
       f'{"  [SIMULATION]" if args.simulate else ""}')
 print('안전 확인: 손으로 훑을 때와 같은 리프트 높이 / 주변 물건 치움 / 사람이 팔 옆에 대기 / Ctrl+C = 즉시 토크 끔(팔이 떨어짐)')
 if wait_key('준비됐으면 yes 입력:') != 'yes': sys.exit('cancelled')
-args.out.mkdir(parents=True, exist_ok=False)
+if args.out.exists() and any(p.is_dir() for p in args.out.iterdir()):
+    sys.exit(f'{args.out} already holds shots; use another name')
+if (args.out / 'tour_run.json').exists():          # an earlier attempt that saved no shot: keep its log
+    (args.out / 'tour_run.json').rename(args.out / f'tour_run.{int(time.time())}.json')
+args.out.mkdir(parents=True, exist_ok=True)
 
 report = dict(kind='calibration_tour_run', tour_sha256=TOUR_SHA, lift_m=args.lift_m, simulated=args.simulate,
               attachments=ATT, started_utc=time.time(), steps=[])
