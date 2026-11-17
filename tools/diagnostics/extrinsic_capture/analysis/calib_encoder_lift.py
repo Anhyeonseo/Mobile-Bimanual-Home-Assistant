@@ -22,50 +22,15 @@ ap.add_argument('repo'); ap.add_argument('capture'); ap.add_argument('tours'); a
 ap.add_argument('--bottom-raw', type=int, default=3900); ap.add_argument('--cv', type=int, default=5)
 args = ap.parse_args()
 
-MPC = 2.05078125e-05; TURN = 4096 * MPC
+from encoder_lift_model import EncModel, enc_height as _enc_height, add_encoder_heights, MPC, TURN
+
 def enc_height(raw, op):
-    base = ((args.bottom_raw - raw) % 4096) * MPC
-    return base + TURN * round((op - base) / TURN)
+    return _enc_height(raw, op, args.bottom_raw)
 
 ctx = Context(args.repo, [args.capture] + args.tours.split(','))
-for s in ctx.shots:
-    s['h_enc'] = enc_height(s['lift'], s['lift_op']); s['key'] = (s['session'], s['lvl'], s['name'], id(s))
+add_encoder_heights(ctx, args.bottom_raw)
 print('shots', len(ctx.shots), {(a, l.split('@')[-1]): sum(s['arm'] == a and s['lvl'] == l for s in ctx.shots)
                                  for a in ARMS for l in [ctx.ref_level, *ctx.levels]})
-
-
-class EncModel(Model):
-    def __init__(self, ctx, free, wplane=1.0):
-        super().__init__(ctx, set(free) - {'lscale', 'loff'}, wplane)
-        self.free = set(free)
-        for n in ('lscale', 'loff'):
-            self.spec.append((n, 1)); self.slices[n] = slice(self.size, self.size + 1); self.size += 1
-            self.labels.append(n); self.units.append('%' if n == 'lscale' else 'mm')
-        self.mask = np.zeros(self.size, bool)
-        for n in self.free: self.mask[self.slices[n]] = True
-
-    def nominal(self):
-        p = np.zeros(self.size); p[:self.size - 2] = super().nominal()[:self.size - 2]; return p
-
-    def to_human(self, p):
-        h = super().to_human(p)
-        if 'lscale' in self.free: h['lscale'] = 100 * p[self.slices['lscale']][0]
-        return h
-
-    def tool_in_base(self, arm, ang, lvl, dc, d, shot=None):
-        c = self.ctx
-        h = shot['h_enc'] * (1 + d['lscale']) + d['loff']
-        from scipy.spatial.transform import Rotation as Rot
-        axis = Rot.from_rotvec([d['lt_x'], d['lt_y'], 0.0]).apply(c.AXIS)
-        L = np.eye(4); L[:3, 3] = axis * h
-        m = c.MOUNT[arm] @ d['rm'] if arm == 'right' else c.MOUNT[arm]
-        zero = {j: d[f'z_{arm}_{j}'] for j in ZJ}
-        sc = {'elbow_flex': d[f's_{arm}_upper'], 'wrist_flex': d[f's_{arm}_fore']}
-        comp = {j: d[f'c_{arm}_{j}'] for j in CJ if d[f'c_{arm}_{j}'] != 0.0}
-        return L @ m @ c.fk(ang, zero, sc, comp)
-
-    def marker_in_cam(self, s, d):
-        return np.linalg.inv(d['cam']) @ self.tool_in_base(s['arm'], s['ang'], s['lvl'], 0.0, d, s) @ d['gm_' + s['att']]
 
 
 BASE = {'cam', 'rm'} | {'gm_' + a for a in ctx.atts}

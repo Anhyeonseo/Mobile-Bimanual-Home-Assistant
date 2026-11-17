@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "mode": "absolute_optical_height_only",
+  "source_frame": "color_camera_optical_frame",
+  "target": "height_above_floor_m",
+  "profile_calibration_id": "s2-dev-74cf69505343b9cef8a76199",
+  "ground_z_m": -0.0702,
+  "base_z_from_optical": [
+    -0.022936716471693874,
+    -0.6970511865128175,
+    -0.7166544149159837,
+    1.0080046980550093
+  ],
+  "legacy_z_adjustment_applied": false,
+  "source": {
+    "branch": "yeoeun/extrinsic-calibration",
+    "path": "docs/EXTRINSIC_CALIBRATION_HANDOFF_20261117.md",
+    "model": "AL zeros + lift"
+  },
+  "adoption_scope": "Stopped surface/object height from raw optical XYZ only; no arm, lift scale, map XY or rigid TF changes",
+  "assumption": "Stopped upright base and unchanged fixed D415 mount",
+  "status": "candidate_from_joint_calibration_not_applied",
+  "physical_grasp_accuracy_verified": false,
+  "model_id": "height-ac58eaacfce8c6f500812b84"
+}
