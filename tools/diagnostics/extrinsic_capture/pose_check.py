@@ -9,11 +9,13 @@ spec = importlib.util.spec_from_file_location('sp', Path.cwd()/'tools/run/statio
 sp = importlib.util.module_from_spec(spec); spec.loader.exec_module(sp)
 import serial
 from so101_arm_bridge.limit_manifest import JOINTS
+import capture_common as cc
 ranges = sp.read('arm_ranges.development.json')
 bad = 0
 with sp.acquire_backend_lease('stm32', 87), sp.open_exclusive_serial(serial, sp.DEVICE, 921600, .02) as port:
     t = sp.StreamValidationTransportV2(port, response_timeout_s=.12)
-    sp.identity(t)
+    hello = cc.identity(sp, t, allow_latched_stop=True)
+    print('controller firmware', hex(hello['firmware_version']), '| stop latched' if hello['stop_latched'] else '')
     for bus, side in enumerate(('left', 'right')):
         for i, name in enumerate(JOINTS):
             raw = t.read_device_inventory(bus, i + 1)['feedback']['position_raw']

@@ -10,22 +10,23 @@
 
 | 파일 | 역할 |
 |---|---|
-| `helpers.sh` | `source` 하면 실행 폴더로 이동하고 아래 명령을 등록한다. 릴리스 경로가 바뀌면 이 파일의 `cd` 경로를 고친다 |
-| `live_cam.py` (`livecam`) | 브라우저 실시간 화면(ArUco 검출 표시) + 터미널에서 이름 입력으로 저장. `NAME` = 카메라만, `NAME LIFT_M` = 관절값 포함 |
+| `helpers.sh` | `REL=<릴리스 경로> source` 하면 그 릴리스 폴더로 이동하고 아래 명령을 등록한다. 세션 폴더(`CAL`)는 이 파일이 있는 폴더다 |
+| `capture_common.py` | 공통: S3(0x24911)·S4(0x2492D) 제어기 확인, 깊이 노출 16ms 고정. 정지 잠금은 읽기 전용 촬영에서 거부하지 않고 기록한다 |
+| `live_cam.py` (`livecam`) | 브라우저 실시간 화면(ArUco 검출 표시) + 터미널에서 이름 입력으로 저장. `NAME` = 카메라만, `NAME LIFT_M` = 관절값 포함, `NAME LIFT_M left\|right ATT` = 팔 마커 그룹 기록 |
 | `raw_shot.py` (`rawshot`) | 사진 + 양팔 12축·리프트(ID10) 원시 엔코더. 기록 범위 검사를 건너뛴다 |
-| `cam_shot.py` (`camshot`) | 카메라만 (바닥, 탁자, 체커보드) |
+| `cam_shot.py` (`camshot`) | 카메라만 (바닥, 탁자, 체커보드, 깊이 표적, 리프트 판 마커) |
 | `pose_check.py` (`pose`) | 각 관절이 `arm_ranges.development.json` 범위 안인지 출력 |
 
 `raw_shot.py`와 `live_cam.py`는 `stationary_pick.py capture`의 범위 검사 대신
 촬영 전후 엔코더를 읽어 3 count 넘게 움직였으면 거부한다. idle reader는 시작하지 않는다.
-양팔 토크가 켜져 있으면 거부한다.
+양팔 토크가 켜져 있으면 거부한다. `sweep`·`tour`(및 `platform_check.py`, `rest_check.py`)는 S3 전용이다.
 
 Jetson 사용 예:
 
 ```bash
 scp tools/diagnostics/extrinsic_capture/{*.py,helpers.sh} hyper@<jetson>:~/cal_YYYYMMDD/
 # Jetson에서
-source ~/cal_YYYYMMDD/helpers.sh   # helpers.sh 안의 CAL 경로도 맞춘다
+REL=/home/hyper/robot/releases/<릴리스> source ~/cal_YYYYMMDD/helpers.sh
 livecam
 # PC에서 실시간 화면
 ssh -N -L 18765:127.0.0.1:8765 hyper@<jetson>   # 그다음 http://127.0.0.1:18765

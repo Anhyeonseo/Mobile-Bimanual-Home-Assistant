@@ -3,24 +3,17 @@
 Run on the Jetson from inside the installed release folder:  python live_cam.py
 Laptop:   ssh -N -L 18766:127.0.0.1:8766 hyper@<jetson>   then open http://127.0.0.1:18766  (port: LIVECAM_PORT)
 Terminal: NAME          -> camera-only shot   (floor, table, checkerboard)
-          NAME LIFT_M   -> shot + raw joint encoders read before/after (arm marker)
+          NAME LIFT_M   -> shot + raw joint encoders read before/after (gripper-tip touch)
+          NAME LIFT_M left|right ATT -> same, grouped as an arm-marker shot (e.g. M-L-01 0.35 left M1)
           q             -> quit
 Never enables torque or moves anything. Only one program can use the camera.
+S3 or S4 controller (capture_common.identity). The depth exposure is fixed at 16 ms (capture_common).
 """
 import importlib.util, io, json, re, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 spec = importlib.util.spec_from_file_location('sp', Path.cwd()/'tools/run/stationary_pick.py')
 sp = importlib.util.module_from_spec(spec); spec.loader.exec_module(sp)
-
-def read_identity(transport):
-    """Firmware identity for a read-only, torque-off shot. A latched stop (normal after a tour) does
-    not affect reading encoders, so it is recorded instead of refused; any other mismatch still refuses."""
-    try:
-        return sp.identity(transport)
-    except ValueError as exc:
-        if 'stop_latched=True' not in str(exc): raise
-        return dict(stop_latched=True, identity_error=str(exc))
 
 import numpy as np
 import serial
@@ -31,6 +24,7 @@ try:
     DICTIONARY = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 except Exception:
     cv2 = None
+import capture_common as cc
 
 import os
 # capture folder and preview port: CAL / LIVECAM_PORT environment variables (helpers.sh exports CAL)
@@ -51,7 +45,7 @@ def detect(gray):
 
 def camera_loop():
     try:
-        with sp.Capture(sp.camera_profile(), sp.read('camera_device.near.observed.json'), retain_frame=True) as camera:
+        with cc.open_camera(sp.Capture, sp.camera_profile(), sp.read('camera_device.near.observed.json')) as camera:
             last_jpeg = 0.0
             while not stop.is_set():
                 record, images = camera.next_frame()
@@ -125,7 +119,7 @@ def save_frame(folder, record, images):
     Image.fromarray(images[0][:, :, ::-1]).save(folder/'color.png')
     Image.fromarray(images[1]).save(folder/'depth_aligned.png')
     (folder/'metadata.json').write_text(json.dumps(images[2], indent=2))
-    (folder/'record.json').write_text(json.dumps(record, default=str))
+    (folder/'record.json').write_text(json.dumps(dict(record, capture_settings=cc.SETTINGS), default=str))
 
 
 def read_all(transport):
@@ -140,7 +134,7 @@ def read_all(transport):
     return rows
 
 
-def shot(name, lift_m):
+def shot(name, lift_m, group=None):
     raw = lambda rows: {k: r['feedback']['position_raw'] for k, r in rows.items()}
     if lift_m is None:
         out = CAL/name/'cam'
@@ -154,7 +148,7 @@ def shot(name, lift_m):
         raise RuntimeError(f'{name} already exists; use another name')
     with sp.acquire_backend_lease('stm32', 87), sp.open_exclusive_serial(serial, sp.DEVICE, 921600, .02) as port:
         transport = sp.StreamValidationTransportV2(port, response_timeout_s=.12)
-        hello = read_identity(transport)
+        hello = cc.identity(sp, transport, allow_latched_stop=True)
         start = time.time(); before = read_all(transport); mark = time.monotonic()
         record, images = wait_frame(mark)
         after = read_all(transport); end = time.time()
@@ -165,8 +159,9 @@ def shot(name, lift_m):
     save_frame(out, record, images)
     (out/'joints.json').write_text(json.dumps(dict(
         kind='raw_calibration_shot', lift_m_operator=lift_m, raw_before=b, raw_after=a,
-        read_window_utc_s=[start, end], camera_record=record, controller=hello,
-        inventory_before=before, inventory_after=after, motor_write_commands=0), indent=2, default=str))
+        read_window_utc_s=[start, end], camera_record=record, controller=hello, capture_settings=cc.SETTINGS,
+        inventory_before=before, inventory_after=after, motor_write_commands=0,
+        **({'calibration_group': group} if group else {})), indent=2, default=str))
     return f"saved {out}  left raw {[a['left/' + j] for j in JOINTS]}  lift raw {a['lift/id10']}"
 
 
@@ -175,7 +170,7 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f'saving to {CAL}; live view: on the laptop run  ssh -N -L 1{PORT}:127.0.0.1:{PORT} hyper@<jetson>  and open http://127.0.0.1:1{PORT}')
-    print('type: NAME (camera only) | NAME LIFT_M (with arm joints) | q (quit)')
+    print('type: NAME (camera only) | NAME LIFT_M (tip touch) | NAME LIFT_M left|right ATT (arm marker) | q (quit)')
     try:
         while not stop.is_set():
             try:
@@ -186,10 +181,14 @@ def main():
                 continue
             if words[0] == 'q':
                 break
-            if not re.fullmatch(r'[A-Za-z0-9_-]+', words[0]) or len(words) > 2:
-                print('usage: NAME  or  NAME LIFT_M   e.g. CB-1   or   L1-01 0.20'); continue
+            if (not re.fullmatch(r'[A-Za-z0-9_-]+', words[0]) or len(words) not in (1, 2, 4)
+                    or (len(words) == 4 and words[2] not in ('left', 'right'))):
+                print('usage: NAME | NAME LIFT_M | NAME LIFT_M left|right ATT   e.g. CB-1 | TCP-L-A01 0.00 | M-L-01 0.35 left M1'); continue
             try:
-                print(shot(words[0], float(words[1]) if len(words) == 2 else None))
+                lift = float(words[1]) if len(words) >= 2 else None
+                group = (dict(arm=words[2], attachment=words[3], level=f'{lift:.2f}', lift_m=lift, session=CAL.name)
+                         if len(words) == 4 else None)
+                print(shot(words[0], lift, group))
             except Exception as exc:
                 print('REJECTED:', exc)
     finally:
