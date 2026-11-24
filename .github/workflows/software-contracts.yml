@@ -170,7 +170,7 @@ jobs:
       - name: Install actual navigation and manipulation planners
         run: |
           apt-get update
-          apt-get install --no-install-recommends -y build-essential cmake python3-serial python3-yaml python3-numpy python3-scipy \
+          apt-get install --no-install-recommends -y build-essential cmake python3-colcon-common-extensions python3-serial python3-yaml python3-numpy python3-scipy \
             ros-jazzy-nav2-amcl ros-jazzy-nav2-planner ros-jazzy-nav2-navfn-planner \
             ros-jazzy-nav2-controller ros-jazzy-nav2-dwb-controller ros-jazzy-nav2-bt-navigator ros-jazzy-slam-toolbox \
             ros-jazzy-moveit-ros-move-group ros-jazzy-moveit-kinematics ros-jazzy-moveit-planners-ompl \
@@ -182,6 +182,8 @@ jobs:
           ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
         run: |
           source /opt/ros/jazzy/setup.bash
+          colcon build --base-paths ros2_ws/src/so101_planning_accel --cmake-args -DCMAKE_BUILD_TYPE=Release
+          source install/setup.bash
           export PYTHONPATH="$PWD/ros2_ws/src/home_robot_tasks:$PWD/ros2_ws/src/so101_arm_bridge:$PYTHONPATH"
           cmake -S firmware/stm32_actuator -B build/offline-core
           cmake --build build/offline-core --parallel 2

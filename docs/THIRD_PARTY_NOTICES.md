@@ -23,3 +23,5 @@ STMicroelectronics, STM32와 각 제품명은 해당 권리자의 상표다. 이
 | Meta SAM 2.1 Hiera Tiny | `de431c4043854a71d8101e17995dfe596bf101a5` | [Apache-2.0, 공식 모델 카드](https://huggingface.co/facebook/sam2.1-hiera-tiny) |
 
 실행 위치·입력 크기·추론 방식·제약은 [D415 실행 안내](REALSENSE.md)에 기록한다.
+
+내부 연구용 Pick Station 배포본은 GraspNet baseline `280c215`의 추론 소스와 RealSense 체크포인트를 사용한다. 배포본에 원본 라이선스 `artifacts/graspnet-baseline/LICENSE`를 포함한다. [GraspNet baseline](https://github.com/graspnet/graspnet-baseline)
