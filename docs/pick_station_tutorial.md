@@ -276,3 +276,25 @@ Jetson에서도 `OFFLINE_PREFLIGHT_PASSED`를 확인한 뒤 `bash tools/run/pick
 | `baseline` 또는 포트 오류 | 기본 baseline은 `/home/hyper/robot/shared/diagnostics/s4-trial-20261114/baseline.json`이다. 이 로봇의 승인된 파일이나 시리얼 경로가 다르면 `PICK_BASELINE`, `PICK_SERIAL`에 실제 값을 지정한다. |
 
 ROS와 추론 환경이 없는 새 Ubuntu 24.04 장비를 처음 준비할 때만 배포 폴더에서 `bash tools/run/install_pick_environment.sh`를 실행할 수 있다. 이 선택 설치는 sudo와 인터넷 연결을 사용한다. 프로젝트 Jetson과 노트북의 일반 실행 절차는 1~3단계다.
+
+## 같은 탁상에서 좌우 정차점 비교
+
+저장된 `prepared.json`과 당시 팔 자세로 현재 위치의 집기 경로를 먼저 검사한다.
+재배치 검토 대상이면 같은 높이와 방향에서 탁상 모서리를 따라 좌우로 옮겨 본다.
+방향은 촬영 당시 베이스의 전방이 0도, 왼쪽이 +90도다.
+탁상과 평행하게 정면 주차한 시험에서는 아래처럼 실행한다.
+
+```bash
+tools/run/pick_kit.sh tabletop-review --prepared /path/to/prepared.json \
+  --edge-angle-deg 90 --output output/tabletop-review-01
+```
+
+`--compare`를 추가하면 현재 자리에서 집히더라도 좌우 후보를 비교한다.
+`summary.json`에는 각 위치에서 대상이 카메라 안에 들어오는지, 관측된 장면과 로봇 외형이
+직선 이동 구간의 표본에서 겹치는지, MoveIt 집기 경로가 있는지 기록된다.
+추천값은 검사한 위치 중 하나다. 가려진 공간, 실시간 라이다 장애물, 바퀴 미끄러짐은 재현하지 않는다.
+
+웹에서는 시작할 때 `PICK_TABLE_EDGE_ANGLE_DEG=90 tools/run/pick_kit.sh web`처럼
+측정한 모서리 방향을 지정한다. 최상단 집기에서 재배치 검토가 발생하면 같은 계획기를 이용해
+좌우 후보를 비교하고 결과 파일을 표시한다. 후보는 검토용이며 이 버전에서 바퀴 명령은 전송하지 않는다.
+기존 상대이동 시험은 최하단 기준을 등록하므로 상단에 있는 로봇에서 그대로 시작하면 안 된다.

@@ -4,6 +4,7 @@ These are review outcomes, never base commands. A future relocation adapter must
 prove a completed move and acquire a new capture before running the same pick
 pipeline again. A failed search is not proof that every physical grasp is impossible.
 """
+import ast
 from collections import Counter
 
 
@@ -27,6 +28,24 @@ GEOMETRY_ROUTES = {
     'payload orientation violated along path',
     'OMPL error -1',  # MoveIt PLANNING_FAILED; other error codes need diagnosis.
 }
+
+
+def observed_approach_collision(failure):
+    """An alternate base may clear a reported hand/obstacle collision on approach."""
+    if failure.get('stage') not in ('pregrasp', 'approach'):
+        return False
+    prefix = 'invalid full robot state: '
+    reason = failure.get('reason')
+    if not isinstance(reason, str) or not reason.startswith(prefix) or len(reason) > 4096:
+        return False
+    try:
+        pairs = ast.literal_eval(reason[len(prefix):])
+    except (SyntaxError, ValueError):
+        return False
+    fingers = {'left_s2_gripper_link', 'left_s2_moving_jaw_so101_v1_link'}
+    return isinstance(pairs, list) and bool(pairs) and all(
+        isinstance(pair, tuple) and len(pair) == 2 and all(isinstance(link, str) for link in pair)
+        and 'capture_obstacle' in pair and any(link in fingers for link in pair) for pair in pairs)
 
 
 def planning_recovery(report):
@@ -58,7 +77,7 @@ def planning_recovery(report):
     if any(not (str(f.get('reason', '')).startswith(IK_PREFIX)
                 or f.get('reason') in GEOMETRY_BINDINGS) for f in bindings):
         return result
-    if any(f.get('reason') not in GEOMETRY_ROUTES for f in failures):
+    if any(f.get('reason') not in GEOMETRY_ROUTES and not observed_approach_collision(f) for f in failures):
         return result
     # Every bound candidate must have a recorded disposition before suggesting
     # a new base position. Otherwise continue the current search first.

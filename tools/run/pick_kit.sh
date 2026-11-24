@@ -68,6 +68,7 @@ mkdir -p "$ROS_LOG_DIR"
 case "$pick_action" in
   env) [[ $# == 0 ]] || exit 2; exec "$pick_python" tools/run/pick_service.py --mode live --check --candidate-source graspnet --mobile-mesh-dir assets/mobile_meshes ;;
   preflight) [[ $# == 0 ]] || exit 2; exec "$pick_python" tools/diagnostics/preflight_pick_station.py ;;
+  tabletop-review) exec "$pick_python" tools/diagnostics/review_tabletop_pick.py --mobile-mesh-dir assets/mobile_meshes "$@" ;;
   inspect-target)
     if [[ $# != 2 || ! -d "$1" ]]; then
         echo 'Usage: pick_kit.sh inspect-target /path/to/near/RGBD "물체 이름 또는 집기 요청"' >&2
@@ -82,6 +83,7 @@ case "$pick_action" in
     [[ $# == 0 ]] || exit 2
     pick_resume_flags=()
     if [[ -n "${PICK_RESUME_FROM:-}" ]]; then pick_resume_flags=(--resume-from "$PICK_RESUME_FROM"); fi
+    if [[ -n "${PICK_TABLE_EDGE_ANGLE_DEG:-}" ]]; then pick_resume_flags+=(--table-edge-angle-deg "$PICK_TABLE_EDGE_ANGLE_DEG"); fi
     exec "$pick_python" tools/run/pick_service.py --mode station --port "${PICK_WEB_PORT:-18768}" --device cpu --candidate-source graspnet \
       --stage-timeout-seconds 0 "${pick_resume_flags[@]}" \
       --camera-mode wide --artifacts-dir "$pick_root/artifacts" --mobile-mesh-dir "$pick_root/assets/mobile_meshes" \
@@ -100,5 +102,5 @@ case "$pick_action" in
       --baseline "${PICK_BASELINE:-/home/hyper/robot/shared/diagnostics/s4-trial-20261114/baseline.json}" \
       --serial-port "${PICK_SERIAL:-/dev/ttyACM0}" \
       --lift-target-um 0 --execute --supported-empty-bottom "${pick_flags[@]}" ;;
-  *) echo 'Usage: pick_kit.sh {env|preflight|demo|language|inspect-target|web|plan-only|pick}' >&2; exit 2 ;;
+  *) echo 'Usage: pick_kit.sh {env|preflight|demo|language|inspect-target|tabletop-review|web|plan-only|pick}' >&2; exit 2 ;;
 esac

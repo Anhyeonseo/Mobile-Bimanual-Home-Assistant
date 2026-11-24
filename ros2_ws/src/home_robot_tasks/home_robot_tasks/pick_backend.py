@@ -130,6 +130,19 @@ class PipelineBackend:
                     # a geometry search failure from an earlier successful plan.
                     if report.get('status')=='NO_COMPLETE_ROUTE':
                         recovery=report['recovery']
+                        angle = self.options.get('table_edge_angle_deg')
+                        if (angle is not None and value.get('operation') == 'top-pick'
+                                and recovery.get('base_reposition_candidate')):
+                            ctx.progress('같은 높이에서 탁상 좌우 정차 후보 비교 중')
+                            output = ctx.folder / 'tabletop-review'
+                            comparison = self._compute(ctx, 'tabletop_review', prepared=value['prepared'],
+                                origin_report=str(path), output=str(output), angle=angle)
+                            ctx.artifact(output/'positions.png', '탁상 좌우 정차 후보')
+                            ctx.artifact(output/'summary.json', '좌우 정렬 경로 비교')
+                            offset = comparison['preferred_tested_offset_mm']
+                            recovery['preferred_tested_offset_mm'] = offset
+                            if offset is not None:
+                                recovery['reason'] = f'탁상 방향 {offset:+g} mm에서 파지 경로 확인 · 베이스 이동 전'
                         ctx.note(recovery['reason'])
                         raise PlanningRejected(str(exc).split('\n')[0],recovery) from exc
                 raise Rejected(str(exc).split('\n')[0]) from exc

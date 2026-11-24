@@ -171,6 +171,12 @@ class PickCompute:
         validate_request_binding(checked,**binding)
         return checked
 
+    def tabletop_review(self, prepared, origin_report, output, angle):
+        from tools.diagnostics.review_tabletop_pick import review
+        return review(Path(prepared), self.options['mobile_mesh_dir'], Path(output),
+                      [-100, -50, 50, 100], angle, origin_report=origin_report,
+                      planner=self.planner)
+
     def planning_failure(self, report):
         """Decode potentially large evidence off the serial-owner thread."""
         from home_robot_tasks.pick_recovery import planning_recovery

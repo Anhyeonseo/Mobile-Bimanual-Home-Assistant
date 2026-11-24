@@ -111,7 +111,7 @@ def main():
     return 0 if report['status']=='OFFLINE_ROUTE_FOUND' else 2
 
 
-def plan(args, *, session_factory=session):
+def plan(args, *, session_factory=session, preview_base_xy=None):
     """Callable planner; session lifetime may be owned by a resident worker."""
     if args.approach_mode=='vertical' and args.fixed_finger_clearance_mm:
         raise ValueError('vertical requires no fixed-finger offset')
@@ -127,6 +127,11 @@ def plan(args, *, session_factory=session):
     from home_robot_tasks.pick_calibration import TOP_BASIS, TOP_BASES, check_top_surface
     from home_robot_tasks.pick_lift_transition import planning_review
     review=planning_review(prepared,profile)
+    group = prepared['group']
+    if preview_base_xy is not None:
+        from home_robot_tasks.tabletop_alignment import translated_observation
+        review, group, boxes, payload = translated_observation(
+            preview_base_xy, profile, review, group, boxes, payload)
     calibrated_top = review.get('lift_reference_basis') in TOP_BASES
     if calibrated_top:
         if args.preview_lift is not None:
@@ -160,6 +165,8 @@ def plan(args, *, session_factory=session):
         plane = prepared['support_plane']
         normal = transform[:3,:3] @ plane['normal']
         point = transform[:3,:3] @ plane['point_m'] + transform[:3,3]
+        if preview_base_xy is not None:
+            point[:2] -= preview_base_xy
         report.update(lift_reference_basis=review['lift_reference_basis'], calibration_revision=REVISION,
                       observed_support_plane_base=[*normal, -float(normal @ point)])
     directions=(tabletop_lift_directions(normal) if calibrated_top and args.approach_mode=='vertical'
@@ -168,10 +175,26 @@ def plan(args, *, session_factory=session):
     if prepared.get('start_revalidation') is not None:
         report['start_revalidation']=prepared['start_revalidation']
     args.output.mkdir(parents=True,exist_ok=True)
+    if preview_base_xy is not None:
+        from home_robot_tasks.tabletop_alignment import projected_target_visible
+        from home_robot_tasks.camera_evidence import load_capture_profile
+        for mode in ('near', 'wide', 'legacy'):
+            _, device = load_capture_profile(ROOT, mode)
+            if device['camera_device'] == profile['camera_device']:
+                break
+        else:
+            raise ValueError('no matching camera intrinsics for tabletop preview')
+        report.update(mode='hypothetical_tabletop_alignment', preview_base_xy_m=list(preview_base_xy),
+                      within_camera_view=projected_target_visible(profile, payload,
+                                               device['sdk_calibration']['color_intrinsics']))
+        if not report['within_camera_view']:
+            report['reason'] = 'target outside camera view'
+            (args.output/'report.json').write_text(json.dumps(report, default=serial, indent=2)+'\n')
+            return report
     candidates=[]
     for index,jaw_sign in ((i,s) for i in range(min(64,len(prepared['group']['refined_grasps']))) for s in (1,-1)):
         try:
-            candidate,jaw=bind_grasp(arm,review,prepared['group'],index,payload,installed,
+            candidate,jaw=bind_grasp(arm,review,group,index,payload,installed,
                                      hypothetical_lift_m=args.preview_lift,jaw_sign=jaw_sign,
                                      entry_clearance_m=args.entry_clearance_mm/1000,
                                      fixed_finger_clearance_m=args.fixed_finger_clearance_mm/1000,
@@ -194,8 +217,19 @@ def plan(args, *, session_factory=session):
         (args.output/'robot.urdf').write_text(config['robot_description'])
         state=RobotState();state.joint_state.name=list(joints);state.joint_state.position=list(joints.values())
         with session_factory(config,state,args.output) as call:
-            apply_boxes(call,boxes)
-            validity=call('check_state_validity',GetStateValidity.Request(robot_state=state))
+            validity_request = GetStateValidity.Request(robot_state=state)
+            if preview_base_xy is None:
+                apply_boxes(call, boxes)
+                validity = call('check_state_validity', validity_request)
+            else:
+                from home_robot_tasks.tabletop_alignment import scene_sweep
+                for fraction, moved_boxes in scene_sweep(boxes, preview_base_xy):
+                    apply_boxes(call, moved_boxes)
+                    validity = call('check_state_validity', validity_request)
+                    if not validity.valid:
+                        break
+                report['observed_sweep_clear'] = bool(validity.valid)
+                report['sweep_fraction'] = float(fraction)
             report['initial_state_valid']=validity.valid
             report['initial_contacts']=[(c.contact_body_1,c.contact_body_2) for c in validity.contacts]
             report['initial_contact_details']=[dict(bodies=[c.contact_body_1,c.contact_body_2],
@@ -217,6 +251,8 @@ def plan(args, *, session_factory=session):
     report['recovery']=planning_recovery(report)
     report['next_action']=report['recovery']['action']
     report['next_action_motion_authorized']=False
+    if preview_base_xy is not None and report['status'] == 'OFFLINE_ROUTE_FOUND':
+        report['status'] = 'HYPOTHETICAL_ROUTE_FOUND'
     (args.output/'report.json').write_text(json.dumps(report,default=serial,indent=2)+'\n')
     return report
 

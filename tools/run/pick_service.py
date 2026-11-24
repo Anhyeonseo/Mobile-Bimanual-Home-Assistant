@@ -43,6 +43,8 @@ def main(argv=None):
     parser.add_argument('--camera-mode', choices=('wide','legacy','near'))
     parser.add_argument('--lift-height-model',choices=('field_effective','encoder_no_sag'),
                         help='station defaults to encoder_no_sag; field_effective explicitly restores historical 630 mm compensation')
+    parser.add_argument('--table-edge-angle-deg', type=float,
+                        help='station: review lateral positions along this measured table edge in base_link')
     parser.add_argument('--maximum-grasps', type=int, choices=range(1,33), default=8)
     parser.add_argument('--stage-timeout-seconds', type=float,
                         help='overall stage deadline; 0 waits until completion (station default), other modes default to 300')
@@ -56,6 +58,8 @@ def main(argv=None):
     parser.add_argument('--plan-only', action='store_true', help='live: hold/capture/plan but do not dispatch an arm route')
     parser.add_argument('--check', action='store_true', help='read-only dependency check; no web, models or devices started')
     args = parser.parse_args(argv)
+    if args.table_edge_angle_deg is not None and (args.mode != 'station' or not math.isfinite(args.table_edge_angle_deg)):
+        parser.error('--table-edge-angle-deg needs station mode and a finite table edge direction')
     if args.lift_height_model is None:
         from home_robot_tasks.pick_calibration import STATION_HEIGHT_MODEL
         args.lift_height_model = STATION_HEIGHT_MODEL if args.mode == 'station' else 'field_effective'
