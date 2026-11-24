@@ -30,7 +30,7 @@ from so101_arm_bridge.stationary_runtime import ResidentStop,verify_inventory
 from so101_arm_bridge.bimanual_stream_adapter import OperationalLimits,CANONICAL_JOINT_NAMES
 from so101_arm_bridge.development_ranges import read_development_ranges,calibration_hash
 
-DEVICE='/dev/serial/by-id/usb-STMicroelectronics_STLINK-V3_005100393235511438363730-if02'
+DEVICE='/dev/ttyACM0'
 CONFIG=ROOT/'config/home_assistant'
 OBSERVATION_POLICY='snapshot_then_verify'
 def read(name):return json.loads((CONFIG/name).read_text())
@@ -200,7 +200,7 @@ def run(transport,args):
                 except ValueError:
                     if time.monotonic()>deadline:raise
                 time.sleep(.01)
-            session=build_carry_session(p,adapter=adapter,coordinated_stop=stop,observe=reader.read,
+            session=build_carry_session(p,adapter=adapter,coordinated_stop=stop,observe=reader.read,transport_owner='stationary-pick',
                 clock=time.monotonic,validate_current_scene=inputs.validate_stage,
                 observation_policy=OBSERVATION_POLICY,ready_for_route=inputs.route_start_ready,
                 pause_before_descent=pause_before_descent)

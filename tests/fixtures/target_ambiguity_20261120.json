@@ -1,0 +1,82 @@
+{
+  "observations": [
+    {
+      "capture_id": "rgbd-690",
+      "captured_at_utc": "2026-11-20T01:38:20.901309+00:00",
+      "frame_id": "color_camera_optical_frame",
+      "source_sha256": {
+        "color.png": "bddf6298511b0600ef0bf33fe71bd6df9521a233d5b3ecdfc67afacce9142be0",
+        "depth_aligned.png": "a72232bf9c060c4e027720e308476d87325ed1d087500df6a2d4818a380a20d6",
+        "metadata.json": "4ac3c2d0362bb3ce16481f6e2d17cfb9a86cb6c04c0df3e60644dbe56649c2fa"
+      },
+      "box_xyxy": [
+        301.26812744140625,
+        260.0646057128906,
+        351.1858825683594,
+        345.5909423828125
+      ],
+      "label": "white eraser",
+      "status": "accepted",
+      "failure": null,
+      "reason": null,
+      "center_xyz_m": [
+        0.004182779269878134,
+        0.03759472248644673,
+        0.3315889786602943
+      ],
+      "mask_sha256": "4e21481a20492a74125c1854a4a2c5b9d299ba1bd0934ad64cbfb52bc2dedf16",
+      "clock_domain": "global_time",
+      "calibration_id": "unmeasured",
+      "support_height_m": 0.018377581920550706,
+      "valid_depth_fraction": 0.9953508030431107,
+      "detection_score": 0.807305097579956
+    },
+    {
+      "capture_id": "rgbd-690",
+      "captured_at_utc": "2026-11-20T01:38:20.901309+00:00",
+      "frame_id": "color_camera_optical_frame",
+      "source_sha256": {
+        "color.png": "bddf6298511b0600ef0bf33fe71bd6df9521a233d5b3ecdfc67afacce9142be0",
+        "depth_aligned.png": "a72232bf9c060c4e027720e308476d87325ed1d087500df6a2d4818a380a20d6",
+        "metadata.json": "4ac3c2d0362bb3ce16481f6e2d17cfb9a86cb6c04c0df3e60644dbe56649c2fa"
+      },
+      "box_xyxy": [
+        128.37013244628906,
+        222.65142822265625,
+        152.1171875,
+        233.73973083496094
+      ],
+      "label": "white eraser",
+      "status": "held",
+      "failure": null,
+      "reason": "no_locally_verified_support",
+      "center_xyz_m": [
+        -0.11412184916789093,
+        -0.004139355581120553,
+        0.39309731720591834
+      ],
+      "mask_sha256": "c261ff570f25e2f1ebcff067970b43eb8379d63f62a164007a235145fc23066b",
+      "clock_domain": "global_time",
+      "calibration_id": "unmeasured",
+      "support_height_m": null,
+      "valid_depth_fraction": 1.0,
+      "detection_score": 0.34622666239738464
+    }
+  ],
+  "meta": {
+    "captured_at_utc": "2026-11-20T01:38:20.901309+00:00",
+    "color_intrinsics": {
+      "width": 640,
+      "height": 480
+    }
+  },
+  "profile": {
+    "source_frame": "color_camera_optical_frame",
+    "calibration_id": "unused"
+  },
+  "source": {
+    "color.png": "bddf6298511b0600ef0bf33fe71bd6df9521a233d5b3ecdfc67afacce9142be0",
+    "depth_aligned.png": "a72232bf9c060c4e027720e308476d87325ed1d087500df6a2d4818a380a20d6",
+    "metadata.json": "4ac3c2d0362bb3ce16481f6e2d17cfb9a86cb6c04c0df3e60644dbe56649c2fa"
+  }
+}

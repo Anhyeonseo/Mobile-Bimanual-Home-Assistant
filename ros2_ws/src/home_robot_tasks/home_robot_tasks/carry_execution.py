@@ -17,7 +17,7 @@ class HandoffRecheck(ValueError):
         super().__init__('measured anchor changed after planning: '+str(diagnostics))
 
 
-def build_carry_session(program, *, adapter, coordinated_stop, observe, clock,
+def build_carry_session(program, *, adapter, coordinated_stop, observe, clock, transport_owner,
                        validate_current_scene, simulation=False, observation_policy='continuous_patch',
                        ready_for_route=None, pause_before_descent=False, recoverable_handoffs=False):
     """Compose over prepared clients; never open a port, flash or auto-home.
@@ -29,7 +29,7 @@ def build_carry_session(program, *, adapter, coordinated_stop, observe, clock,
     from .device_ports import ResidentArmPort
     builder = CarryRouteBuilder(program, validate_current_scene,pause_before_descent=pause_before_descent)
     motion = ResidentArmPort(adapter, builder, coordinated_stop, clock,
-                             transport_owner='stationary-pick')
+                             transport_owner=transport_owner)
     return CarrySession(program, motion, coordinated_stop, observe, clock, simulation=simulation,
                         observation_policy=observation_policy,ready_for_route=ready_for_route,
                         pause_before_descent=pause_before_descent,recoverable_handoffs=recoverable_handoffs)
@@ -273,6 +273,8 @@ class CarrySession:
     @property
     def holding_reason(self):
         # Retained arm/jaw goals do not prove that an object came with them.
+        if self.observation_policy == 'snapshot_then_verify' and self.last_feedback is not None and self._held(self.last_feedback):
+            return 'HOLDING_VISUALLY_VERIFIED'
         return ('HOLDING_UNVERIFIED' if self.observation_policy == 'snapshot_then_verify'
                 else 'HOLDING')
 

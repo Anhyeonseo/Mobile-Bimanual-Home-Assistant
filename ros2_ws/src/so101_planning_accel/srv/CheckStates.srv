@@ -1,0 +1,7 @@
+moveit_msgs/PlanningScene scene
+moveit_msgs/RobotState[] states
+---
+bool valid
+int32 failed_index
+string reason
+float64 wall_seconds

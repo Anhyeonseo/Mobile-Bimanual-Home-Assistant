@@ -7,6 +7,7 @@ This is sampled checking, not a continuous collision or physical holding proof.
 from copy import deepcopy
 from dataclasses import dataclass, replace
 import math
+from time import perf_counter
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -29,8 +30,15 @@ class StagePath:
 
 
 class MoveItCarryPlanner:
-    def __init__(self, arm, initial_state, call):
-        self.arm, self.initial_state, self.call = arm, deepcopy(initial_state), call
+    def __init__(self, arm, initial_state, call, *, planning_budget_s=5., planning_attempts=2, vertical_grasp_policy=None):
+        if not math.isfinite(planning_budget_s) or not 0 < planning_budget_s <= 5:
+            raise ValueError('planning budget must be in (0, 5] seconds')
+        if type(planning_attempts) is not int or not 1 <= planning_attempts <= 2:
+            raise ValueError('expected one or two planning attempts')
+        self.vertical_grasp_policy = vertical_grasp_policy
+        self.arm, self.initial_state, self.transport = arm, deepcopy(initial_state), call
+        self.planning_budget_s, self.planning_attempts = planning_budget_s, planning_attempts
+        self.timings = {}
         self.names = [arm.side+'_model_'+name for name in JOINTS[:5]]
         self.jaw_name = arm.side+'_model_gripper'
         self.tcp = arm.side+'_tcp'
@@ -40,7 +48,40 @@ class MoveItCarryPlanner:
             raise ValueError('MoveIt and carry generator must use the same fixed lift')
         self.touch_links = [arm.side+'_s2_'+name for name in ('gripper_link', 'moving_jaw_so101_v1_link', 'gripper_frame_link')]
         self._scene_key = None
+        self._scene_candidate = None
         self.checked_states = 0
+
+    def call(self, name, request):
+        started = perf_counter()
+        try:
+            return self.transport(name, request)
+        finally:
+            row = self.timings.setdefault(name, dict(calls=0, wall_ms=0.))
+            row['calls'] += 1
+            row['wall_ms'] += 1000*(perf_counter()-started)
+
+    def valid_many(self, samples, candidate, attached, *, jaws=None):
+        batch = getattr(self.transport, 'check_states', None)
+        if batch is None:
+            for i, q in enumerate(samples):
+                self.valid(q, candidate, attached, jaw=None if jaws is None else jaws[i])
+            return
+        states = []
+        for i, q in enumerate(samples):
+            if attached and candidate.object_constraint and not candidate.object_constraint.satisfied(self.arm.fk(q)[0]):
+                raise PlanRejected('payload orientation violated along path')
+            states.append(self.state(q, candidate, attached, jaw=None if jaws is None else jaws[i]))
+        started = perf_counter()
+        try:
+            result = batch(states)
+        finally:
+            row = self.timings.setdefault('batch_state_validity', dict(calls=0, wall_ms=0.))
+            row['calls'] += 1
+            row['wall_ms'] += 1000*(perf_counter()-started)
+        self.checked_states += getattr(result, 'checked_count',
+            len(states) if result.valid else max(0, result.failed_index+1))
+        if not result.valid:
+            raise PlanRejected(f'batch state {result.failed_index} rejected: {result.reason}')
 
     @staticmethod
     def pose(matrix):
@@ -60,7 +101,9 @@ class MoveItCarryPlanner:
         obj.operation = CollisionObject.ADD
         primitive = SolidPrimitive(type=SolidPrimitive.BOX, dimensions=list(map(float, candidate.object_size_m)))
         obj.primitives = [primitive]
-        pose = candidate.tcp_from_object if attached else candidate.base_from_grasp_tcp @ candidate.tcp_from_object
+        pose = (candidate.tcp_from_object if attached else
+                candidate.observed_base_from_object if candidate.observed_base_from_object is not None else
+                candidate.base_from_grasp_tcp @ candidate.tcp_from_object)
         obj.primitive_poses = [self.pose(pose)]
         if candidate.payload_mesh is not None:
             from shape_msgs.msg import Mesh, MeshTriangle
@@ -107,6 +150,7 @@ class MoveItCarryPlanner:
         if not self.call('apply_planning_scene', request).success:
             raise PlanRejected('planning scene update failed')
         self._scene_key = key
+        self._scene_candidate = candidate  # Retain identity while its scene is cached.
 
     def state(self, q, candidate=None, attached=False, jaw=None):
         from moveit_msgs.msg import AttachedCollisionObject
@@ -165,14 +209,13 @@ class MoveItCarryPlanner:
         q = np.array([[p.positions[i] for i in indexes] for p in jt.points])
         if not np.isfinite(q).all() or np.max(abs(q[0]-start)) > .002:
             raise PlanRejected('MoveIt path start differs from requested anchor')
-        if np.any(abs(q-start) >= math.pi) or np.any(abs(np.diff(q, axis=0)) >= math.pi):
+        if np.any(abs(np.diff(q, axis=0)) >= math.pi):
             raise PlanRejected('large joint branch change; no encoder wrapping allowed')
         samples = [q[0]]
         for a, b in zip(q[:-1], q[1:]):
             steps = max(1, math.ceil(np.max(abs(b-a))/math.radians(1)))
             samples.extend(np.linspace(a, b, steps+1)[1:])
-        for value in samples:
-            self.valid(value, candidate, attached)
+        self.valid_many(samples, candidate, attached)
         duration = jt.points[-1].time_from_start
         return StagePath(label, np.asarray(samples), planner, duration.sec+duration.nanosec/1e9)
 
@@ -185,7 +228,7 @@ class MoveItCarryPlanner:
         r = request.motion_plan_request
         r.group_name = self.group; r.pipeline_id = 'ompl'; r.planner_id = 'RRTConnect'
         r.start_state = self.state(start, candidate, attached)
-        r.num_planning_attempts = 2; r.allowed_planning_time = 5.
+        r.num_planning_attempts = self.planning_attempts; r.allowed_planning_time = self.planning_budget_s
         r.max_velocity_scaling_factor = .2; r.max_acceleration_scaling_factor = .2
         if attached and candidate.object_constraint:
             r.path_constraints = self.orientation_hint(candidate)
@@ -197,12 +240,14 @@ class MoveItCarryPlanner:
             for n, q in zip(self.names, goal)])]
         response = self.call('plan_kinematic_path', request).motion_plan_response
         planner_id = r.planner_id
-        if response.error_code.val != 1 and planner_id == 'RRTGoal':
+        if response.error_code.val != 1 and planner_id == 'RRTGoal' and not getattr(self.transport, 'parallel', False):
             r.planner_id = 'RRTConnect'
             response = self.call('plan_kinematic_path', request).motion_plan_response
             planner_id = r.planner_id
         if response.error_code.val != 1:
             raise PlanRejected('OMPL error '+str(response.error_code.val))
+        if getattr(self.transport, 'parallel', False):
+            planner_id = 'parallel/'+(getattr(self.transport, 'selected_planner', '') or 'unknown')
         path = self.checked_path(response.trajectory, start, candidate, attached, label, 'MoveIt OMPL/'+planner_id)
         if np.max(abs(path.end-goal)) > .002:
             raise PlanRejected('MoveIt missed carry/pregrasp joint goal')
@@ -242,6 +287,9 @@ class MoveItCarryPlanner:
 
     def cartesian(self, start, goal, candidate, *, attached, label):
         from moveit_msgs.srv import GetCartesianPath
+        policy=getattr(self,'vertical_grasp_policy',None) if label in ('approach','lift') else None
+        tolerance_deg=5. if policy is not None else 2.
+        orientation_limit=math.radians(tolerance_deg)
         self.prepare(candidate, attached)
         request = GetCartesianPath.Request()
         request.header.frame_id = 'base_link'
@@ -252,15 +300,25 @@ class MoveItCarryPlanner:
         request.avoid_collisions = True
         request.max_velocity_scaling_factor = .2; request.max_acceleration_scaling_factor = .2
         response = self.call('compute_cartesian_path', request)
-        if response.error_code.val != 1 or response.fraction < .999999:
+        path=None
+        if response.error_code.val == 1 and response.fraction >= .999999:
+            try:
+                path=self.checked_path(response.solution,start,candidate,attached,label,'MoveIt Cartesian')
+            except PlanRejected as exc:
+                if 'large joint branch change' not in str(exc):raise
+        if path is None:
             from .carry_cartesian import bounded_cartesian
-            samples=bounded_cartesian(self.arm,start,goal)
-            for q in samples:self.valid(q,candidate,attached)
+            try:
+                samples=(bounded_cartesian(self.arm,start,goal,orientation_tolerance_deg=tolerance_deg)
+                         if policy is not None else bounded_cartesian(self.arm,start,goal))
+            except PlanRejected as exc:
+                exc.diagnostics=dict(getattr(exc,'diagnostics',{}),
+                    moveit_fraction=float(response.fraction),moveit_error_code=int(response.error_code.val))
+                raise
+            self.valid_many(samples,candidate,attached)
             path=StagePath(label,samples,'bounded 5DOF IK + MoveIt collision checks; Cartesian fraction='+str(response.fraction))
-        else:
-            path = self.checked_path(response.solution, start, candidate, attached, label, 'MoveIt Cartesian')
         actual = self.arm.fk(path.end)[0]
-        if np.linalg.norm(actual[:3, 3]-goal[:3, 3]) > .001 or Rotation.from_matrix(goal[:3, :3].T@actual[:3, :3]).magnitude() > math.radians(2):
+        if np.linalg.norm(actual[:3, 3]-goal[:3, 3]) > .001 or Rotation.from_matrix(goal[:3, :3].T@actual[:3, :3]).magnitude() > orientation_limit:
             raise PlanRejected('Cartesian endpoint pose mismatch')
         # Cartesian interpolation must preserve the requested orientation and line.
         origin = self.arm.fk(start)[0]
@@ -269,7 +327,11 @@ class MoveItCarryPlanner:
         previous = -.001
         for q in path.joints:
             pose = self.arm.fk(q)[0]
-            if Rotation.from_matrix(origin[:3, :3].T@pose[:3, :3]).magnitude() > math.radians(2):
+            if policy is not None:
+                from .grasp_preferences import contact_posture
+                if not contact_posture(pose,policy)['accepted']:
+                    raise PlanRejected('Cartesian path exceeds tabletop finger tilt envelope')
+            if Rotation.from_matrix(origin[:3, :3].T@pose[:3, :3]).magnitude() > orientation_limit:
                 raise PlanRejected('Cartesian orientation drift')
             if distance > 1e-6:
                 along = np.dot(pose[:3, 3]-origin[:3, 3], direction/distance)
@@ -282,8 +344,7 @@ class MoveItCarryPlanner:
     def open(self, q, candidate):
         self.prepare(candidate, False)
         current = self.initial_state.joint_state.position[self.initial_state.joint_state.name.index(self.jaw_name)]
-        for angle in np.linspace(current, candidate.open_jaw_model_rad, 16):
-            self.valid(q, candidate, False, jaw=angle)
+        self.valid_many([q]*16, candidate, False, jaws=np.linspace(current, candidate.open_jaw_model_rad, 16))
         return StagePath('open_geometry', np.array([q]), 'sampled opening sweep')
 
     def close(self, q, candidate):
@@ -296,9 +357,11 @@ class MoveItCarryPlanner:
             error=PlanRejected('fixed/moving finger contact binding differs from observed section')
             error.diagnostics=review
             raise error
-        self.prepare(candidate, False)
-        for angle in np.linspace(candidate.open_jaw_model_rad, candidate.held_jaw_model_rad, 16):
-            self.valid(q, candidate, False, jaw=angle)
+        from .carry_planning import closing_sweep_candidate
+        sweep=closing_sweep_candidate(candidate)
+        attached=candidate.observed_base_from_object is not None
+        self.prepare(sweep, attached)
+        self.valid_many([q]*16, sweep, attached, jaws=np.linspace(candidate.open_jaw_model_rad, candidate.held_jaw_model_rad, 16))
         self.prepare(candidate, True)
         self.valid(q, candidate, True)
         return StagePath('close_geometry', np.array([q]), 'sampled jaw sweep; holding not verified')
@@ -306,6 +369,5 @@ class MoveItCarryPlanner:
     def release(self, q, candidate):
         """World-object/opening geometry only; does not command or prove release."""
         self.prepare(candidate, False)
-        for angle in np.linspace(candidate.held_jaw_model_rad, candidate.open_jaw_model_rad, 16):
-            self.valid(q, candidate, False, jaw=angle)
+        self.valid_many([q]*16, candidate, False, jaws=np.linspace(candidate.held_jaw_model_rad, candidate.open_jaw_model_rad, 16))
         return StagePath('release_geometry', np.array([q]), 'sampled release sweep; support not verified')

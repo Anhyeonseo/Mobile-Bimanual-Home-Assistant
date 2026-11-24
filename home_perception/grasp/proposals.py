@@ -90,9 +90,21 @@ def select(rows, target_points, plane, opening_range, *, limit=32, surface_heigh
             candidate = candidate_from_row(proposal, 'graspnet')
             candidate.update(proposal_variant=variant,contact_height_shift_m=height_shift,
                 orientation_variant=orientation,contact_position_variant=position_variant,
-                contact_center_shift_m=center_shift)
+                contact_center_shift_m=center_shift,closing_center_shift_m=0.)
             candidate['closing_section'] = observed_contact_line(candidate,target_points)
             section = candidate['closing_section']
+            if (section['status']=='VISIBLE_SPAN'
+                    and low<=section['high_m']-section['low_m']<=high
+                    and 2*max(-section['low_m'],section['high_m'])>high):
+                # An off-centre network origin can demand an opening twice the
+                # actual span. Recentre on this SAME observed pinch line, then
+                # measure again. Neither jaw limits nor object bounds change.
+                shift=(section['low_m']+section['high_m'])/2
+                proposal=proposal.copy();proposal[13:16]+=shift*rotation[:,1]
+                tip=proposal[13:16]+proposal[3]*rotation[:,0]
+                candidate.update(translation_m=proposal[13:16].tolist(),closing_center_shift_m=float(shift))
+                section=observed_contact_line(candidate,target_points)
+                candidate['closing_section']=section
             if plane.height(tip) < 0:
                 # The contact point itself cannot lie below its support. No
                 # imaginary 20 mm finger corners are used for this decision.
@@ -118,7 +130,8 @@ def select(rows, target_points, plane, opening_range, *, limit=32, surface_heigh
     # Keep nearby orientation alternatives for a five-DOF, asymmetric hand.
     # The former 3 cm / 30 deg NMS could remove every feasible variant before IK.
     # Prefer centred contacts before the bounded proposal pool can discard them.
-    # Preserve a quarter of the pool for detector-ranked orientation alternatives.
+    # Preserve detector alternatives and contact locations as well. Many high
+    # scoring rotations at one location must not consume the entire IK budget.
     def priority(item):
         balance=item[3]['balance_proxy']
         penalty=.5*balance.get('normalized_offset',0.)**2
@@ -128,29 +141,42 @@ def select(rows, target_points, plane, opening_range, *, limit=32, surface_heigh
         return (-item[1][0]+penalty,item[0])
     by_balance=sorted(eligible,key=priority)
     by_detector=sorted(eligible,key=lambda item:(-item[1][0],item[0]))
-    preferred=max(1,limit-limit//4)
+    spatial_slots=limit//4
+    detector_slots=limit//4
+    preferred=max(1,limit-detector_slots-spatial_slots)
     ordered=iter(by_balance);kept=[]
-    def append_distinct(item):
+    def is_distinct(item):
         rotation=item[1][4:13].reshape(3,3)
         duplicate=any(np.linalg.norm(item[2]-other[2])<.008 and
             abs((item[2]-other[2])@plane.normal)<.002 and
             np.arccos(np.clip((np.trace(rotation.T@other[1][4:13].reshape(3,3))-1)/2,-1,1))
             <np.deg2rad(10) for other in kept)
-        if not duplicate:kept.append(item)
+        return not duplicate
+    def append_distinct(item):
+        if is_distinct(item):kept.append(item)
     for item in ordered:
         append_distinct(item)
         if len(kept)>=preferred:break
     for item in by_detector:
-        if len(kept)>=limit:break
+        if len(kept)>=limit-spatial_slots:break
         append_distinct(item)
+    remaining=[item for item in by_balance if is_distinct(item)]
+    while remaining and len(kept)<limit:
+        # Rigid-frame invariant farthest-contact sampling. The later arm
+        # planner still ranks balance and checks every physical constraint.
+        item=max(remaining,key=lambda item:min(np.linalg.norm(item[2]-other[2]) for other in kept))
+        kept.append(item)
+        remaining=[other for other in remaining if other is not item and is_distinct(other)]
     kept.sort(key=priority)
     return [dict(item[3], proposal_row_index=item[0], robot_feasibility_checked=False) for item in kept], dict(
-        policy='observed_target_proposals_v5_centered_contact', input_rows=len(rows), evaluated_contact_variants=evaluated,
+        policy='observed_target_proposals_v6_contact_coverage', input_rows=len(rows), evaluated_contact_variants=evaluated,
         longitudinal_center_alternatives=bool(centered_contacts),
         straight_across_alternatives=short_axis is not None,
         balance_score_weight=.5,balance_preferred_slots=preferred,
-        detector_alternative_slots=limit-preferred,measured_com=False,
+        detector_alternative_slots=detector_slots,spatial_alternative_slots=spatial_slots,measured_com=False,
+        closing_line_recentered_selected=sum(abs(item[3]['closing_center_shift_m'])>0 for item in kept),
         eligible_before_diversity=len(eligible),surface_heights_sampled=bool(surface_heights),
+        distinct_proposals_over_budget=len(remaining),
         selected=len(kept), maximum_proposals=limit, rejected_by_evidence=rejected,
         physical_collision_model='deferred_to_SO101_CAD_and_full_path',
         diversity_translation_m=.008,diversity_height_m=.002, diversity_rotation_deg=10, motion_authorized=False)

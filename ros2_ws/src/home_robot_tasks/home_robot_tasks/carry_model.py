@@ -14,6 +14,7 @@ import numpy as np
 from . import s2_geometry as geo, s2_development as dev
 from .s2_urdf import render_observation_urdf, _rpy
 from .d415_geometry import nominal_model
+from .pick_calibration import planning_lift_limit
 
 
 def parameters(root, profile, geometry, arms, mobile_mesh_dir):
@@ -21,7 +22,7 @@ def parameters(root, profile, geometry, arms, mobile_mesh_dir):
     dev.validate(profile, geometry)
     robot = ET.fromstring(render_observation_urdf(
         profile, geometry, lift_axis=' '.join(map(str, profile['lift']['axis_base'])),
-        lift_travel=profile['lift']['travel_m'], ground_z=profile['ground_z_m']))
+        lift_travel=planning_lift_limit(profile), ground_z=profile['ground_z_m']))
     official_path = root/'config/home_assistant/official_sources/so101_new_calib.urdf'
     expected = next(s['sha256'] for s in geometry['sources'] if s['file'] == official_path.name)
     if hashlib.sha256(official_path.read_bytes()).hexdigest() != expected:

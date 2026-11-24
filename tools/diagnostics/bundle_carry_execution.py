@@ -51,8 +51,14 @@ def bundle(report_path,prepared_path,proof_dir,snapshot,mask,output):
         scene_guard=route_background_depth_guard(arms,profile,report['plan']['resolved_grasp'],
             ROOT/'config/home_assistant/official_sources/so101_new_calib.urdf',
             ROOT/'ros2_ws/src/so101_description/meshes',program))
+    if 'lift_reference_basis' in report:
+        model.update(lift_reference_basis=report['lift_reference_basis'], calibration_revision=report['calibration_revision'])
     if report.get('start_revalidation') is not None:
         model['start_revalidation']=report['start_revalidation']
+    if prepared.get('label'):
+        model['target_label'] = prepared['label']
+        if prepared['observations'][index]['label'] != model['target_label']:
+            raise ValueError('selected target label differs from requested label')
     md=json.loads((snapshot/'metadata.json').read_text());intr=md['aligned_depth_intrinsics']
     sweep=np.zeros((intr['height'],intr['width']),np.uint8);optical=np.linalg.inv(np.asarray(profile['base_from_optical']))
     def draw(points):

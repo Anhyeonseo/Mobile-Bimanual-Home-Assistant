@@ -102,7 +102,9 @@ def grounding_observations(snapshot, detection_file, meta, depth, plane, source,
         observations.append(dict(capture_id=snapshot.name, captured_at_utc=meta['captured_at_utc'],
                                  frame_id=meta['coordinate_frame'], source_sha256=source,
                                  box_xyxy=detection['box_xyxy'], label=detection['label'],
+                                 detection_score=detection.get('score'),
                                  status=geometry.status, failure=geometry.failure, reason=geometry.reason,
+                                 mask_pixels=int(mask.sum()), depth_point_count=geometry.point_count,
                                  center_xyz_m=geometry.center_xyz_m, mask_sha256=seg['sha256'],
                                  clock_domain=meta['color_frame']['timestamp_domain'].split('.')[-1], calibration_id='unmeasured',
                                  support_height_m=geometry.support_height_m, valid_depth_fraction=geometry.valid_depth_fraction))
@@ -141,10 +143,12 @@ def capture_scene_boxes(scene, review):
 def replay(snapshot, detections, label, side=None, *, robot_report=None, scene_boxes=None,
            grasp_run=None, perception_run=None, surface_variants=False, height_only=False, above_support_m=0., previous_preset=None,
            tabletop_calibration=False, candidate_source='graspnet-first', scene_preview=False, near_field=False,
-           left_pad_record=None, prepare_carry=False, trial_contact_offset_m=0., nominal_jaw=False):
+           left_pad_record=None, prepare_carry=False, trial_contact_offset_m=0., nominal_jaw=False, camera_mode=None, grasp_inference=None, grasp_checkpoint=None, grasp_audit=True):
+    if candidate_source == 'so101' and grasp_run:
+        raise ValueError('so101 requires saved detections, not precomputed grasp exports')
     if trial_contact_offset_m and not prepare_carry:
         raise ValueError('trial contact offset requires capture-bound carry preparation')
-    if candidate_source not in ('graspnet-first', 'graspnet', 'flat-rule') or (surface_variants and candidate_source != 'flat-rule'):
+    if candidate_source not in ('graspnet-first', 'graspnet', 'flat-rule', 'so101') or (surface_variants and candidate_source != 'flat-rule'):
         raise ValueError('surface variants require the explicit flat-rule comparison')
     if height_only and (robot_report is None or scene_boxes is not None):
         raise ValueError('height-only replay requires the capture-time robot report and no arm scene')
@@ -164,11 +168,19 @@ def replay(snapshot, detections, label, side=None, *, robot_report=None, scene_b
     if near_field:
         profile = near_depth_profile(profile, read(CONFIG/'camera_device.observed.json'),
                                      read(CONFIG/'camera_device.near.observed.json'))
+    if camera_mode is not None:
+        if near_field:
+            raise ValueError('choose camera_mode or near_field')
+        from home_robot_tasks.camera_evidence import load_capture_profile
+        profile, camera_reference = load_capture_profile(ROOT, camera_mode)
     source = hashes(snapshot)
     meta, depth, scene, plane = load_scene(snapshot)
     if near_field:
         from home_robot_tasks.camera_evidence import from_metadata, match_observed_identity
         match_observed_identity(from_metadata(meta), read(CONFIG/'camera_device.near.observed.json'))
+    if camera_mode is not None:
+        from home_robot_tasks.camera_evidence import from_metadata, match_observed_identity
+        match_observed_identity(from_metadata(meta), camera_reference)
     support_planes = {}
     if grasp_run:
         observations = yeoeun_grasp_export.original_observations(perception_run, snapshot.name)
@@ -270,9 +282,15 @@ def replay(snapshot, detections, label, side=None, *, robot_report=None, scene_b
                                                for c in group['refined_grasps']])
         intr = meta['aligned_depth_intrinsics']
         section_points = clouds.get(index, np.empty((0, 3)))
-        if source_name == 'graspnet':
+        if source_name == 'so101':
+            from home_perception.grasp.so101 import candidates as so101_candidates
+            group = so101_candidates(section_points, plane, (jaw.gaps[0], jaw.gaps[-1]))
+        elif source_name == 'graspnet':
             group = graspnet.candidates(depth, intr, masks, index, scene, plane, selected['support_height_m'],
-                                        (jaw.gaps[0], jaw.gaps[-1]), section_points=section_points)
+                                        (jaw.gaps[0], jaw.gaps[-1]), section_points=section_points,
+                                        **({"audit_enabled": False} if not grasp_audit else {}),
+                                        **({"inference": grasp_inference} if grasp_inference is not None else {}),
+                                        **({"checkpoint": grasp_checkpoint} if grasp_checkpoint is not None else {}))
         else:
             group = flat_candidates(section_points, scene, plane, surface_variants=surface_variants)
         return dict(group, mask_sha256=selected['mask_sha256'])
@@ -336,8 +354,8 @@ def main():
     evidence.add_argument('--detections', type=Path, help='hash-bound Grounding DINO + SAM detections.json')
     evidence.add_argument('--grasp-run', type=Path, help='original Yeoeun tabletop grasp export directory')
     parser.add_argument('--perception-run', type=Path, help='original perception export used by --grasp-run')
-    parser.add_argument('--candidate-source', choices=['graspnet-first', 'graspnet', 'flat-rule'], default='graspnet-first',
-                        help='try network poses before the flat-object rule, or compare either method alone')
+    parser.add_argument('--candidate-source', choices=['graspnet-first', 'graspnet', 'flat-rule', 'so101'], default='graspnet-first',
+                        help='network plus flat rule, either baseline alone, or network-free SO101 geometry')
     parser.add_argument('--surface-variants', action='store_true', help='try filtered surface-height poses after the original rule')
     parser.add_argument('--label', required=True)
     parser.add_argument('--screen-side', choices=['left','right'])

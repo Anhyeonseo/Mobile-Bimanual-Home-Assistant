@@ -27,7 +27,7 @@ from so101_arm_bridge.backend_lease import acquire_backend_lease
 from so101_arm_bridge.serial_port import open_exclusive_serial
 from so101_arm_bridge.stream_transport_v2 import StreamValidationTransportV2
 from so101_arm_bridge.device_inventory import collect_inventory
-from so101_arm_bridge.unified_commissioning import CommissionClient,FIRMWARE
+from so101_arm_bridge.unified_commissioning import CommissionClient,FIRMWARE,pick_board_scale
 from so101_arm_bridge.mobile_inspection import inspect_mobile
 from so101_arm_bridge.lift_wire import LiftCommand,LiftStatus
 
@@ -197,19 +197,23 @@ def check_hold_stop(transport,*,baseline,supported_empty,bottom_confirmed,report
             except Exception as error:result['release_error']=str(error)
     return result
 
-def release_boot_supported(transport,*,baseline,supported_empty,report=None):
+def release_boot_supported(transport,*,baseline,supported_empty,report=None,pick_board=None):
     if supported_empty is not True or baseline is None:
         raise ValueError('current support, empty grippers and calibration baseline required')
     result={} if report is None else report
     hello=transport.enter_binary_mode()
     result.update(status='BOOT_RELEASE_PREFLIGHT',controller=asdict(hello),
         reset_commands=0,nonzero_mobile_velocity_commands=0,automatic_retry=False)
-    if hello.firmware_version!=FIRMWARE or hello.stop_latched or hello.joint_count!=12:
+    expected=FIRMWARE if pick_board is None else pick_board[0]
+    if hello.firmware_version!=expected or hello.protocol_version!=2 or hello.stop_latched or hello.joint_count!=12:
         raise ValueError('exact fresh unified firmware required')
     for key in ('left_calibration_hash','right_calibration_hash'):
         if getattr(hello,key)!=baseline['hello'][key]:raise ValueError('arm calibration hash changed')
     client=CommissionClient(transport);initial=client.query()
     if initial.flags or initial.reason:raise ValueError('unconfigured clean boot required')
+    if pick_board is not None:
+        pick_board_scale(*pick_board)
+        if initial.profile_crc32!=pick_board[1]:raise ValueError('pick controller profile changed before release')
     before=collect_inventory(transport);result['inventory_before']=before
     compare_calibration(baseline['inventory'],before,allow_mobile_mode_change=True,configuration_only=True)
     result['release_attempted']=True
@@ -258,7 +262,9 @@ def compare_calibration(before,after,*,allow_mobile_mode_change=False,powered_mo
         stationary_report=(0<=speed<=65535 and (speed&0x7fff)<=50 and moving in (0,1)) if wheel_pending else speed==0 and moving==0
         if (d['command']['torque_enabled_raw']!=expected_torque or not stationary_report or
             d['feedback']['lock_raw']!=1):
-            raise ValueError(f'expected locked, stopped, torque {expected_torque}: {key}')
+            actual=d['command']['torque_enabled_raw'];lock=d['feedback']['lock_raw']
+            raise ValueError(f'expected locked, stopped, torque {expected_torque}: {key}; '
+                             f'actual torque={actual}, lock={lock}, speed={speed}, moving={moving}')
         if powered_mobile and expected_torque and d['command']['goal_speed_raw']!=0:
             raise ValueError(f'nonzero mobile goal: {key}')
 
@@ -372,7 +378,10 @@ def check_zero_power(transport,*,baseline,supported_empty,seconds=3,report=None)
         result.get('power_check_passed') and result.get('released_confirmed')) else 'FAILED'
     return result
 
-def inspect(transport,*,prepare=False,supported=False,empty=False,baseline=None,report=None):
+def inspect(transport,*,prepare=False,supported=False,empty=False,baseline=None,report=None,
+            pick_board=None,release_retained=False):
+    if type(release_retained) is not bool or (release_retained and not (prepare and supported is True and empty is True)):
+        raise ValueError('supported empty preparation required for retained torque release')
     if prepare and (supported is not True or empty is not True):
         raise ValueError('current support and empty-gripper confirmation required')
     if prepare and baseline is None:raise ValueError('original calibration baseline required')
@@ -380,24 +389,40 @@ def inspect(transport,*,prepare=False,supported=False,empty=False,baseline=None,
     hello=transport.enter_binary_mode()
     result.update(controller=asdict(hello),checked_at_utc=datetime.now(timezone.utc).isoformat(),
                   motion_commands=0,torque_commands=0,reset_requested=False,physical_test_ready=False)
-    if hello.firmware_version!=FIRMWARE or hello.protocol_version!=2 or hello.joint_count!=12 or hello.stop_latched:
+    expected = FIRMWARE if pick_board is None else pick_board[0]
+    if hello.firmware_version!=expected or hello.protocol_version!=2 or hello.joint_count!=12 or hello.stop_latched:
         raise ValueError('exact unified controller identity and clear stop required')
     client=CommissionClient(transport)
     result['commission_before']=asdict(client.query())
+    if pick_board is not None:
+        pick_board_scale(*pick_board)
+        if result['commission_before']['profile_crc32'] != pick_board[1]:
+            raise ValueError('pick controller profile changed before preparation')
     result['inventory_before']=collect_inventory(transport)
     if not result['inventory_before']['all_snapshots_complete']:raise ValueError('incomplete device inventory')
     if baseline is not None:
         for key in ('left_calibration_hash','right_calibration_hash'):
             if result['controller'][key]!=baseline['hello'][key]:raise ValueError('arm model calibration hash changed')
-        compare_calibration(baseline['inventory'],result['inventory_before'],allow_pending_wheel_reports=True,allow_pending_lift_reports=True)
-        observation=ZeroPowerObservation(result['inventory_before'],powered=False)
-        result['unpowered_observations']=[result['inventory_before']]
-        observation.observe(result['inventory_before']);started=time.monotonic()
-        while not observation.proven:
-            if time.monotonic()-started>2:raise TimeoutError('torque-OFF stationarity window unavailable')
-            time.sleep(.05);sample=collect_inventory(transport)
-            result['unpowered_observations'].append(sample);observation.observe(sample)
-        result['unpowered_stationarity']=observation.report()
+        retained=any(d['command']['torque_enabled_raw']==1 for d in result['inventory_before']['devices'])
+        if release_retained and retained:
+            # A request-specific operator confirmation authorizes this one
+            # release. Firmware verifies rest before writes; no reset/retry.
+            result['startup_release']={}
+            release_boot_supported(transport,baseline=baseline,supported_empty=True,
+                                   report=result['startup_release'],pick_board=pick_board)
+            result['torque_commands']=1
+            result['unpowered_observations']=result['startup_release']['unpowered_observations']
+            result['unpowered_stationarity']=result['startup_release']['unpowered_stationarity']
+        else:
+            compare_calibration(baseline['inventory'],result['inventory_before'],allow_pending_wheel_reports=True,allow_pending_lift_reports=True)
+            observation=ZeroPowerObservation(result['inventory_before'],powered=False)
+            result['unpowered_observations']=[result['inventory_before']]
+            observation.observe(result['inventory_before']);started=time.monotonic()
+            while not observation.proven:
+                if time.monotonic()-started>2:raise TimeoutError('torque-OFF stationarity window unavailable')
+                time.sleep(.05);sample=collect_inventory(transport)
+                result['unpowered_observations'].append(sample);observation.observe(sample)
+            result['unpowered_stationarity']=observation.report()
         result['baseline_calibration_preserved']=True
     if prepare:
         result['commission_after']=asdict(client.prepare(supported=supported,empty_grippers=empty))
@@ -407,6 +432,8 @@ def inspect(transport,*,prepare=False,supported=False,empty=False,baseline=None,
         result['calibration_preserved']=True
     status=client.query()
     result['commission_final']=asdict(status)
+    if pick_board is not None and status.profile_crc32 != pick_board[1]:
+        raise ValueError('pick controller profile changed during preparation')
     if status.flags&1:
         result['mobile']=inspect_mobile(transport)
         result['lift']=asdict(LiftStatus.decode(transport.exchange_mobile(LiftCommand(4,1,1,0,status.boot_id).encode())))

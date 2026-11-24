@@ -148,7 +148,7 @@ def annotate(rgb, report, masks=None):
 
 
 class GroundingRGBD:
-    def __init__(self, device="auto", box_threshold=0.30, text_threshold=0.25, use_sam=False, *, cache_dir=None):
+    def __init__(self, device="auto", box_threshold=0.30, text_threshold=0.25, use_sam=False, *, cache_dir=None, local_files_only=False):
         import torch
         import transformers
         from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
@@ -160,10 +160,19 @@ class GroundingRGBD:
         self.use_sam, self.segmenter = use_sam, None
         self.versions = {"torch": torch.__version__, "transformers": transformers.__version__}
         options = {"revision": MODEL_REVISION, "cache_dir": str(cache_dir or ROOT / "artifacts/models/huggingface")}
+        model_source = MODEL_ID
+        if local_files_only:
+            options["local_files_only"] = True
+            # Pass the pinned snapshot directory, not a Hub ID. Some processor
+            # discovery paths otherwise issue HEAD requests despite this flag.
+            local = Path(options["cache_dir"])/('models--'+MODEL_ID.replace('/','--'))/'snapshots'/MODEL_REVISION
+            if not local.is_dir():
+                raise FileNotFoundError('installed pinned model snapshot required: '+str(local))
+            model_source = str(local)
         print(f"Loading {MODEL_ID} on {self.device} ...", flush=True)
-        self.processor = AutoProcessor.from_pretrained(MODEL_ID, **options)
+        self.processor = AutoProcessor.from_pretrained(model_source, **options)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
-            MODEL_ID, use_safetensors=True, disable_custom_kernels=True, **options
+            model_source, use_safetensors=True, disable_custom_kernels=True, **options
         ).to(self.device).eval()
 
     def detect(self, rgb, prompt):

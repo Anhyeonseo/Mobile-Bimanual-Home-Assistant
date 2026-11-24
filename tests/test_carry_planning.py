@@ -112,6 +112,27 @@ def test_complete_route_selection_tries_other_grasp_after_carry_failure(arm):
     assert plan.failures[0]['stage']=='carry'
 
 
+def test_default_first_route_stop_still_checks_close_lift_and_carry(arm):
+    backend=FakePlanner()
+    plan=plan_pick_carry(arm,backend,arm.anchor,[candidate(arm),candidate(arm,'two')],
+                         scene_id='scene-1')
+    assert plan.status=='OFFLINE_ROUTE_FOUND'
+    assert plan.selection['policy']=='first_complete_route'
+    assert {name for name,_,_ in backend.calls}=={'one'}
+    assert [s.label for s in plan.stages]==['open_geometry','pregrasp','approach','close_geometry','lift','carry']
+    assert not plan.motion_authorized
+
+
+def test_failed_route_advances_but_success_does_not_preplan_backups(arm):
+    backend = FakePlanner(blocked=('one', 'carry'))
+    plan = plan_pick_carry(arm, backend, arm.anchor,
+        [candidate(arm, name) for name in ('one', 'two', 'three')], scene_id='scene-1')
+    assert plan.status == 'OFFLINE_ROUTE_FOUND' and plan.candidate_id == 'two'
+    assert {name for name, _, _ in backend.calls} == {'one', 'two'}
+    assert plan.selection['policy'] == 'first_complete_route'
+    assert any(f['candidate'] == 'one' for f in plan.failures)
+
+
 def test_partial_approach_never_attaches_or_lifts(arm):
     backend=FakePlanner(blocked=('one','approach'))
     result=plan_pick_carry(arm,backend,arm.anchor,[candidate(arm)],scene_id='scene-1')
@@ -133,7 +154,7 @@ def test_balance_precedes_carry_comfort_but_never_overrides_failed_path(arm,monk
         return [SimpleNamespace(model_rad=q,cost=10. if near else 0.)]
     monkeypatch.setattr(carry_planning,'carry_goals',goals)
     backend=FakePlanner(blocked=('center','approach') if center_blocked else None)
-    result=plan_pick_carry(arm,backend,arm.anchor,[edge,center],scene_id='scene-1')
+    result=plan_pick_carry(arm,backend,arm.anchor,[edge,center],scene_id='scene-1',stop_after_first=False)
     assert result.status=='OFFLINE_ROUTE_FOUND'
     assert result.candidate_id==('edge' if center_blocked else 'center')
     assert result.selection['policy']=='near_best_feasible_balance_then_grasp_and_carry_cost'
@@ -397,7 +418,7 @@ def test_candidate_evaluation_reused_but_contact_and_next_plan_are_fresh(arm, mo
     pose[0, 3] += .001  # FakePlanner reaches the anchor, leaving an IK residual.
     grasp = replace(grasp, base_from_grasp_tcp=pose)
     for run in range(2):
-        plan = plan_pick_carry(arm, FakePlanner(), arm.anchor, [grasp], scene_id='scene-1')
+        plan = plan_pick_carry(arm, FakePlanner(), arm.anchor, [grasp], scene_id='scene-1',stop_after_first=False)
         assert plan.status == 'OFFLINE_ROUTE_FOUND'
         assert len(plan.selection['alternatives']) > 1
         # Ranking and each carry alternative share one evaluation per pose.
@@ -407,3 +428,21 @@ def test_candidate_evaluation_reused_but_contact_and_next_plan_are_fresh(arm, mo
         assert actual is not nominal and actual.candidate_id == nominal.candidate_id
         assert not np.array_equal(actual.tcp_from_object, nominal.tcp_from_object)
     assert evaluated[1] is not evaluated[3]
+
+
+def test_historical_calibration_range_is_advisory_and_full_route_is_still_checked(arm):
+    planner=FakePlanner()
+    result=plan_pick_carry(arm,planner,arm.anchor,[candidate(arm)],scene_id='scene-1',top_calibrated=True)
+    assert result.status=='OFFLINE_ROUTE_FOUND'
+    review=result.carry_quality['top_calibration']
+    assert review['outside_recorded_stages'] and review['hard_limit'] is False
+    assert not result.motion_authorized and not result.physical_task_completed
+    assert [s.label for s in result.stages]==['open_geometry','pregrasp','approach','close_geometry','lift','carry']
+
+
+@pytest.mark.parametrize('stage',['pregrasp','approach','lift','carry'])
+def test_posture_advisory_never_overrides_a_failed_motion_stage(arm,stage):
+    result=plan_pick_carry(arm,FakePlanner(blocked=('one',stage)),arm.anchor,[candidate(arm)],
+                           scene_id='scene-1',top_calibrated=True)
+    assert result.status=='NO_COMPLETE_ROUTE' and not result.motion_authorized
+    assert any(f['stage']==stage for f in result.failures)

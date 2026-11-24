@@ -77,3 +77,29 @@ def load_bundle(folder,*,for_execution=False):
     depth=np.asarray(Image.open(folder/'depth_aligned.png'),dtype=np.uint16).astype(float)*md['depth_scale_m']
     if mask.shape!=depth.shape or sweep.shape!=depth.shape or color.shape[:2]!=depth.shape or not mask.any():raise ValueError('bundle image alignment mismatch')
     return program,model,proof,(color,depth),mask,sweep,md
+
+
+def validate_request_binding(checked, *, prepared, snapshot, profile, session_id, prompt, candidate_source):
+    """File/provenance validation in the compute worker, never the serial service loop."""
+    program=checked[0]
+    prepared=json.loads(Path(prepared).read_text())
+    capture=json.loads((Path(snapshot)/'robot_capture.json').read_text())
+    capture_session=capture['session_id']
+    record=prepared.get('start_revalidation',{})
+    if record.get('kind')=='resumed_bottom_observation_measured_top':
+        from .pick_lift_transition import validate_revalidation
+        arrival=validate_revalidation(record,profile,prepared['capture_id'],prepared['source_sha256'])
+        capture_session=arrival['session_id']
+    if (program.capture_id != Path(snapshot).name
+            or program.source_sha256 != prepared['source_sha256']
+            or capture_session != session_id):
+        raise ValueError('current request/capture/controller binding mismatch')
+    if not prompt or checked[1].get('target_label') != prompt or prepared.get('label') != prompt:
+        raise ValueError('requested target differs from planned target')
+    if candidate_source == 'graspnet':
+        from home_perception.grasp.graspnet_assets import BASELINE_REVISION, CHECKPOINT_SHA256
+        group = prepared.get('group', {})
+        if (program.candidate_source != 'graspnet' or prepared.get('candidate_source') != 'graspnet'
+                or group.get('baseline_revision') != BASELINE_REVISION
+                or group.get('checkpoint_sha256') != CHECKPOINT_SHA256):
+            raise ValueError('실행 경로의 GraspNet 후보 또는 모델 버전을 확인할 수 없습니다.')
