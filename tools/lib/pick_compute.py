@@ -84,6 +84,7 @@ class PickCompute:
             matches = [result['observations'][index]]
         surface_error = None
         surface_height = None
+        object_base = None
         if result['status'] == 'CAMERA_CANDIDATES_ONLY' and len(matches) == 1:
             from home_robot_tasks.camera_evidence import load_capture_profile
             from home_robot_tasks.pick_calibration import check_top_surface
@@ -93,18 +94,19 @@ class PickCompute:
             if xyz is None:
                 surface_error = '대상 물체에 대응하는 3차원 위치를 확인하지 못했습니다.'
             else:
+                object_base = optical_to_base(profile['base_from_optical'], xyz)
                 try:
-                    z = check_top_surface(result['support_plane'], optical_to_base(profile['base_from_optical'], xyz), profile)
+                    z = check_top_surface(result['support_plane'], object_base, profile)
                     surface_height = dict(base_z_m=z, ground_z_m=profile['ground_z_m'],
                         height_above_model_floor_m=z-profile['ground_z_m'],
                         floor_reference='calibrated_model_not_fresh_floor_observation',
                         calibration_id=profile['calibration_id'])
                 except ValueError as exc:
                     surface_error = str(exc)
-        result.update(surface_height=surface_height, surface_error=surface_error)
+        result.update(surface_height=surface_height, surface_error=surface_error, object_base_xyz_m=object_base)
         Path(output).write_text(json.dumps(result, default=serial, indent=2, allow_nan=False))
         return dict(status=result['status'], reason=result.get('reason'), surface_error=surface_error,
-                    surface_height=surface_height,
+                    surface_height=surface_height, object_base_xyz_m=object_base,
                     count=len(result.get('group', {}).get('refined_grasps', [])),
                     depth_fraction=matches[0].get('valid_depth_fraction') if len(matches)==1 else None)
 

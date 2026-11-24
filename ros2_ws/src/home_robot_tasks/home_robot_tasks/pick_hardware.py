@@ -254,7 +254,7 @@ class UnifiedPickHardware:
             inputs.add_frame(record,images)
 
     def tick(self):
-        if not self.prepared or self.stopped or self.rising:
+        if not self.prepared or self.stopped or self.rising or getattr(self,'base_moving',False):
             return
         # In-memory only: file/UI I/O belongs after STOP. Record both idle gaps
         # and transaction time so host stalls differ from slow serial replies.
@@ -416,6 +416,82 @@ class UnifiedPickHardware:
                 except Exception as error:ctx.note('상승 관측 기록 표시 실패: '+str(error))
         while len(self.history)<3:ctx.pause(.05)
         ctx.note('리프트 상승·정지 확인 완료 · 하단 관측 좌표 유지',actual_lift_m=height)
+
+    def lateral_shift(self, ctx, plan):
+        """Empty-hand timed strafe, then whole-system STOP; this owner then retires.
+
+        Same order as the supervised S4 navigation trial. Transport mode makes
+        the session wheel-only, so arm use needs a fresh controller reset.
+        """
+        from .base_alignment import run_lateral_shift
+        from .platform_preparation import arm_observed_stationary, enter_base_transport
+        if (not self.prepared or self.stopped or self.session is not None or self.inputs is not None
+                or not self.guard.supported_top):
+            raise ValueError('empty supported top hold required before base alignment')
+        ctx.service()
+        self.guard.require_fresh(time.monotonic())
+        path=ctx.folder/'base-motion.jsonl'
+        def log(event,**data):
+            reply=data.get('reply')
+            if reply is not None:data['reply']=asdict(reply)
+            with path.open('a') as stream:
+                stream.write(json.dumps(dict(event=event,host_s=time.monotonic(),**data))+'\n')
+        def observe(allow_stop=False):
+            state=self.transport.heartbeat()
+            if state.stop_latched and not allow_stop:
+                raise RuntimeError('controller STOP latched during base alignment')
+            if self.evidence.transport_only:
+                return None  # firmware keeps the resident hold; arm evidence is wheel-only now
+            return self.observe_preparation()
+        self.base_moving=True
+        self.execution_phase='base_alignment'
+        try:
+            log('plan',plan=plan)
+            result=run_lateral_shift(plan,mobile=self.mobile,observe=observe,
+                enter_transport=lambda:enter_base_transport(observe,self.evidence),
+                admit=lambda:arm_observed_stationary(observe,self.mobile,transport_only=True),
+                check=ctx.check,log=log)
+            log('settled',**result)
+        finally:
+            # Always end with STOP, also after success.
+            try:
+                if self.evidence.transport_only:
+                    self._stop_after_transport(observe,log)
+                else:
+                    self.abort()
+            finally:
+                self.base_moving=False
+                if path.is_file():ctx.artifact(path,'베이스 정렬 명령·응답 기록')
+        ctx.note('바퀴 영속도 유지와 정지 확인 완료',base_motion=result)
+        return result
+
+    def _stop_after_transport(self, observe, log):
+        """Transport-scope STOP proof is ``base_confirmed`` (scope 1), as in the navigation trial."""
+        if not hasattr(self,'transport_before_stop'):
+            try:self.transport_before_stop=self.transport.timing_diagnostics()
+            except Exception as error:self.transport_before_stop={'error':str(error)}
+        self.stopped=True
+        error=None
+        try:self.stop.request()
+        except Exception as exc:error=exc
+        deadline=time.monotonic()+4
+        last=None
+        try:
+            while time.monotonic()<deadline:
+                try:observe(allow_stop=True)
+                except Exception as exc:last=str(exc)
+                try:status,_=self.stop.status()
+                except Exception as exc:
+                    last=str(exc);time.sleep(.03);continue
+                if status.base_confirmed:
+                    self.stop_confirmed=True
+                    log('stop_confirmed',scope=status.scope,state=status.state,flags=status.flags)
+                    return
+                time.sleep(.03)
+            raise RuntimeError('base stop not confirmed'+(': '+str(error) if error else '')
+                               +(' · last observation error: '+last if last else ''))
+        finally:
+            self._record_controller_diagnostics()
 
     def execute(self, ctx, checked):
         from .unified_carry_inputs import UnifiedObservationReader

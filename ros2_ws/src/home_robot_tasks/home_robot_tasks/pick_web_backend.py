@@ -36,9 +36,18 @@ class WebPickBackend(PipelineBackend):
     def ready(self):
         if self.after_motion and self.can_prepare_next_test():
             return False,'동작 완료 · 물체를 치운 뒤 «다음 시험 준비»를 눌러 주세요. 정지는 필요 없습니다.'
+        if getattr(self,'controller_reset_required',False):
+            return False,('베이스 정렬 후 제어기가 정지 상태입니다. 받침을 유지한 채 제어기(SWD)를 리셋하고 '
+                          '«픽 스테이션 초기화»를 누른 뒤 «최상단 · 카메라 검사»로 위치를 확인하세요.')
         return super().ready()
 
     def reset(self, ctx):
+        if getattr(self,'controller_reset_required',False) and self.hardware is None:
+            # The alignment owner already retired after a confirmed STOP. The
+            # operator reset the controller; models and the worker stay loaded.
+            self.controller_reset_required=False
+            ctx.note('베이스 정렬 후 제어기 리셋 확인 · 다음 요청은 새 제어기 준비부터 시작합니다.')
+            return
         if self.hardware is not None and not getattr(ctx,'supported_empty',False):
             raise Rejected('물체 제거와 양팔·리프트 받침 확인이 필요합니다.')
         if self.can_prepare_next_test():
@@ -68,6 +77,13 @@ class WebPickBackend(PipelineBackend):
         if operation == 'top-inspect':
             if any(confirmations) or self.hardware is not None:
                 raise Rejected('장치가 자세를 유지하는 중에는 독립 촬영으로 바꿀 수 없습니다.')
+        elif operation == 'top-align':
+            if confirmations != (False, True):
+                raise Rejected('리프트 최상단, 빈 양팔·리프트 받침과 베이스 좌우 이동 공간을 확인해 주세요.')
+            if self.hardware is not None:
+                raise Rejected('팔 자세 유지 중에는 베이스를 움직이지 않습니다. 다음 시험 준비나 초기화 후 다시 요청하세요.')
+            if not self.options.get('top_baseline') or not Path(self.options['top_baseline']).is_file():
+                raise Rejected('이 로봇의 제어기 보정 기준 파일을 열 수 없습니다.')
         elif operation in ('top-pick', 'bottom-pick', 'observe-rise-pick'):
             top = operation == 'top-pick'
             if confirmations != (not top, top):
@@ -111,7 +127,7 @@ class WebPickBackend(PipelineBackend):
         if self.worker is None:
             self._prepare_worker(ctx)
         operation = request['operation']
-        if operation == 'top-inspect':
+        if operation in ('top-inspect', 'top-align'):
             return dict(request, **self._camera_capture(ctx, 'wide'))
         if operation not in ('top-pick', 'bottom-pick', 'observe-rise-pick'):
             raise Rejected('지원하지 않는 동작입니다.')
@@ -132,7 +148,7 @@ class WebPickBackend(PipelineBackend):
         return super().capture(ctx, dict(request, camera_mode=self.hardware.options['camera_mode']))
 
     def detect(self, ctx, value):
-        if value['operation'] == 'top-inspect' or value.get('preview_only'):
+        if value['operation'] in ('top-inspect', 'top-align') or value.get('preview_only'):
             return self._detect_camera(ctx, value)
         return super().detect(ctx, value)
 
@@ -162,16 +178,78 @@ class WebPickBackend(PipelineBackend):
                      '보정 파일의 바닥 기준', surface_height=height)
         return result
 
+    def _alignment(self, ctx, result):
+        from .base_alignment import describe, load_alignment_profile, plan_lateral_alignment
+        if result.get('object_base_xyz_m') is None:
+            raise Rejected('요청한 물체 하나의 3차원 위치를 확인하지 못해 정렬 이동량을 계산할 수 없습니다.')
+        plan = plan_lateral_alignment(result['object_base_xyz_m'], load_alignment_profile())
+        ctx.note('왼팔 기준 정렬: '+describe(plan), alignment=plan)
+        return plan
+
     def candidates(self, ctx, value):
-        if value['operation'] != 'top-inspect' and not value.get('preview_only'):
+        if value['operation'] not in ('top-inspect', 'top-align') and not value.get('preview_only'):
             return super().candidates(ctx, value)
         mode, result = self._inspect(ctx, value)
+        if value['operation'] == 'top-align':
+            try:
+                plan = self._alignment(ctx, result)
+            except ValueError as exc:
+                raise Rejected(str(exc)) from exc
+            return dict(value, camera_mode=mode, alignment=plan)
         if value['operation'] == 'top-inspect':
+            alignment = None
+            if result.get('object_base_xyz_m') is not None:
+                try:
+                    alignment = self._alignment(ctx, result)
+                except ValueError as exc:
+                    ctx.note('왼팔 기준 정렬 계산 불가: '+str(exc))
             return dict(status='OBSERVED_ONLY', physical_success=False, camera_mode=mode,
-                        candidates=result['count'], reason=f"파지 후보 {result['count']}개를 찾았습니다.")
+                        candidates=result['count'], alignment=alignment,
+                        reason=f"파지 후보 {result['count']}개를 찾았습니다.")
         if result['surface_error']:
             raise Rejected(result['surface_error'])
         return dict(value, camera_mode=mode)
+
+    def align(self, ctx, value):
+        """Camera-planned lateral shift; one controller owner, ended by STOP and retired."""
+        from .base_alignment import describe
+        if value.get('operation') != 'top-align':
+            raise Rejected('베이스 정렬 작업이 아닙니다.')
+        plan = value['alignment']
+        if plan['within_tolerance']:
+            return dict(status='UNVERIFIED', physical_success=False, alignment=plan,
+                        reason='물체가 이미 왼팔 정렬 범위 안입니다. 베이스는 움직이지 않았습니다. '
+                               '바로 «최상단 · 실물 파지»를 요청하세요.')
+        if self.hardware is not None:
+            raise Rejected('팔 자세 유지 중에는 베이스를 움직이지 않습니다.')
+        ctx.progress('베이스 정렬용 제어기 준비 · 리프트 이동 없음')
+        options = dict(self.options, execute=True, supported_empty_top=True, supported_empty_bottom=False,
+                       camera_mode='near', baseline=self.options['top_baseline'], rise_after_observation=False,
+                       fixed_base_station=True, single_capture_test=False,
+                       supported_startup_release=value.get('supported_startup_release', False))
+        from .pick_hardware import UnifiedPickHardware
+        self.hardware = (self.hardware_factory or UnifiedPickHardware)(options)
+        try:
+            self.hardware.prepare(ctx)
+        except Exception as error:
+            if getattr(error, 'diagnostics', None):
+                path = ctx.folder/'preparation-failure.json'
+                path.write_text(json.dumps(dict(reason=str(error), diagnostics=error.diagnostics), indent=2, ensure_ascii=False))
+                ctx.artifact(path, '장치 준비 실패 명령·응답')
+            raise
+        ctx.check()
+        ctx.progress(describe(plan))
+        self.after_motion = True  # A failed strafe leaves an unknown base pose.
+        result = self.hardware.lateral_shift(ctx, plan)
+        hardware, self.hardware = self.hardware, None
+        hardware.close()
+        self.after_motion = False
+        self.controller_reset_required = True
+        side = '왼쪽' if plan['direction'] == 'left' else '오른쪽'
+        return dict(status='UNVERIFIED', physical_success=False, alignment=plan, base_motion=result,
+                    reason=f'베이스를 {side}으로 약 {abs(plan["shift_m"])*100:.1f} cm 이동하고 정지를 확인했습니다. '
+                           '실제 이동량은 다음 카메라 검사에서 확인합니다. 제어기 리셋 → «픽 스테이션 초기화» → '
+                           '«최상단 · 카메라 검사» → «최상단 · 실물 파지» 순서로 진행하세요.')
 
     def prepare_pick(self, ctx, value):
         if not value.get('preview_only'):

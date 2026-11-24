@@ -273,6 +273,8 @@ class PickStation:
                 stages=stages[:-1]+(('VERIFYING','동작 완료 확인','verify'),)
             if request.get('operation')=='resume-top-pick':
                 stages=(('PREPARING_PICK','이전 관측·현재 자세 연결','prepare_resume'),)+STAGES[3:]
+            if request.get('operation')=='top-align':
+                stages=STAGES[:3]+(('ALIGNING','베이스 좌우 정렬','align'),)
         with self.lock:
             self.active = True
             self.assets.clear()
