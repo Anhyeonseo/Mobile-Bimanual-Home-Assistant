@@ -8,13 +8,17 @@ from .stationary_pick_adapter import StationaryPickAdapter
 from .bimanual_stream_adapter import (
     ResidentBimanualStreamAdapter, BimanualStreamContractError, TimedJointPoint,
 )
-from .unified_commissioning import CommissionClient, FIRMWARE
+from .unified_commissioning import CommissionClient, FIRMWARE, pick_board_scale
 
 
 class UnifiedArmAdapter(StationaryPickAdapter):
     firmware_version = FIRMWARE
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, pick_board=None, **kwargs):
+        self._pick_board = pick_board
+        if pick_board is not None:
+            pick_board_scale(*pick_board)
+            self.firmware_version = pick_board[0]
         super().__init__(*args, **kwargs)
         self._commission = CommissionClient(self._transport)
         self._commission_identity = None
@@ -25,6 +29,8 @@ class UnifiedArmAdapter(StationaryPickAdapter):
         if (not status.flags & 1 or status.flags & 8 or status.reason or
                 not status.boot_id or (initial and status.flags not in (17,113))):
             raise BimanualStreamContractError('prepared, non-stopped unified board required')
+        if self._pick_board is not None and status.profile_crc32 != self._pick_board[1]:
+            raise BimanualStreamContractError('installed pick board profile changed')
         identity = (status.boot_id, status.profile_crc32)
         if initial:
             self._commission_identity = identity

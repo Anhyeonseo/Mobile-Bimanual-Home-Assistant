@@ -94,3 +94,20 @@ def test_current_pose_hold_uses_last_unpowered_anchor_not_earlier_preview(monkey
     a.start_current_pose_hold('supported-hold')
     assert t.goal_log and all(q==latest for q in t.goal_log)
     assert not a._current_pose_only
+
+
+def test_current_pick_firmware_enforces_bound_profile_before_shadow(monkeypatch):
+    _, t, _ = make_adapter(monkeypatch)
+    board = (0x2492E, 2696088964)
+    original = t.enter_binary_mode
+    def hello():
+        packet = original()
+        packet.firmware_version = board[0]
+        return packet
+    t.enter_binary_mode = hello
+    adapter = UnifiedArmAdapter(t, ROOT/'config/home_assistant/arm_ranges.development.json', pick_board=board)
+    with pytest.raises(BimanualStreamError, match='profile changed'):
+        adapter.prepare()
+    t.profile = board[1]
+    assert adapter.prepare().positions_urad == (0,) * 12
+    assert 'arm' not in t.calls

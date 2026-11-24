@@ -9,6 +9,49 @@ from .mobile_wire import crc32c
 
 FIRMWARE = 0x0002492D
 
+# Bottom-referenced pick sessions only. The 6624e5730336 deployment manifest
+# and CS profile identify the firmware-side lift scale before host conversion.
+# firmware -> (commissioning profile CRC32, lift micrometres per revolution)
+PICK_BOARDS = {0x2492D: (2430209922, 84000), 0x2492E: (2696088964, 87287), 0x2492F: (3399362976, 87287), 0x24930: (3399362976, 87287)}
+
+
+def pick_board_scale(firmware, profile_crc32):
+    if (firmware,profile_crc32)==(0x2492E,3399362976):return 87287
+    board = PICK_BOARDS.get(firmware)
+    if board is None or board[0] != profile_crc32:
+        raise ValueError('unknown pick controller firmware/profile pair')
+    return board[1]
+
+
+def check_pick_calibration(firmware, profile_crc32, profile):
+    scale_um = pick_board_scale(firmware, profile_crc32)
+    if firmware in (0x2492E, 0x2492F, 0x24930):
+        # The installed board was built against this base profile. Near/wide
+        # captures retain its ID separately from their stream-specific ID.
+        if profile.get('base_profile_id', profile['calibration_id']) != 's2-dev-4683680db9f74ce58184eced':
+            raise ValueError(f'{firmware:#x} board and selected lift/camera calibration differ')
+    return scale_um
+
+
+def query_pick_controller(transport, profile):
+    hello = transport.enter_binary_mode()
+    failures = []
+    if hello.firmware_version not in PICK_BOARDS:
+        failures.append(f'지원 펌웨어 필요 (현재 {hello.firmware_version:#x})')
+    if hello.protocol_version != 2:
+        failures.append(f'통신 프로토콜 2 필요 (현재 {hello.protocol_version})')
+    if hello.joint_count != 12:
+        failures.append(f'양팔 12개 관절 필요 (현재 {hello.joint_count})')
+    if hello.stop_latched:
+        failures.append('STOP 잠금 해제 필요 (stop_latched=true)')
+    if failures:
+        raise ValueError('컨트롤러 준비 거절 · '+' / '.join(failures))
+    status = CommissionClient(transport).query()
+    board = (hello.firmware_version, status.profile_crc32)
+    check_pick_calibration(*board, profile)
+    return board, status
+
+
 def request(kind, sequence, ticket=0, *, supported=False):
     if type(kind) is not int or kind not in (1, 2, 3, 4, 5) or type(sequence) is not int or not 0<sequence<2**32:
         raise ValueError('commissioning operation/sequence required')

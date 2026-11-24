@@ -8,13 +8,15 @@
 static uint32_t now,stamp;
 static uint8_t joint;
 static bool active,pending,quiet=true,fail_end,fail_reply,missing;
+static unsigned aborted_reads;
 static uint16_t shoulder=2048,other=2048;
 static UART_HandleTypeDef left,right;
 uint32_t HAL_GetTick(void){return now;}
 bool ServoTransport_ReadReady(UART_HandleTypeDef *u){(void)u;return quiet;}
 uint8_t BimanualTrackingFeedback_Active(void){return active;}
+uint8_t BimanualTrackingFeedback_Pending(void){return pending;}
 uint8_t BimanualTrackingFeedback_CanStart(void){return active&&!pending&&quiet;}
-void BimanualTrackingFeedback_End(void){if(!fail_end){active=false;pending=false;}}
+void BimanualTrackingFeedback_End(void){if(pending)aborted_reads++;if(!fail_end){active=false;pending=false;}}
 HAL_StatusTypeDef BimanualTrackingFeedback_Begin(void){CHECK(!active);active=true;return HAL_OK;}
 HAL_StatusTypeDef BimanualTrackingFeedback_BeginObservation(void){return BimanualTrackingFeedback_Begin();}
 HAL_StatusTypeDef BimanualTrackingFeedback_Start(uint8_t j,uint32_t ms,const uint16_t l[6],const uint16_t r[6],int32_t lp,int32_t rp){
@@ -43,6 +45,22 @@ int main(int argc,char **argv){
  CHECK(advance(2000));BimanualFeedbackSnapshot s;BimanualFeedbackSnapshot_Copy(now,&s);
  CHECK(s.present_mask==4095&&s.completed_pairs>=99);
  for(unsigned i=0;i<12;i++)CHECK(s.sample_age_ms[i]<=60);
+ if(scenario>=11){
+  CHECK(MobileArmObserver_Poll()&&pending);
+  CHECK(MobileArmObserver_PrepareMotion()==MOBILE_ARM_HANDOFF_WAIT);
+  CHECK(MobileArmObserver_PrepareMotion()==MOBILE_ARM_HANDOFF_WAIT&&pending&&!aborted_reads);
+  if(scenario==12){missing=true;CHECK(!advance(2200));CHECK(MobileArmObserver_PrepareMotion()==MOBILE_ARM_HANDOFF_FAULT);CHECK(!aborted_reads);return 0;}
+  now++;CHECK(MobileArmObserver_Poll()&&!pending);CHECK(MobileArmObserver_PrepareMotion()==MOBILE_ARM_HANDOFF_READY);
+  CHECK(!active&&!aborted_reads);MobileArmObserver_Resume();CHECK(advance(2100));
+  /* Exercise repeated transitions at every relative read phase. */
+  for(unsigned i=0;i<60;i++){
+   CHECK(advance(now+i%11+1));MobileArmHandoff h=MobileArmObserver_PrepareMotion();
+   if(h==MOBILE_ARM_HANDOFF_WAIT){now++;CHECK(MobileArmObserver_Poll());h=MobileArmObserver_PrepareMotion();}
+   CHECK(h==MOBILE_ARM_HANDOFF_READY&&!aborted_reads&&!active);
+   MobileArmObserver_Resume();CHECK(advance(now+70));
+  }
+  return 0;
+ }
  if(scenario==0){CHECK(MobileArmObserver_Suspend()&&!active);CHECK(advance(3000));BimanualFeedbackSnapshot_Copy(now,&s);CHECK(s.sample_age_ms[0]>=1000);
   MobileArmObserver_Resume();CHECK(advance(3100));BimanualFeedbackSnapshot_Copy(now,&s);CHECK(s.sample_age_ms[0]<=60);return 0;}
  if(scenario==1){quiet=false;CHECK(!advance(2200));return 0;}

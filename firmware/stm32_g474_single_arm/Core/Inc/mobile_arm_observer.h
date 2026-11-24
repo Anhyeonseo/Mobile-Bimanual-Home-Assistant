@@ -10,5 +10,10 @@ bool MobileArmObserver_Poll(void);
 bool MobileArmObserver_OwnsFeedback(void);
 bool MobileArmObserver_HasStarted(void);
 bool MobileArmObserver_Suspend(void);
+/* Finish the current read without abort/quiet delays before motion ownership.
+ * WAIT must return to the main loop; Poll still consumes the pending reply. */
+typedef enum { MOBILE_ARM_HANDOFF_WAIT, MOBILE_ARM_HANDOFF_READY,
+               MOBILE_ARM_HANDOFF_FAULT } MobileArmHandoff;
+MobileArmHandoff MobileArmObserver_PrepareMotion(void);
 void MobileArmObserver_Resume(void);
 #endif

@@ -22,6 +22,6 @@ def observer(tmp_path_factory,request):
         "-o", str(binary)], check=True)
     return binary
 
-@pytest.mark.parametrize("scenario", range(11))
+@pytest.mark.parametrize("scenario", range(13))
 def test_idle_observation_and_handoff(observer, scenario):
     subprocess.run([str(observer), str(scenario)], check=True)

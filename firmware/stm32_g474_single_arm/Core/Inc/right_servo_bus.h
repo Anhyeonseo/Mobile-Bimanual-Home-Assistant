@@ -191,6 +191,7 @@ void RightServoBus_Init(UART_HandleTypeDef *uart);
 const RightServoDiscoverySnapshot *RightServoBus_Discover(void);
 /* Fixed register blocks only; no arbitrary read or write access. */
 RightServoReadStatus RightServoBus_ReadInventoryBlock(uint8_t servo_id, unsigned block, uint8_t *data);
+RightServoReadStatus RightServoBus_ReadTuningBlock(uint8_t servo_id, unsigned block, uint8_t *data);
 RightServoJogSnapshot RightServoBus_JogOnce(uint8_t servo_id, int8_t delta_raw);
 RightServoTorqueEnableSnapshot RightServoBus_EnableTorqueAtPresentPositionOnce(
     uint8_t servo_id
