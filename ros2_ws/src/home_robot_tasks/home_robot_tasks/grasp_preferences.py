@@ -34,12 +34,16 @@ def contact_posture(pose, policy):
         cost=(approach/policy.preferred_approach_deg)**2+(closing/policy.preferred_closing_deg)**2)
 
 
-def contact_roll_interval(pose, policy, limit=np.pi/3):
-    """Intersect the original roll freedom with the tabletop envelope.
+def contact_roll_interval(pose, policy, limit=np.pi/2):
+    """Intersect contact-line roll freedom with the tabletop envelope.
 
     Rotating about TCP X preserves both contact positions and closing slope.
     Restrict the search itself so a rejected tilted solution cannot hide a
-    reachable moderate one. Neither the contact point nor the base moves.
+    reachable moderate one. The old +/-60 degree search clipped near-horizontal
+    source grasps before they could rotate into reachable overhead attitudes.
+    A quarter turn preserves the same closing line and pinch center; the
+    actual approach/closing angles and joint limits remain independently bound.
+    Neither the contact point nor the base moves.
     """
     rotation=rigid(pose)[:3,:3]
     if abs(rotation[2,0])>np.sin(np.deg2rad(policy.maximum_closing_deg))+1e-12:return None

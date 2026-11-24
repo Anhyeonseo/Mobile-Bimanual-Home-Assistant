@@ -187,7 +187,7 @@ def run_timed_route(p, monkeypatch, phase_ms=0, fault=None, *,
     stop = SimStop(adapter)
     # SimStop and ResidentArmPort must use the same single writer identity.
     stop.request = lambda *args: adapter.stop('stationary-pick')
-    session = build_carry_session(p, adapter=adapter, coordinated_stop=stop, observe=reader.read,
+    session = build_carry_session(p, adapter=adapter, coordinated_stop=stop, observe=reader.read,transport_owner='stationary-pick',
         clock=clock, validate_current_scene=inputs.validate_stage, simulation=True,
         observation_policy='snapshot_then_verify', ready_for_route=inputs.route_start_ready)
     session.start('timed-route'); started = clock(); hold_start = None; fault_time = None

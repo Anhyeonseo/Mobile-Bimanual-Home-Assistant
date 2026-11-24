@@ -1,5 +1,6 @@
 #include "mobile_servo_feedback.h"
 #include "mobile_servo_output.h"
+#include "mobile_hold_output.h"
 #include "servo_bus_reader.h"
 #include "control_tick.h"
 #include "timebase.h"
@@ -184,6 +185,12 @@ void MobileServoFeedback_ServiceStopped(bool board_stop_latched) {
     if(!board_stop_latched || !reader.configured || launching ||
        reader.fault==MOBILE_FEEDBACK_OK || !o->configured || !o->stop_requested)return;
     if(!recovery_waiting_zero){
+        /* RecoverReader waits for receiver resynchronization. Running it just
+         * after right STOP launch can block this loop for milliseconds and
+         * turn an already completed 270 us write into a false 700 us overrun.
+         * First retire the other writer normally; never extend its deadline
+         * or count waiting here as a failed receiver recovery. */
+        if(gate_token && MobileHoldOutput_Pending())return;
         uint32_t now=HAL_GetTick();
         if(recovery_attempts>=3 || (recovery_attempts && now-recovery_ms<100))return;
         recovery_ms=now;++recovery_attempts;

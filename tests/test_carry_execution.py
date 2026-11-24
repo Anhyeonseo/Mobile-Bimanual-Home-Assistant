@@ -402,3 +402,20 @@ def test_handoff_classification_keeps_initial_anchor_and_large_offsets_strict():
     assert b.last_index==0
     with pytest.raises(ValueError) as e:b({'carry_stage':1},snap(1,.1))
     assert not isinstance(e.value,HandoffRecheck)
+
+
+def test_extra_close_preload_is_compiled_once_and_retained_through_hold():
+    from test_installed_jaw import stock_conversion
+    report,profile,measured,arm=compiler_fixture();stock,_=stock_conversion()
+    preview=report['candidates'][0]['jaw_preview'];preview.pop('measured_gap_preview')
+    preview['nominal_gap_preview']=stock.preview(preview['closure'])
+    before=compile_program(report,profile,stock,arm,bounds=bounds())
+    preview['closure']['close_extra_raw']=50
+    preview['nominal_gap_preview']=stock.preview(preview['closure'])
+    after=compile_program(report,profile,stock,arm,bounds=bounds())
+    assert after.close_raw==before.close_raw-50
+    assert after.contact_raw_interval[1]==before.contact_raw_interval[1]
+    for old,new in zip(before.stages[:3],after.stages[:3]):
+        assert old.points==new.points
+    assert after.stages[3].points[-1].positions_rad[5]==after.close_control_rad
+    assert all(p.positions_rad[5]==after.close_control_rad for s in after.stages[4:] for p in s.points)

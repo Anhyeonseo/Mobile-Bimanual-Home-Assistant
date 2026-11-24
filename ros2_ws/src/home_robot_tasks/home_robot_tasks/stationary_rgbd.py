@@ -21,6 +21,16 @@ from .perception import CameraIntrinsics, depth_target
 # acquisition choice for stopped height review, not a new geometric offset or
 # a change to navigation/arm capture defaults. Capture restores it on exit.
 HEIGHT_DEPTH_EXPOSURE_US = 16000
+# Camera-only comparison on 2026-11-20: the near pick view keeps one raw
+# exposure, with stable depth exposure rather than ambient-driven auto changes.
+# This is an acquisition setting, not a depth/TF offset or missing-pixel fill.
+NEAR_PICK_DEPTH_EXPOSURE_US = 8000
+
+
+def pick_depth_exposure_us(mode):
+    return {'wide': HEIGHT_DEPTH_EXPOSURE_US, 'near': NEAR_PICK_DEPTH_EXPOSURE_US,
+            'legacy': None}[mode]
+
 
 
 def height_frame_issue(record):

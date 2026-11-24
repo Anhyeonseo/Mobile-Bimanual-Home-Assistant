@@ -170,7 +170,13 @@ def compile_program(report, profile, installed_jaw, arm, *, bounds):
     add('hold', model_paths[5][-1:], close_control, attached=True, dwell=2.)
     validate_program_winding(compiled,profile)
     captured = report['captured_model_joint_positions_si']['s2_lift_joint']
-    hypothetical = report.get('hypothetical_lift_m') is not None or abs(captured-arm.lift_m) > 1e-9
+    revalidation=report.get('start_revalidation')
+    if revalidation is not None:
+        from .pick_lift_transition import validate_revalidation
+        validate_revalidation(revalidation,profile,report['capture_id'],report['source_sha256'])
+        if revalidation['arrival_model_joint_positions_si'] != report['initial_model_joint_positions_si']:
+            raise ValueError('arrival anchor differs from planned start')
+    hypothetical = report.get('hypothetical_lift_m') is not None or (revalidation is None and abs(captured-arm.lift_m)>1e-9)
     return CarryProgram(report['capture_id'], report['calibration_id'], dict(report['source_sha256']),
                         digest(report), report['prepared_sha256'], plan['candidate_id'], candidate['source'],
                         arm.lift_m, captured, hypothetical, tuple(compiled), bounds, close_control,

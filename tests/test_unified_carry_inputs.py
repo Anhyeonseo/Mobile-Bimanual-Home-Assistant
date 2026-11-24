@@ -115,3 +115,35 @@ def test_pick_preflight_failure_closes_workers_before_control(tmp_path, monkeypa
         report = json.loads((args.output/'state.json').read_text())
         assert report['status'] == 'REJECTED_BEFORE_CONTROL'
     assert len(closed) == 2
+
+
+def test_calibrated_board_height_is_not_scaled_twice():
+    from home_robot_tasks.unified_carry_inputs import controller_lift_height_m
+    from so101_arm_bridge.unified_commissioning import pick_board_scale
+    import json
+    from pathlib import Path
+    profile = json.loads((Path(__file__).resolve().parents[1] /
+                          'config/home_assistant/s2_coordinates.wide.development.json').read_text())
+    board = (0x2492e, 2696088964)
+    assert pick_board_scale(*board) == 87287
+    assert controller_lift_height_m(10000, profile, board=board) == pytest.approx(.010, abs=1e-7)
+    assert controller_lift_height_m(10000, profile) == pytest.approx(.01039132, abs=1e-7)
+    with pytest.raises(ValueError, match='firmware/profile'):
+        controller_lift_height_m(10000, profile, board=(0x2492e, 2430209922))
+
+
+def test_current_board_requires_its_released_extrinsic_profile():
+    from so101_arm_bridge.unified_commissioning import check_pick_calibration
+    import json
+    from pathlib import Path
+    config = Path(__file__).resolve().parents[1]/'config/home_assistant'
+    for name in ('s2_coordinates.development.json','s2_coordinates.wide.development.json'):
+        assert check_pick_calibration(0x2492e, 2696088964, json.loads((config/name).read_text())) == 87287
+    with pytest.raises(ValueError, match='calibration differ'):
+        check_pick_calibration(0x2492e, 2696088964, {'calibration_id':'nominal'})
+
+
+def test_lift_fault_is_reported_before_consequent_base_stop():
+    m,l=samples();m.state=3
+    with pytest.raises(ValueError,match='lift fault=1'):
+        UnifiedPlatformGuard(4,.008059).update(m,replace(l,state=6,fault=1),20,20.01)

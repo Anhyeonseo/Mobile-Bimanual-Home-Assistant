@@ -79,11 +79,15 @@ def test_validator_rejects_silent_range_or_provenance_changes(fault):
 def test_persistence_position_does_not_redefine_reference_and_old_pad_fit_is_rejected():
     geometry = geo.load_geometry(CONFIG/'official_geometry.json')
     p = dev.released_profile(ROOT, geometry)
+    # Home stays the reference pose; since 2026-11-17 the model angle there is the measured zero offset
+    # (measured_calibration.development.json), not 0 for shoulder/elbow/wrist_flex.
+    measured = json.loads((ROOT/dev.MEASURED).read_text())['joint_zero_offset_rad'] if (ROOT/dev.MEASURED).exists() else {}
     for side in ('left', 'right'):
         a = p['arms'][side]
-        assert geo.model_angles(a['reference_raw'], a['alignment']) == pytest.approx(dict.fromkeys(geo.JOINTS, 0.))
+        expected = {j: measured.get(side, {}).get(j, 0.) for j in geo.JOINTS}
+        assert geo.model_angles(a['reference_raw'], a['alignment']) == pytest.approx(expected)
         actual = geo.tool_pose(geometry, a, a['reference_raw'])
-        official = geo.arm_transforms(geometry, dict.fromkeys(geo.JOINTS, 0.))['gripper_frame_link']
+        official = geo.arm_transforms(geometry, expected)['gripper_frame_link']
         np.testing.assert_allclose(actual, official, atol=1e-12)
     assert p['arms']['left']['reference_raw']['shoulder'] == 2048  # latest torque-off scan was 3162
     assert p['arms']['left']['reference_raw']['gripper'] == 2047

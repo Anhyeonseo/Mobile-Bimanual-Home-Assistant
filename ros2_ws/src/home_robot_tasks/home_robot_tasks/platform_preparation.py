@@ -44,6 +44,31 @@ def supported_lift_is_holding(status):
             and ((status.mcu_tick_ms - status.observed_ms) & 0xffffffff) < 250)
 
 
+def stationary_platform_is_holding(mobile, lift, board, *, fixed_base_station=False):
+    """Independent AS base-stop + LS hold proof; no lift motion admission.
+
+    Only the installed 0x24930 firmware has the verified drive/encoder hold
+    monitor used here. Require all AS feedback, mode, homing, stop and health
+    bits, and the original 200 ms freshness bound on both observations.
+    """
+    if fixed_base_station:
+        # Explicit operator-fixed tabletop station. Wheel telemetry is not
+        # a grasp admission condition; this owner never enables base motion.
+        return (tuple(board or ()) == (0x24930, 3399362976)
+                and mobile.boot_id == lift.boot_id and mobile.boot_id > 0
+                and mobile.state == 0 and mobile.session == 0 and mobile.reason == 0
+                and not mobile.flags & 32
+                and supported_lift_is_holding(lift)
+                and ((lift.mcu_tick_ms-lift.observed_ms) & 0xffffffff) < 200)
+    return (tuple(board or ()) == (0x24930, 3399362976)
+            and mobile.boot_id == lift.boot_id and mobile.boot_id > 0
+            and mobile.state == 0 and mobile.session == 0 and mobile.reason == 0
+            and mobile.flags == 31
+            and ((mobile.mcu_tick_ms-mobile.feedback_tick_ms) & 0xffffffff) < 200
+            and supported_lift_is_holding(lift)
+            and ((lift.mcu_tick_ms-lift.observed_ms) & 0xffffffff) < 200)
+
+
 def move_observed_lift(lift, observe, stop, height_um, *, clock=time.monotonic, sleep=time.sleep):
     """Explicit <=1cm bottom-origin rise; LiftPort owns the lease and faults."""
     from .device_ports import LiftPort
@@ -74,17 +99,28 @@ def move_observed_lift(lift, observe, stop, height_um, *, clock=time.monotonic, 
 
 
 def reference_supported_bottom(observe, mobile, lift, *, clock=time.monotonic, sleep=time.sleep):
-    """Observe rest, then renew the 200ms lease until the bottom hold settles.
+    return _reference_supported(observe, lift, top_um=None, clock=clock, sleep=sleep)
 
-    No downward homing or position move is sent. The mobile parameter remains
-    for existing callers; wheel interlocks are observed through lift telemetry.
+
+def reference_supported_top(observe, mobile, lift, height_um, *, operator_confirmed=False,
+                            clock=time.monotonic, sleep=time.sleep):
+    if operator_confirmed is not True or type(height_um) is not int or not 0 < height_um <= 10000000:
+        raise ValueError("confirmed mechanical top and calibrated height required")
+    return _reference_supported(observe, lift, top_um=height_um, clock=clock, sleep=sleep)
+
+
+def _reference_supported(observe, lift, *, top_um, clock, sleep):
+    """Observe rest, then renew the 200ms lease until endpoint hold settles.
+
+    No homing or position move is sent; wheel interlocks are observed through
+    lift telemetry. Registration alone never substitutes for measured hold.
     """
     deadline = clock() + 3
     window = []
     while True:
         status = observe()
         # AS is invalid before homing, so waiting on it would deadlock reference.
-        # LS independently reports lift position and MCU interlocks. Op7 checks
+        # LS independently reports lift position and MCU interlocks. Registration checks
         # actual lift speed/current before accepting the zero-motion reference.
         valid = (status.state == 0 and status.fault == 0 and status.flags & 12 == 12
                  and status.command_raw == 0 and 0 <= status.position_raw < 4096
@@ -100,16 +136,30 @@ def reference_supported_bottom(observe, mobile, lift, *, clock=time.monotonic, s
             delta = [(row[1] - window[0][1] + 2048) % 4096 - 2048 for row in window]
             if (len(window) >= 3 and (status.observed_ms - window[0][0]) & 0xffffffff >= 450
                     and max(delta) - min(delta) <= 2):
-                break
+                try:
+                    if top_um is None:
+                        lift.reference_bottom(1, operator_confirmed=True)
+                    else:
+                        lift.reference_top(1, top_um, operator_confirmed=True)
+                    break
+                except RuntimeError as error:
+                    if clock() >= deadline or not _reference_not_started(error, status, top_um):
+                        raise
+                    # A correlated rejection proves that no reference/hold was
+                    # armed. Reobserve the stationary window before another
+                    # zero-motion registration; never retry movement or an ACK loss.
+                    window = []
         if clock() > deadline:
             raise TimeoutError('리프트 원점 등록 전 정지 관측 대기')
         sleep(.02)
-    lift.reference_bottom(1, operator_confirmed=True)
     deadline = clock() + 3
     while True:
         status = observe()
         if supported_lift_is_holding(status):
-            return
+            expected = 0 if top_um is None else top_um
+            if abs(status.height_um - expected) > 2000 or status.target_um != expected:
+                raise RuntimeError("registered lift height differs from confirmed endpoint")
+            return status
         if clock() > deadline:
             raise TimeoutError('리프트 유지 확인 시간 초과')
         if status.flags & 2:
@@ -190,3 +240,20 @@ def enter_base_transport(observe, evidence, *, clock=time.monotonic, sleep=time.
             return
         sleep(.005)
     raise TimeoutError('이동 모드 전환 대기 시간 초과')
+
+
+def _reference_not_started(error, observed, top_um):
+    """Only a fresh explicit same-boot rejection of a never-started registration."""
+    from so101_arm_bridge.lift_wire import LiftStatus
+    try:
+        command=error.diagnostics['command']
+        reply=LiftStatus(**error.diagnostics['response'])
+        kind=7 if top_um is None else 8
+        return (command['kind']==kind and command['target_um']==(top_um or 0)
+                and command['boot_id']==observed.boot_id==reply.boot_id
+                and reply.kind==(kind|128) and reply.request_sequence==command['sequence']
+                and reply.session==0 and reply.sequence==0 and reply.state==0 and reply.fault==0
+                and reply.flags==12 and reply.command_raw==0
+                and (reply.mcu_tick_ms-reply.observed_ms)&0xffffffff<200)
+    except (AttributeError,KeyError,TypeError,ValueError):
+        return False

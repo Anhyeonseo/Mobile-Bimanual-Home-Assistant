@@ -41,10 +41,10 @@ from home_robot_tasks.s2_rgbd_acquisition import Capture
 from home_robot_tasks.stationary_rgbd import HEIGHT_DEPTH_EXPOSURE_US
 from home_robot_tasks.system_stop_backend import SystemStopBackend
 from home_robot_tasks.serviced_work import await_serviced
-from home_robot_tasks.unified_carry_inputs import UnifiedPlatformGuard,UnifiedObservationReader
+from home_robot_tasks.unified_carry_inputs import UnifiedPlatformGuard,UnifiedObservationReader,controller_lift_height_m
 from home_robot_tasks.empty_return import load_empty_return,run_empty_return
 from so101_arm_bridge.unified_arm_adapter import UnifiedArmAdapter
-from so101_arm_bridge.unified_commissioning import CommissionClient
+from so101_arm_bridge.unified_commissioning import CommissionClient, query_pick_controller
 from so101_arm_bridge.backend_lease import acquire_backend_lease
 from so101_arm_bridge.serial_port import open_exclusive_serial
 from so101_arm_bridge.stream_transport_v2 import StreamValidationTransportV2,MobileV2Exchange
@@ -122,13 +122,14 @@ def _run(args, workers):
         stop=None;session=None;adapter=None;guard=None
         try:
             setup={};report['commission']=setup
-            t.enter_binary_mode();initial=CommissionClient(t).query()
+            board,initial=query_pick_controller(t,profile)
+            report['controller_board']=board
             if initial.flags not in (0,17) or initial.reason:raise ValueError('unpowered fresh or already-prepared board required')
-            prep.inspect(t,baseline=json.loads(args.baseline.read_text()),prepare=initial.flags==0,supported=True,empty=True,report=setup)
+            prep.inspect(t,baseline=json.loads(args.baseline.read_text()),prepare=initial.flags==0,supported=True,empty=True,report=setup,pick_board=board)
             camera=resources.enter_context(CameraWorker(factory,consume))
             boot=setup['commission_final']['boot_id'];report['commission']=setup
-            preview=UnifiedArmAdapter(t,CONFIG/'arm_ranges.development.json')
-            adapter=UnifiedArmAdapter(t,CONFIG/'arm_ranges.development.json',
+            preview=UnifiedArmAdapter(t,CONFIG/'arm_ranges.development.json',pick_board=board)
+            adapter=UnifiedArmAdapter(t,CONFIG/'arm_ranges.development.json',pick_board=board,
                 authorized_limits=replace(preview.motion_limits,hardware_authorized=True),motion_authorized=True)
             anchor=adapter.prepare()
             mobile=MobileClient(MobileV2Exchange(t),lambda:int(time.monotonic()*1000));mobile.synchronize()
@@ -159,11 +160,11 @@ def _run(args, workers):
                 report['lift_rise']=move_observed_lift(lift,observe,stop,args.lift_target_um)
             else:
                 report['lift_rise']={'executed':False,'basis':'operator_confirmed_bottom_and_fresh_reference'}
-            actual=observe().height_um/1e6
+            actual=controller_lift_height_m(observe().height_um,profile,board=board)
             waiting_state='WAITING_CHECKED_BUNDLE'
             if args.empty_return:
                 if actual!=checked_return['planned_lift_m']:raise ValueError('return height mismatch')
-                guard=UnifiedPlatformGuard(boot,actual)
+                guard=UnifiedPlatformGuard(boot,actual,profile=profile,board=board)
                 def service_return():
                     if cancel.is_set():raise RuntimeError('operator cancelled')
                     adapter.keepalive()
@@ -229,7 +230,7 @@ def _run(args, workers):
             if np.max(abs(np.array(anchor.positions_urad)/1e6-p.stages[0].points[0].positions_rad))>.02:
                 raise ValueError('checked anchor differs from current held posture')
             observe();event('CREATING_SCENE_ADMISSION')
-            guard=UnifiedPlatformGuard(boot,actual)
+            guard=UnifiedPlatformGuard(boot,actual,profile=profile,board=board)
             inputs=await_serviced(files.submit(LiveCarryInputs,p,MeasuredFK(model['fk']),ref,mask,
                 metadata['aligned_depth_intrinsics'],model['profile']['base_from_optical'],guard,
                 observation_policy='snapshot_then_verify',stationary_hold_admission=True),observe)
@@ -243,7 +244,7 @@ def _run(args, workers):
                 except ValueError:
                     if inputs.failure or time.monotonic()>deadline:raise
                 time.sleep(.01)
-            session=build_carry_session(p,adapter=adapter,coordinated_stop=coordinated,observe=reader.read,
+            session=build_carry_session(p,adapter=adapter,coordinated_stop=coordinated,observe=reader.read,transport_owner=OWNER,
                 clock=time.monotonic,validate_current_scene=inputs.validate_stage,
                 observation_policy='snapshot_then_verify',ready_for_route=inputs.route_start_ready,
                 recoverable_handoffs=True)

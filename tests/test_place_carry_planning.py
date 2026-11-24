@@ -65,3 +65,16 @@ def test_incomplete_place_path_is_never_reported_complete(stage):
     result=plan_place_carry(arm,planner,np.zeros(5),held,**kw)
     assert result.status=='NO_COMPLETE_ROUTE' and not result.stages
     assert planner.calls[-1][0]==stage
+
+
+def test_place_does_not_restore_original_pick_observation():
+    arm,held,kw=inputs()
+    observed=held.base_from_grasp_tcp.copy();observed[0,3]-=.006
+    held=replace(held,observed_base_from_object=observed,fixed_side_clearance_m=.006)
+    class Verify(Planner):
+        def path(self,start,end,candidate,attached,label):
+            assert candidate.observed_base_from_object is None
+            assert candidate.fixed_side_clearance_m==0
+            return super().path(start,end,candidate,attached,label)
+    result=plan_place_carry(arm,Verify(),np.zeros(5),held,**kw)
+    assert result.status=='OFFLINE_ROUTE_FOUND'

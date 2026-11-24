@@ -231,6 +231,13 @@ RightServoReadStatus RightServoBus_ReadInventoryBlock(uint8_t id, unsigned block
     return RightServo_ReadData(id, device_inventory_address(block), device_inventory_length(block), data);
 }
 
+RightServoReadStatus RightServoBus_ReadTuningBlock(uint8_t id, unsigned block, uint8_t *data)
+{
+    if (id < 1 || id > RIGHT_SERVO_BUS_JOINT_COUNT || block >= DEVICE_TUNING_BLOCKS || data == NULL)
+        return RIGHT_SERVO_READ_UNAVAILABLE;
+    return RightServo_ReadData(id, device_tuning_address(block), device_tuning_length(block), data);
+}
+
 #if HOST_MOBILE_BASE_PRESERVE_HOLD
 HAL_StatusTypeDef RightServoBus_HoldRead(uint8_t id,uint8_t address,uint8_t length,uint8_t *data)
 {

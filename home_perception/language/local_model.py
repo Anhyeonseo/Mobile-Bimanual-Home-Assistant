@@ -32,14 +32,21 @@ class LocalLanguageModel:
     def extract(self, utterance, request_id, user_id='local-user'):
         if not isinstance(utterance, str) or not 0 < len(utterance.strip()) <= 512:
             raise ValueError('bounded utterance required')
+        started = time.monotonic()
+        system = PROMPT.removesuffix('요청: ') + '\nJSON만 출력한다. /no_think'
+        reply, data = self.complete_json(system, utterance, 'request_slots', SLOT_SCHEMA)
+        item = parse_reply(reply, request_id, user_id, utterance)
+        return {'extraction': item.to_dict(), 'reply': reply,
+                'model': data.get('model', 'unknown'), 'backend': 'llama.cpp_loopback',
+                'latency_s': round(time.monotonic()-started, 4), 'usage': data.get('usage', {})}
+
+    def complete_json(self, system, utterance, name, schema):
         payload = dict(model='local-qwen', messages=[
-            {'role': 'system', 'content': PROMPT.removesuffix('요청: ') + '\nJSON만 출력한다. /no_think'},
-            {'role': 'user', 'content': utterance}],
+            {'role': 'system', 'content': system}, {'role': 'user', 'content': utterance}],
             temperature=0, seed=42, max_tokens=256, stream=False,
             chat_template_kwargs={'enable_thinking': False},
             response_format={'type': 'json_schema', 'json_schema': {
-                'name': 'request_slots', 'strict': True, 'schema': SLOT_SCHEMA}})
-        started = time.monotonic()
+                'name': name, 'strict': True, 'schema': schema}})
         request = Request(self.endpoint+'/v1/chat/completions',
                           data=json.dumps(payload, ensure_ascii=False).encode(),
                           headers={'Content-Type': 'application/json'})
@@ -51,8 +58,4 @@ class LocalLanguageModel:
         choice = data['choices'][0]
         if choice.get('finish_reason') != 'stop':
             raise ValueError('model reply did not finish')
-        reply = choice['message']['content']
-        item = parse_reply(reply, request_id, user_id, utterance)
-        return {'extraction': item.to_dict(), 'reply': reply,
-                'model': data.get('model', 'unknown'), 'backend': 'llama.cpp_loopback',
-                'latency_s': round(time.monotonic()-started, 4), 'usage': data.get('usage', {})}
+        return choice['message']['content'], data

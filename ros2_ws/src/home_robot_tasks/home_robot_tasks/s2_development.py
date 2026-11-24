@@ -33,7 +33,83 @@ def camera_transform(camera):
     return transform
 
 
-def build(root):
+MEASURED = 'config/home_assistant/measured_calibration.development.json'
+MEASURED_KIND = 'measured_joint_camera_arm_lift_calibration'
+
+
+def apply_measured_calibration(nominal, measured, measured_sha256, geometry):
+    """Apply a joint camera/arm/lift calibration fitted against exactly this nominal profile.
+
+    The fit (tools/diagnostics/extrinsic_capture) estimated, relative to `nominal`:
+      camera base_from_optical; per-arm zero offsets added to home_model_rad (and therefore to
+      reference_model_rad); a right-mount correction post-multiplied onto its CAD mount; a lift zero offset
+      along axis_base for both mounts; a lift travel scale on meters_per_count.
+    Gravity sag and lift tilt are not representable here and must not appear in `measured`.
+    """
+    if (measured.get('record_kind') != MEASURED_KIND or measured.get('schema_version') != 1
+            or measured.get('geometry_sha256') != nominal['geometry_sha256']):
+        raise ValueError('measured calibration record/geometry mismatch')
+    # Bind numerically (a rebuild may differ by ~1e-16 and so change calibration_id).
+    ref = measured['fitted_against']
+    close = lambda a, b: np.allclose(np.asarray(a, float), np.asarray(b, float), rtol=0, atol=1e-9)
+    if not (close(ref['base_from_optical'], nominal['base_from_optical'])
+            and close(ref['meters_per_count'], nominal['lift']['meters_per_count'])
+            and close(ref['axis_base'], nominal['lift']['axis_base'])
+            and all(close(ref['base_from_arm_at_lift_zero'][a], nominal['arms'][a]['base_from_arm_at_lift_zero'])
+                    and all(close(ref['home_model_rad'][a][j], nominal['arms'][a]['alignment'][j]['home_model_rad'])
+                            for j in s2.JOINTS)
+                    for a in s2.ARMS)):
+        raise ValueError('measured calibration was fitted against a different nominal profile')
+    if measured.get('motion_authorized') is not False or measured.get('gravity_sag_applied') is not False:
+        raise ValueError('measured calibration must be a non-authorizing, sag-free record')
+    zeros = measured['joint_zero_offset_rad']
+    if set(zeros) != set(s2.ARMS) or any(set(zeros[a]) - {'shoulder', 'elbow', 'wrist_flex'} for a in s2.ARMS):
+        raise ValueError('zero offsets limited to shoulder/elbow/wrist_flex (base is the gauge)')
+    scale = s2.number(measured['lift_travel_scale'], 'lift scale', .2)
+    offset = s2.number(measured['lift_zero_offset_m'], 'lift zero offset', .05)
+    p = deepcopy(nominal)
+    p.pop('calibration_id')
+    for key in ('camera_height_adjustment', 'camera_nominal_base_from_optical'):
+        p.pop(key, None)
+    p['base_from_optical'] = s2.rigid(measured['base_from_optical']).tolist()
+    axis = np.array(p['lift']['axis_base'])
+    correction = s2.rigid(measured['right_mount_correction'])
+    for side in s2.ARMS:
+        a = p['arms'][side]
+        mount = s2.rigid(a['base_from_arm_at_lift_zero']).copy()
+        if side == 'right':
+            mount = mount @ correction
+        mount[:3, 3] += axis * offset
+        a['base_from_arm_at_lift_zero'] = mount.tolist()
+        for joint, dz in zeros[side].items():
+            dz = s2.number(dz, 'zero offset', .3)
+            a['alignment'][joint]['home_model_rad'] += dz
+            a['reference_model_rad'][joint] += dz
+    p['lift']['meters_per_count'] *= 1 + scale
+    p['provenance'] = 'measured_joint_camera_arm_lift_calibration'
+    p['nominal_calibration_id'] = nominal['calibration_id']
+    p['source_files_sha256'] = dict(p['source_files_sha256'], **{MEASURED: measured_sha256})
+    p['measured_calibration'] = {k: measured[k] for k in ('calibration_date', 'model', 'result_sha256', 'cross_validation')}
+    p['pending_physical_validation'] = ['physical grasp validation of the measured calibration',
+                                        'gripper-tip (TCP) contact verification']
+    p['calibration_id'] = 's2-dev-' + s2.digest(p)[:24]
+    validate(p, geometry)
+    return p
+
+
+def build(root, *, measured=True):
+    """Nominal profile; with measured=True and the measured calibration file present, that calibration applied."""
+    root = Path(root)
+    nominal = build_nominal(root)
+    path = root / MEASURED
+    if not measured or not path.exists():
+        return nominal
+    raw = path.read_bytes()
+    return apply_measured_calibration(nominal, json.loads(raw), hashlib.sha256(raw).hexdigest(),
+                                      s2.load_geometry(root/'config/home_assistant/official_geometry.json'))
+
+
+def build_nominal(root):
     root = Path(root)
     files = {}
     def read(name):

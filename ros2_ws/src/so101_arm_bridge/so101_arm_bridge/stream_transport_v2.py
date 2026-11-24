@@ -8,6 +8,7 @@ from collections import deque
 from functools import wraps
 from threading import RLock
 import time
+from time import perf_counter as _perf_counter, thread_time as _thread_time
 from typing import Any
 from serial import SerialTimeoutException
 
@@ -52,8 +53,26 @@ class StreamResponseTimeoutError(StreamTransportV2Error):
 def _serialized(method):
     @wraps(method)
     def call(self, *args, **kwargs):
+        started = _perf_counter()
         with self._transaction_lock:
-            return method(self, *args, **kwargs)
+            acquired = _perf_counter()
+            previous = self._active_timing
+            record = dict(operation=method.__name__, started_s=started,
+                          lock_wait_ms=(acquired-started)*1000, phases={})
+            if method.__name__ == 'exchange_mobile' and args and isinstance(args[0], bytes):
+                record['inner_request_hex'] = args[0][:4].hex()
+            self._active_timing = record
+            cpu = _thread_time()
+            try:
+                return method(self, *args, **kwargs)
+            except Exception as error:
+                record['error'] = type(error).__name__+': '+str(error)
+                raise
+            finally:
+                record['duration_ms'] = (_perf_counter()-started)*1000
+                record['thread_cpu_ms'] = (_thread_time()-cpu)*1000
+                self._transaction_timings.append(record)
+                self._active_timing = previous
 
     return call
 
@@ -81,6 +100,35 @@ class StreamValidationTransportV2:
         self._write_timeout_count = 0
         self._write_timeout_events = deque(maxlen=20)
         self._uncertain_write = None
+        self._active_timing = None
+        self._transaction_timings = deque(maxlen=256)
+
+    def timing_diagnostics(self, *, after_sequence=None) -> dict:
+        """Copy bounded host timing; no port reads or writes and no lease renewal.
+
+        A long wall time with low thread CPU can be I/O wait OR scheduling/GIL
+        delay. These measurements alone do not identify a defective USB link.
+        """
+        from copy import deepcopy
+        with self._transaction_lock:
+            return dict(clock='host_perf_counter', transactions=deepcopy([
+                row for row in self._transaction_timings
+                if after_sequence is None or row.get('sequence',0)>after_sequence]))
+
+    def _timed_call(self, phase, callback, *args):
+        if self._active_timing is None:
+            return callback(*args)
+        wall, cpu = _perf_counter(), _thread_time()
+        try:
+            return callback(*args)
+        finally:
+            elapsed, used = _perf_counter()-wall, _thread_time()-cpu
+            values = self._active_timing['phases'].setdefault(phase,
+                dict(calls=0, wall_ms=0., thread_cpu_ms=0., maximum_call_ms=0.))
+            values['calls'] += 1
+            values['wall_ms'] += elapsed*1000
+            values['thread_cpu_ms'] += used*1000
+            values['maximum_call_ms'] = max(values['maximum_call_ms'],elapsed*1000)
 
     @staticmethod
     def _now_ms() -> int:
@@ -99,6 +147,8 @@ class StreamValidationTransportV2:
         payload: bytes = b"",
     ) -> tuple[int, int]:
         sequence = self._next_sequence()
+        if self._active_timing is not None:
+            self._active_timing.update(sequence=sequence,message_type=message_type.name)
         sender_time_ms = self._now_ms()
         packet = encode_frame_v2(
             FrameV2(
@@ -135,7 +185,7 @@ class StreamValidationTransportV2:
     def _write_packet(self, packet: bytes) -> None:
         # Serial.write uses the configured finite write timeout. Do not flush:
         # POSIX tcdrain can wait indefinitely on a stalled USB/flow-control path.
-        if self._port.write(packet) != len(packet):
+        if self._timed_call('write',self._port.write,packet) != len(packet):
             raise StreamTransportV2Error(
                 "partial serial write; command delivery is uncertain"
             )
@@ -176,14 +226,14 @@ class StreamValidationTransportV2:
         observed: list[str] = []
         while time.monotonic() < deadline:
             try:
-                packet = self._read_packet()
+                packet = self._timed_call('read',self._read_packet)
             except Exception:
                 self._resolve_uncertain_write(sequence,'receive_error')
                 raise
             if packet is None:
                 continue
             try:
-                frame = decode_frame_v2(packet)
+                frame = self._timed_call('decode',decode_frame_v2,packet)
             except Exception:
                 continue
             if frame.sequence == sequence and frame.message_type is message_type:
@@ -281,6 +331,15 @@ class StreamValidationTransportV2:
         sequence, _ = self._send(StreamMessageTypeV2.DEVICE_INVENTORY_REQUEST, packet)
         response = self._receive(sequence, StreamMessageTypeV2.DEVICE_INVENTORY_RESPONSE)
         return decode_inventory(response.payload, bus, motor_id)
+
+    @_serialized
+    def read_servo_tuning(self, bus: int, motor_id: int) -> dict:
+        """Opt-in fixed-register read, subject to the existing maintenance gate."""
+        from .servo_tuning import tuning_request, decode_tuning
+        packet = tuning_request(bus, motor_id)
+        sequence, _ = self._send(StreamMessageTypeV2.DEVICE_INVENTORY_REQUEST, packet)
+        response = self._receive(sequence, StreamMessageTypeV2.DEVICE_INVENTORY_RESPONSE)
+        return decode_tuning(response.payload, bus, motor_id)
 
     @_serialized
     def stationary_platform(self, operation=0):

@@ -79,6 +79,49 @@ def test_network_hand_width_does_not_override_measured_so101_opening():
     assert .02<candidates[0]['width_m']<.03
 
 
+@pytest.mark.parametrize('angles', [[0,0,0],[15,-20,40]])
+def test_off_center_contact_can_fit_without_enlarging_jaw_or_moving_pinch_line(angles):
+    from home_perception.grasp.handoff import observed_contact_line
+    plane=Plane(np.array([0.,0.,-1.]),np.array([0.,0.,.6]),.001,1.)
+    rotation=np.array([[0.,1.,0.],[0.,0.,1.],[1.,0.,0.]])
+    tip=np.array([-.015,0.,.59])
+    row=np.zeros(17);row[:4]=[.8,.08,.02,.02];row[4:13]=rotation.ravel()
+    row[13:16]=tip-.02*rotation[:,0]
+    points=np.array([[x,y,.59]for x in np.linspace(-.025,.025,101)for y in np.linspace(-.005,.005,7)])
+    r=Rotation.from_euler('xyz',angles,degrees=True).as_matrix();t=np.array([.1,-.05,.2])
+    row[13:16]=r@row[13:16]+t;row[4:13]=(r@rotation).ravel()
+    points=points@r.T+t;plane=Plane(r@plane.normal,r@plane.point+t,.001,1.)
+    kept,report=select([row],points,plane,(.0024,.0633),surface_heights=False,straight_across=False)
+    assert len(kept)==1 and report['closing_line_recentered_selected']==1
+    c=kept[0];assert c['width_m']==pytest.approx(.048,abs=.001)
+    assert c['closing_section']==observed_contact_line(c,points)
+    delta=np.asarray(c['translation_m'])-row[13:16]
+    axis=r@rotation[:,1]
+    np.testing.assert_allclose(delta,axis*(axis@delta),atol=1e-12)
+    assert plane.height(np.asarray(c['translation_m'])+.02*(r@rotation[:,0]))==pytest.approx(.01)
+    assert c['robot_feasibility_checked'] is False
+    # A truly oversized object still cannot pass the same opening limit.
+    wide=points+((points-(r@np.array([0.,0.,.59])+t))@axis)[:,None]*axis
+    rejected,_=select([row],wide,plane,(.0024,.0633),surface_heights=False,straight_across=False)
+    assert not rejected
+
+
+def test_bounded_pool_reserves_different_contact_locations():
+    plane=Plane(np.array([0.,0.,-1.]),np.array([0.,0.,.6]),.001,1.)
+    points=np.array([[x,y,.59]for x in np.linspace(-.015,.015,31)for y in np.linspace(-.045,.045,91)])
+    base=np.array([[0.,1.,0.],[0.,0.,1.],[1.,0.,0.]])
+    rows=[]
+    for y,score,angle in [(0.,.95,a)for a in (-40,-20,0,20,40)]+[(.035,.6,0),(-.035,.5,0)]:
+        rotation=base@Rotation.from_euler('y',angle,degrees=True).as_matrix()
+        row=np.zeros(17);row[:4]=[score,.03,.02,.02];row[4:13]=rotation.ravel()
+        row[13:16]=np.array([0.,y,.59])-.02*rotation[:,0];rows.append(row)
+    kept,report=select(rows,points,plane,(.0024,.0633),limit=4,surface_heights=False,straight_across=False)
+    assert len(kept)==4 and report['spatial_alternative_slots']==1
+    tips=[np.asarray(c['translation_m'])+c['depth_m']*np.asarray(c['rotation_matrix'])[:,0]for c in kept]
+    assert max(abs(t[1])for t in tips)>.03
+    assert any(abs(t[1])<1e-9 for t in tips)
+
+
 def test_float32_roundoff_normalized_but_invalid_rotation_still_rejected():
     from home_robot_tasks.s2_geometry import rigid
     row,points,plane=example();row[4]+=2e-7

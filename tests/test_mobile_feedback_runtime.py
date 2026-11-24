@@ -34,6 +34,7 @@ def feedback_runtime(tmp_path_factory,request):
                 for n in (
                     "mobile_servo_feedback",
                     "mobile_servo_output",
+                    "mobile_hold_output",
                     "servo_transport",
                 )
             ),
@@ -65,7 +66,7 @@ def feedback_runtime(tmp_path_factory,request):
     return binary
 
 
-@pytest.mark.parametrize("scenario", [*range(19), *range(20, 38)])
+@pytest.mark.parametrize("scenario", [*range(19), *range(20, 40)])
 def test_mobile_feedback_runtime(feedback_runtime, scenario):
     subprocess.run([str(feedback_runtime), str(scenario)], check=True)
 

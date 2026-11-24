@@ -36,9 +36,10 @@ def test_record_rebase_preserves_physical_measurements_and_check():
 
 def test_camera_only_profile_rebind_preserves_all_jaw_measurements():
     c=ROOT/'config/home_assistant';old=c/'historical/pre-height-20261111'
+    rebound=c/'historical/pre-extrinsic-20261117'   # the released files of that camera-only rebind
     read=lambda p:json.loads(p.read_bytes())
-    before,after=(read(folder/'left_pad_gap.observed.json') for folder in (old,c))
-    old_profile,new_profile=(read(folder/'s2_coordinates.development.json') for folder in (old,c))
+    before,after=(read(folder/'left_pad_gap.observed.json') for folder in (old,rebound))
+    old_profile,new_profile=(read(folder/'s2_coordinates.development.json') for folder in (old,rebound))
     assert old_profile['arms']==new_profile['arms']
     assert before['samples']==after['samples'] and before['check']==after['check']
     a,b=InstalledLeftJaw(before,old_profile),InstalledLeftJaw(after,new_profile)

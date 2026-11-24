@@ -31,14 +31,36 @@ def serial(value):
     raise TypeError(type(value).__name__)
 
 
+def tabletop_lift_directions(normal, distance_m=.02):
+    """Prefer separation normal to the observed table; retain base-up fallback.
+
+    Keep the existing probe envelope (2 mm lateral travel). The complete
+    attached-object path and rounded commands still require collision checks.
+    """
+    n=np.asarray(normal,dtype=float)
+    if n.shape!=(3,) or not np.isfinite(n).all() or n[2]<=0:
+        raise ValueError('finite upward observed support normal required')
+    n=n/np.linalg.norm(n);vertical=np.array([0.,0.,1.])
+    if np.linalg.norm(n[:2])*distance_m>.002 or np.allclose(n,vertical,atol=1e-8):
+        return [vertical.tolist()]
+    return [n.tolist(),vertical.tolist()]
+
+
 def load_models(prepared, *, nominal_obstacles=None, obstacle_padding_m=.001, jaw_basis='measured_front'):
     read=lambda name:json.loads((ROOT/'config/home_assistant'/name).read_text())
     profile=read('s2_coordinates.development.json')
     if jaw_basis not in ('measured_front','nominal_stock_tcp_section'):raise ValueError('unknown jaw basis')
     measured_profile=profile
     if prepared['review']['calibration_id']!=profile['calibration_id']:
-        profile=near_depth_profile(profile,read('camera_device.observed.json'),read('camera_device.near.observed.json'))
+        wide=read('s2_coordinates.wide.development.json')
+        profile=(wide if prepared['review']['calibration_id']==wide['calibration_id'] else
+                 near_depth_profile(profile,read('camera_device.observed.json'),read('camera_device.near.observed.json')))
+    if prepared['review']['calibration_id']!=profile['calibration_id']:
+        raise ValueError('unknown prepared camera calibration')
     boxes,payload,joints=from_prepared_capture(prepared,profile,nominal_obstacles=nominal_obstacles,obstacle_padding_m=obstacle_padding_m)
+    if prepared.get('start_revalidation') is not None:
+        from home_robot_tasks.pick_lift_transition import planning_review
+        joints=planning_review(prepared,profile)['model_joint_positions_si']
     geometry=geo.load_geometry(ROOT/'config/home_assistant/official_geometry.json')
     jaw=load_stock_jaw(ROOT/'config/home_assistant/official_sources/so101_new_calib.urdf',ROOT/'ros2_ws/src/so101_description/meshes')
     installed=(StockLeftJaw(jaw,profile,read('arm_ranges.development.json')['arms']['left']['gripper'])
@@ -54,6 +76,8 @@ def main():
     parser.add_argument('--mobile-mesh-dir',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--maximum-grasps',type=int,default=8,choices=range(1,33))
+    parser.add_argument('--compare-all-routes',action='store_true',
+                        help='offline comparison only: evaluate alternatives after the first complete route')
     parser.add_argument('--approach-mode',choices=('tool_axis','vertical'),default='tool_axis',
                         help='vertical aligns XY above the contact without forcing an upright wrist')
     parser.add_argument('--nominal-jaw',action='store_true',help='explicit stock-STL fingers; use nominal TCP-section width, not measured pads')
@@ -61,8 +85,12 @@ def main():
                         help='prefer easy tabletop contact; legacy is for historical offline comparisons')
     parser.add_argument('--entry-clearance-mm',type=int,default=4,choices=range(4,21),
                         help='extra opening beyond observed span; final close target unchanged')
+    parser.add_argument('--contact-clearance-mm',type=int,default=0,choices=range(0,11),
+                        help='fixed-side gap retained through descent; closing may slide the object')
     parser.add_argument('--close-allowance-mm',type=int,default=5,choices=(1,2,3,4,5),
                         help='fixed close target below observed width; position preload, not calibrated force')
+    parser.add_argument('--close-extra-raw',type=int,default=0,
+                        help='additional stock-jaw closing preload; clamped at its existing raw limit')
     parser.add_argument('--fixed-finger-clearance-mm',type=int,default=0,choices=range(0,11),
                         help='pregrasp-only fixed-side offset, converging to the original contact')
     parser.add_argument('--preview-lift',type=float,help='offline hypothetical height; preserves original capture state')
@@ -75,6 +103,20 @@ def main():
         parser.error('vertical descent requires --fixed-finger-clearance-mm 0; align XY before lowering')
     if args.fixed_finger_clearance_mm > args.entry_clearance_mm-2:
         parser.error('entry opening must retain at least 2 mm on the moving side')
+    report=plan(args)
+    summary={k:report.get(k) for k in ('status','capture_id','hypothetical_lift_m','obstacle_envelope','checked_states','reason')}
+    summary.update(bound_candidates=len(report['candidates']),rejected_candidates=len(report['binding_failures']),hardware_commands=0)
+    print(json.dumps(summary,default=serial))
+    for failure in report.get('plan',{}).get('failures',[]):print(failure['stage']+': '+failure['reason'])
+    return 0 if report['status']=='OFFLINE_ROUTE_FOUND' else 2
+
+
+def plan(args, *, session_factory=session):
+    """Callable planner; session lifetime may be owned by a resident worker."""
+    if args.approach_mode=='vertical' and args.fixed_finger_clearance_mm:
+        raise ValueError('vertical requires no fixed-finger offset')
+    if args.fixed_finger_clearance_mm > args.entry_clearance_mm-2:
+        raise ValueError('moving side clearance below 2 mm')
     prepared=json.loads(args.prepared.read_text())
     if args.nominal_obstacles is None:
         args.nominal_obstacles=prepared['observed_scene'].get('preferred_obstacle_envelope')=='point_bounds'
@@ -82,17 +124,29 @@ def main():
     grasp_policy=TabletopGraspPolicy() if args.grasp_posture=='tabletop' else None
     profile,geometry,arms,installed,boxes,payload,joints=load_models(prepared,nominal_obstacles=args.nominal_obstacles,
         obstacle_padding_m=args.obstacle_padding_mm/1000,jaw_basis=jaw_basis)
-    captured_joints=dict(joints)
+    from home_robot_tasks.pick_calibration import TOP_BASIS, TOP_BASES, check_top_surface
+    from home_robot_tasks.pick_lift_transition import planning_review
+    review=planning_review(prepared,profile)
+    calibrated_top = review.get('lift_reference_basis') in TOP_BASES
+    if calibrated_top:
+        if args.preview_lift is not None:
+            raise ValueError('상단 실측 경로는 촬영 때의 등록 높이를 사용합니다.')
+        points = prepared['review']['base_points_m']
+        check_top_surface(prepared['support_plane'], points.get('center_xyz_m', points.get('surface_xyz_m')), profile)
+    captured_joints=dict(prepared['review']['model_joint_positions_si'])
     if args.preview_lift is not None:
         if not np.isfinite(args.preview_lift) or not 0<=args.preview_lift<=profile['lift']['travel_m']:
-            parser.error('preview lift outside model travel')
+            raise ValueError('preview lift outside model travel')
         ranges=json.loads((ROOT/'config/home_assistant/arm_ranges.development.json').read_text())
         arms={side:StationaryArm(profile,geometry,ranges,args.preview_lift,arms[side].jaw,side) for side in arms}
         joints['s2_lift_joint']=args.preview_lift
     arm=arms['left'];start=np.array([joints['left_model_'+n] for n in geo.JOINTS[:5]])
     report=dict(mode='offline_capture_moveit',jaw_basis=jaw_basis,capture_id=prepared['capture_id'],source_sha256=prepared['source_sha256'],
         approach_mode=args.approach_mode,
+        cartesian_orientation_tolerance_deg=5. if args.approach_mode=='vertical' and grasp_policy is not None else 2.,
+        contact_clearance_m=getattr(args,'contact_clearance_mm',0)/1000,
         close_allowance_m=args.close_allowance_mm/1000,
+        close_extra_raw=getattr(args,'close_extra_raw',0),
         grasp_posture_policy=asdict(grasp_policy) if grasp_policy else None,
         prepared_sha256=hashlib.sha256(args.prepared.read_bytes()).hexdigest(),calibration_id=profile['calibration_id'],
         hardware_commands=0,motion_authorized=False,physical_task_completed=False,continuous_collision_proof=False,
@@ -100,16 +154,32 @@ def main():
         captured_model_joint_positions_si=captured_joints,hypothetical_lift_m=args.preview_lift,
         obstacle_envelope='point_bounds' if args.nominal_obstacles else 'rounded_5mm_columns',obstacle_padding_mm=args.obstacle_padding_mm,
         observed_scene_boxes=len(boxes),candidates=[],binding_failures=[],status='NO_COMPLETE_ROUTE')
+    if calibrated_top:
+        from home_robot_tasks.pick_calibration import REVISION
+        transform = np.asarray(profile['base_from_optical'])
+        plane = prepared['support_plane']
+        normal = transform[:3,:3] @ plane['normal']
+        point = transform[:3,:3] @ plane['point_m'] + transform[:3,3]
+        report.update(lift_reference_basis=review['lift_reference_basis'], calibration_revision=REVISION,
+                      observed_support_plane_base=[*normal, -float(normal @ point)])
+    directions=(tabletop_lift_directions(normal) if calibrated_top and args.approach_mode=='vertical'
+                else [[0.,0.,1.]])
+    report['lift_directions_base']=directions
+    if prepared.get('start_revalidation') is not None:
+        report['start_revalidation']=prepared['start_revalidation']
     args.output.mkdir(parents=True,exist_ok=True)
     candidates=[]
     for index,jaw_sign in ((i,s) for i in range(min(64,len(prepared['group']['refined_grasps']))) for s in (1,-1)):
         try:
-            candidate,jaw=bind_grasp(arm,prepared['review'],prepared['group'],index,payload,installed,
+            candidate,jaw=bind_grasp(arm,review,prepared['group'],index,payload,installed,
                                      hypothetical_lift_m=args.preview_lift,jaw_sign=jaw_sign,
                                      entry_clearance_m=args.entry_clearance_mm/1000,
                                      fixed_finger_clearance_m=args.fixed_finger_clearance_mm/1000,
                                      grasp_policy=grasp_policy,close_allowance_m=args.close_allowance_mm/1000,
-                                     approach_mode=args.approach_mode)
+                                     close_extra_raw=getattr(args,'close_extra_raw',0),
+                                     approach_mode=args.approach_mode,
+                                     contact_clearance_m=getattr(args,'contact_clearance_mm',0)/1000,
+                                     support_normal_base=normal if calibrated_top else (0.,0.,1.))
             candidates.append(candidate)
             report['candidates'].append(dict(candidate=asdict(candidate),jaw_preview=jaw,
                 source=prepared['group']['refined_grasps'][index]['source']))
@@ -123,7 +193,7 @@ def main():
         config=parameters(ROOT,profile,geometry,arms,args.mobile_mesh_dir)
         (args.output/'robot.urdf').write_text(config['robot_description'])
         state=RobotState();state.joint_state.name=list(joints);state.joint_state.position=list(joints.values())
-        with session(config,state,args.output) as call:
+        with session_factory(config,state,args.output) as call:
             apply_boxes(call,boxes)
             validity=call('check_state_validity',GetStateValidity.Request(robot_state=state))
             report['initial_state_valid']=validity.valid
@@ -132,23 +202,23 @@ def main():
                 depth_m=c.depth,position_m=[c.position.x,c.position.y,c.position.z])
                 for c in validity.contacts]
             if validity.valid:
-                backend=MoveItCarryPlanner(arm,state,call)
+                backend=MoveItCarryPlanner(arm,state,call,vertical_grasp_policy=grasp_policy if args.approach_mode=='vertical' else None)
                 plan=plan_pick_carry(arm,backend,start,candidates,scene_id=prepared['capture_id'],maximum_grasps=args.maximum_grasps,
-                                     grasp_policy=grasp_policy)
+                                     grasp_policy=grasp_policy,stop_after_first=not args.compare_all_routes,top_calibrated=calibrated_top,
+                                     exhaust_candidates=getattr(args,'exhaust_candidates',False),lift_directions_base=directions)
                 report['plan']=asdict(plan);report['status']=plan.status;report['checked_states']=backend.checked_states
             else:
                 report['reason']='captured robot state collides in the current model/observed scene'
     except Exception as exc:
         report['status']='PLANNER_ERROR';report['reason']=str(exc)
-    if grasp_policy is not None and report['status']=='NO_COMPLETE_ROUTE':
-        report['next_action']='REPOSITION_BASE_AND_REOBSERVE'
-        report['next_action_motion_authorized']=False
+    from home_robot_tasks.pick_recovery import planning_recovery
+    from tools.lib.pick_contact_review import contact_height_review
+    report['contact_height_review']=contact_height_review(report,prepared)
+    report['recovery']=planning_recovery(report)
+    report['next_action']=report['recovery']['action']
+    report['next_action_motion_authorized']=False
     (args.output/'report.json').write_text(json.dumps(report,default=serial,indent=2)+'\n')
-    summary={k:report.get(k) for k in ('status','capture_id','hypothetical_lift_m','obstacle_envelope','checked_states','reason')}
-    summary.update(bound_candidates=len(candidates),rejected_candidates=len(report['binding_failures']),hardware_commands=0)
-    print(json.dumps(summary,default=serial))
-    for failure in report.get('plan',{}).get('failures',[]):print(failure['stage']+': '+failure['reason'])
-    return 0 if report['status']=='OFFLINE_ROUTE_FOUND' else 2
+    return report
 
 
 if __name__=='__main__':raise SystemExit(main())

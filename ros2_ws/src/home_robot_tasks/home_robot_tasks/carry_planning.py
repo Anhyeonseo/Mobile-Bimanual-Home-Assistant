@@ -31,11 +31,24 @@ class GraspRouteCandidate:
     held_jaw_model_rad: float
     object_constraint: object = None
     payload_mesh: object = None
+    # Original observation stays fixed until closing; attachment predicts the
+    # small displacement into the fixed finger. Neither is a measured grasp.
+    observed_base_from_object: object = None
+    fixed_side_clearance_m: float = 0.
 
     def __post_init__(self):
         if not all((self.candidate_id, self.calibration_id, self.scene_id)):
             raise ValueError('candidate identity and scene binding required')
         rigid(self.base_from_grasp_tcp); rigid(self.tcp_from_object)
+        if not np.isfinite(self.fixed_side_clearance_m) or not 0<=self.fixed_side_clearance_m<=.010:
+            raise ValueError('fixed-side entry clearance must be within 0..10 mm')
+        if self.observed_base_from_object is not None:
+            observed=rigid(self.observed_base_from_object)
+            expected=rigid(self.base_from_grasp_tcp)@rigid(self.tcp_from_object)
+            if not np.allclose(observed[:3,:3],expected[:3,:3],atol=1e-8) or np.linalg.norm(observed[:3,3]-expected[:3,3])>.015:
+                raise ValueError('closing permits only a small planned object translation')
+        elif self.fixed_side_clearance_m:
+            raise ValueError('entry clearance requires the original observed object pose')
         size = np.asarray(self.object_size_m)
         if size.shape != (3,) or not np.isfinite(size).all() or np.any(size <= 0):
             raise ValueError('finite positive payload dimensions required')
@@ -93,7 +106,35 @@ def fixed_contact_review(arm, candidate, *, tolerance_m=.002):
                    open_moving_clearance_m=opening_clearance,tolerance_m=tolerance_m,
                    accepted=bool(abs(section['fixed_intrusion_m'])<=tolerance_m and
                                  abs(moving_error)<=tolerance_m and opening_clearance>=.002))
+    if candidate.observed_base_from_object is not None:
+        observed=rigid(candidate.observed_base_from_object)
+        local=(vertices-obj[:3,3])@obj[:3,:3]
+        entry_vertices=local@observed[:3,:3].T+observed[:3,3]
+        entry=arm.jaw.contact_section(tcp@arm.tcp_from_stock,entry_vertices)
+        fixed_gap=-entry['fixed_intrusion_m']
+        moving_gap=arm.jaw.fixed_face_m+opened-entry['high_m']
+        section.update(entry_fixed_clearance_m=fixed_gap,open_moving_clearance_m=moving_gap,
+            requested_fixed_clearance_m=candidate.fixed_side_clearance_m,
+            planned_object_translation_base_m=(obj[:3,3]-observed[:3,3]).tolist(),
+            object_translation_physically_verified=False,
+            accepted=bool(section['accepted'] and fixed_gap>=0 and
+                abs(fixed_gap-candidate.fixed_side_clearance_m)<=tolerance_m and moving_gap>=.002))
     return section
+
+
+def closing_sweep_candidate(candidate):
+    """Enclose original-to-held object translation for closing collision checks."""
+    if candidate.observed_base_from_object is None:return candidate
+    from scipy.spatial import ConvexHull
+    import itertools
+    expected=rigid(candidate.base_from_grasp_tcp)@rigid(candidate.tcp_from_object)
+    observed_in_expected=np.linalg.inv(expected)@rigid(candidate.observed_base_from_object)
+    v=(np.asarray(candidate.payload_mesh['vertices']) if candidate.payload_mesh else
+       np.asarray(list(itertools.product(*[(-s/2,s/2) for s in candidate.object_size_m]))))
+    points=np.vstack([v,v@observed_in_expected[:3,:3].T+observed_in_expected[:3,3]])
+    hull=ConvexHull(points)
+    mesh=dict(vertices=points.tolist(),faces=hull.simplices.tolist(),kind='planned_closing_translation_sweep')
+    return replace(candidate,payload_mesh=mesh)
 
 
 @dataclass
@@ -124,16 +165,24 @@ class _CandidateEvaluation:
 
 def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
                     lift_distance_m=.02, reference_model_rad=None, policy=CarryPolicy(),
-                    maximum_grasps=8, grasp_policy=None):
+                    maximum_grasps=8, grasp_policy=None, stop_after_first=True, top_calibrated=False, exhaust_candidates=False, lift_directions_base=None):
     """Planner protocol: open, connect, cartesian, close; each returns a StagePath.
 
     No failed approach or partial Cartesian result may reach the carry stage.
     Closing checks geometry only: contact/holding requires the runtime gripper
     feedback controller before a physical lifting command can be authorized.
+    Default: return the first complete route. Failed candidates/goals fall
+    through to the next alternative; do not preplan successful backup routes.
+    stop_after_first=False is an explicit offline quality-comparison mode.
     """
     start = checked_joints(arm, start_model_rad)
     if not 0 < lift_distance_m <= .1 or not 1 <= maximum_grasps <= 32:
         raise ValueError('bounded lift and grasp budget required')
+    directions=np.asarray([(0.,0.,1.)] if lift_directions_base is None else lift_directions_base,dtype=float)
+    if (directions.ndim!=2 or directions.shape[1:]!=(3,) or not len(directions)
+            or not np.isfinite(directions).all() or np.any(directions[:,2]<=0)):
+        raise ValueError('finite upward lift directions required')
+    directions=directions/np.linalg.norm(directions,axis=1)[:,None]
     answers, failures = [], []
     # Rank only capture-bound candidates; stale metadata cannot enter geometry.
     current=[]
@@ -166,7 +215,12 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
                     'reason':'CONTACT_TOO_FAR_FROM_PAYLOAD_CENTER','diagnostics':evidence})
             else:retained.append(candidate)
         current=retained
-    def preference(c):return evaluate(c).preference
+    def preference(c):
+        value=evaluate(c).preference
+        if not top_calibrated:return value
+        from .pick_calibration import top_posture_preference
+        posture=top_posture_preference(c.pregrasp_model_rad)
+        return dict(value,cost=value['cost']+posture['cost'],calibration_posture=posture)
     def balance_cost(c):
         offset=balance(c)['normalized_offset']
         return (offset/grasp_policy.preferred_balance_offset)**2 if grasp_policy else 2*offset**2
@@ -186,14 +240,18 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
         if not remaining:break
         c=min(remaining,key=exploration)
         scheduled.append(c);scheduled_ids.add(c.candidate_id)
+    if exhaust_candidates:
+        scheduled.extend(c for c in current if c.candidate_id not in {s.candidate_id for s in scheduled})
     for candidate in scheduled:
-        stage = 'approach'
+        stage = 'open_geometry'
         try:
             pre = checked_joints(arm, candidate.pregrasp_model_rad)
             if candidate.object_constraint and not candidate.object_constraint.satisfied(candidate.base_from_grasp_tcp):
                 raise PlanRejected('grasp already violates object orientation')
             paths = [planner.open(start, candidate)]
+            stage = 'pregrasp'
             paths.append(planner.connect(start, pre, candidate, attached=False, label='pregrasp'))
+            stage = 'approach'
             paths.append(planner.cartesian(pre, candidate.base_from_grasp_tcp, candidate,
                                            attached=False, label='approach'))
             candidate=at_actual_contact(candidate,arm.fk(paths[-1].end)[0])
@@ -204,9 +262,30 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
             stage = 'close_geometry'
             paths.append(planner.close(paths[-1].end, candidate))
             stage = 'lift'
-            lift_pose = rigid(candidate.base_from_grasp_tcp).copy()
-            lift_pose[2, 3] += lift_distance_m
-            paths.append(planner.cartesian(paths[-1].end, lift_pose, candidate, attached=True, label='lift'))
+            lift_attempts=[]
+            for direction in directions:
+                lift_pose = rigid(candidate.base_from_grasp_tcp).copy()
+                lift_pose[:3, 3] += direction*lift_distance_m
+                try:
+                    lift_path=planner.cartesian(paths[-1].end,lift_pose,candidate,attached=True,label='lift')
+                except PlanRejected as exc:
+                    lift_attempts.append(dict(direction_base=direction.tolist(),reason=str(exc),
+                                              diagnostics=getattr(exc,'diagnostics',None)))
+                else:
+                    paths.append(lift_path)
+                    break
+            else:
+                if len(lift_attempts)==1:
+                    failure=PlanRejected(lift_attempts[0]['reason'])
+                    failure.diagnostics=lift_attempts[0]['diagnostics']
+                else:
+                    failure=PlanRejected('all checked lift directions blocked')
+                    failure.diagnostics=dict(lift_attempts=lift_attempts)
+                raise failure
+            calibration_review=None
+            if top_calibrated:
+                from .pick_calibration import review_top_path
+                calibration_review=review_top_path([(p.label,p.joints) for p in paths[2:]])
             stage = 'carry_goals'
             goals = carry_goals(arm, paths[-1].end, candidate.base_from_grasp_tcp,
                                 reference_model_rad=reference_model_rad,
@@ -224,6 +303,7 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
                     quality['payload_clearance_probe']=clearance
                     quality['grasp_balance']=balance(candidate)
                     quality['grasp_preference']=preference(candidate)
+                    if calibration_review is not None:quality['top_calibration']=calibration_review
                     quality['carry_grasp_balance']=grasp_balance(arm.fk(goal.model_rad)[0],
                         evaluate(candidate).payload)
                     # Clearance is a soft preference after the original full-path
@@ -232,6 +312,10 @@ def plan_pick_carry(arm, planner, start_model_rad, candidates, *, scene_id,
                     answers.append((goal.cost + .05*travel + penalty + quality['grasp_preference']['cost']
                                     + (balance_cost(candidate) if grasp_policy else 0.),
                                     candidate, paths+[carry], goal,quality))
+                    if stop_after_first:
+                        return PickCarryPlan('OFFLINE_ROUTE_FOUND', candidate.candidate_id, paths+[carry], goal, failures,
+                            resolved_grasp=candidate, carry_quality=quality,
+                            selection=dict(policy='first_complete_route', physical_balance_validated=False))
                 except PlanRejected as exc:
                     failures.append({'candidate': candidate.candidate_id, 'stage': 'carry', 'reason': str(exc),
                                      'diagnostics':getattr(exc,'diagnostics',None)})
@@ -285,6 +369,8 @@ def plan_place_carry(arm, planner, start_model_rad, held, *, scene_id,
     from scipy.spatial.transform import Rotation
     from .carry_cartesian import validate_vertical_descent
     from .navigation import identifier, number
+    # Entry observation belongs to the completed pick, not the new placement.
+    held=replace(held,observed_base_from_object=None,fixed_side_clearance_m=0.)
     result = PlaceCarryPlan('NO_COMPLETE_ROUTE')
     stage = 'binding'
     try:

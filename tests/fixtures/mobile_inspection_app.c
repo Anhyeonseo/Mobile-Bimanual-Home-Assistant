@@ -51,6 +51,9 @@ RightServoReadStatus RightServoBus_ReadInventoryBlock(uint8_t id,unsigned block,
     if(fail_right)return RIGHT_SERVO_READ_RX_TIMEOUT;
     return Servo_ReadData(id,device_inventory_address(block),device_inventory_length(block),data)==HAL_OK?RIGHT_SERVO_READ_OK:RIGHT_SERVO_READ_TX;
 }
+RightServoReadStatus RightServoBus_ReadTuningBlock(uint8_t id,unsigned block,uint8_t *data) {
+    (void)id;(void)block;(void)data;assert(0);return RIGHT_SERVO_READ_UNAVAILABLE;
+}
 static void feed(const char *text) {
     input=(const unsigned char *)text;remaining=strlen(text);
     while(remaining)SingleArmApp_Process();

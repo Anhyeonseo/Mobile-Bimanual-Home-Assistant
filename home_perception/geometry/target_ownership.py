@@ -1,8 +1,8 @@
 """Associate observed RGB-D material with a target without filling unseen space.
 
 SAM supplies seeds, not a hard 3-D silhouette. Only adjacent, measured surfaces
-can extend those seeds across a bounded image rim. A depth discontinuity, table
-return or missing pixel breaks connectivity. Unresolved returns remain occupied.
+can extend those seeds across a bounded image rim. Measured gaps block joins;
+missing pixels never supply material. Unresolved returns remain occupied.
 The limits below are development association budgets, not calibrated sensor errors.
 """
 from dataclasses import dataclass
@@ -56,10 +56,20 @@ def associate(depth, intr, mask, optical, heights, clean_target, plane_rms_m, *,
     pixel_index.flat[valid_index[rows]]=np.arange(len(rows))
     vertices=optical[rows]
     edges=[]
-    for a,b in ((pixel_index[:-1,:],pixel_index[1:,:]),(pixel_index[:,:-1],pixel_index[:,1:])):
-        present=(a>=0)&(b>=0);left,right=a[present],b[present]
+    # RGB alignment can leave same-surface returns connected only diagonally.
+    # Scale image spacing for diagonal steps, retaining the metric cap. Do not cross a measured
+    # table/background pixel or another protected instance at the corner.
+    corner_ok=((~valid)|(pixel_index>=0))&~protected
+    pairs=((pixel_index[:-1,:],pixel_index[1:,:],None,1.),
+           (pixel_index[:,:-1],pixel_index[:,1:],None,1.),
+           (pixel_index[:-1,:-1],pixel_index[1:,1:],corner_ok[:-1,1:]&corner_ok[1:,:-1],np.sqrt(2)),
+           (pixel_index[:-1,1:],pixel_index[1:,:-1],corner_ok[:-1,:-1]&corner_ok[1:,1:],np.sqrt(2)))
+    for a,b,corners,step_pixels in pairs:
+        present=(a>=0)&(b>=0)
+        if corners is not None:present&=corners
+        left,right=a[present],b[present]
         local_spacing=np.minimum(vertices[left,2],vertices[right,2])/focal
-        limit=np.clip(2*plane_rms_m+2*local_spacing,.0025,.006)
+        limit=np.clip(2*plane_rms_m+2*step_pixels*local_spacing,.0025,.006)
         connected=np.linalg.norm(vertices[left]-vertices[right],axis=1)<=limit
         edges.append((left[connected],right[connected]))
     source=np.concatenate([e[0] for e in edges]);dest=np.concatenate([e[1] for e in edges])
@@ -76,7 +86,7 @@ def associate(depth, intr, mask, optical, heights, clean_target, plane_rms_m, *,
         seed_points=int(seeds.sum()),associated_rim_points=int((target&~mask).sum()),
         unresolved_rim_points=int(uncertain.sum()),maximum_pixels=6,
         radius_m_range=[float(radius.min()),float(radius.max())],
-        radius_m_cap=.006,seed_distance_m=.005,adjacency=4,
+        radius_m_cap=.006,seed_distance_m=.005,adjacency=8,diagonal_measured_gap_guard=True,
         protected_instance_pixels=int(protected.sum()),
         missing_depth_filled=False,unresolved_policy='retain_as_occupied',
         sensor_accuracy_calibrated=False))

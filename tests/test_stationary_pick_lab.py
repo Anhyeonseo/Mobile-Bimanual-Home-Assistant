@@ -166,7 +166,8 @@ def test_bound_input_cli_and_candidate_order(arm,tmp_path):
     inp=tmp_path/'in.json';out=tmp_path/'out.json'
     inp.write_text(json.dumps({k:a[k] for k in ('review','group','scene_boxes_m')}))
     subprocess.run([sys.executable,str(lab.ROOT/'tools/diagnostics/run_s3_stationary_lab.py'),
-                    '--input',str(inp),'--output',str(out)],check=True)
+                    '--input',str(inp),'--output',str(out),
+                    '--profile',str(lab.PROFILE),'--pad-record',str(lab.PAD_RECORD)],check=True)
     result=json.loads(out.read_text());assert result['path']['status']=='VIRTUAL_PATH_FOUND'
     assert result['hardware_commands']==0 and result['motion_authorized'] is False
     assert result['task'] == 'pick-lift' and 'destinations_tested' not in result['path']

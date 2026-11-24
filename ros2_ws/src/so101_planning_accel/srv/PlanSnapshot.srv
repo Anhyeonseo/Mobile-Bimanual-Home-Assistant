@@ -1,0 +1,7 @@
+moveit_msgs/PlanningScene scene
+moveit_msgs/MotionPlanRequest request
+---
+moveit_msgs/MotionPlanResponse response
+string selected_planner
+float64 wall_seconds
+string error

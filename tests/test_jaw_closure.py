@@ -125,7 +125,7 @@ def test_uncalibrated_candidate_is_skipped_before_ik_then_next_candidate_is_used
     from home_robot_tasks.stationary_pick_sim import plan_pick
 
     arm=lab.model(.61)
-    measured=InstalledLeftJaw(lab.read(lab.CONFIG/'left_pad_gap.observed.json'),arm.profile)
+    measured=InstalledLeftJaw(lab.read(lab.PAD_RECORD),arm.profile)
     review,group,_=lab.fixture(arm,lab.CASES[0],1)
     missing=plan_pick(arm,dict(review,mode='offline_capture_review'),group,lab.SCENE)
     assert missing['status']=='LEFT_PAD_CALIBRATION_REQUIRED' and missing['attempts']==[]

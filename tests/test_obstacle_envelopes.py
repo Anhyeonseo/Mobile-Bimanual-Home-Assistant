@@ -55,3 +55,15 @@ def test_an_independent_return_inside_the_target_volume_prevents_refinement():
     points=np.array([[.04005,0,.006],[.0399,.0001,.007]])
     bounds=np.array([points.min(axis=0)-.001,points.max(axis=0)+.001]);bounds[0,2]=0.
     assert separate_target_padding(bounds,points,target) is None
+
+@pytest.mark.parametrize('gap',[.00005,.000379278,.002])
+def test_numerical_gap_preserves_returns_and_tolerates_micrometre_pose_residual(gap):
+    target=np.array(list(product([-.04,.04],[-.02,.02],[0.,.015])))
+    points=np.array([[.04+gap,0.,.006]])
+    bounds=np.array([points[0]-.001,points[0]+.001]);bounds[0,2]=0.
+    if gap>.001:bounds[0,0]=.0395
+    pieces=separate_target_padding(bounds,points,target)
+    assert pieces and covered(pieces,points).all()
+    assert not covered(pieces,np.array([[.040005,0.,.006]])).any()
+    # Preserve genuine obstacle material past the separation.
+    assert covered(pieces,np.array([[.04+gap,0.,.006]])).all()

@@ -48,12 +48,23 @@ def load_inputs(report_path, prepared_path):
     return program, (report, profile, geometry, arms, boxes)
 
 
-def validate_native(program, inputs, mesh_dir, output):
+def review_top_clearance(surface_audit):
+    """Historical point residuals are context, not extra collision geometry."""
+    rows=[dict(stage=row['stage'], finger=name, clearance_m=value['clearance_m'])
+          for row in surface_audit['stages'] if row['stage'] in ('approach','close','probe','lift')
+          for name,value in row['minimum_by_finger'].items()]
+    return dict(historical_vertical_residual_m=.004, hard_limit=False,
+                minimum_clearance_m=min(row['clearance_m'] for row in rows),
+                below_historical_residual=[row for row in rows if row['clearance_m']<=.004],
+                physical_accuracy_verified=False)
+
+
+def validate_native(program, inputs, mesh_dir, output, *, session_factory=None):
     from home_robot_tasks.grasp_preferences import TabletopGraspPolicy, contact_posture
     from moveit_msgs.msg import RobotState
     from home_robot_tasks.carry_model import parameters
     from home_robot_tasks.carry_moveit import MoveItCarryPlanner
-    from home_robot_tasks.carry_planning import GraspRouteCandidate, fixed_contact_review, at_actual_contact
+    from home_robot_tasks.carry_planning import GraspRouteCandidate, fixed_contact_review, at_actual_contact, closing_sweep_candidate
     from home_robot_tasks.carry_posture import ObjectAxisConstraint
     from home_robot_tasks.carry_scene import apply_boxes
     from tools.diagnostics.carry_moveit_session import session
@@ -61,6 +72,11 @@ def validate_native(program, inputs, mesh_dir, output):
     surface_audit=audit_native_surfaces(program,profile,arms['left'],boxes,
                                       approach_mode=report.get('approach_mode','tool_axis'),
                                       support_plane=report.get('observed_support_plane_base'))
+    from home_robot_tasks.pick_calibration import TOP_BASIS, TOP_BASES, audit_top_program
+    calibration_review=None
+    if report.get('lift_reference_basis') in TOP_BASES:
+        calibration_review=audit_top_program(program, profile,expected_lift_m=report['initial_model_joint_positions_si']['s2_lift_joint'])
+        calibration_review['surface_clearance'] = review_top_clearance(surface_audit)
     posture_spec=report.get('grasp_posture_policy')
     posture_policy=TabletopGraspPolicy(**posture_spec) if posture_spec else None
     joints = report['initial_model_joint_positions_si']
@@ -84,11 +100,13 @@ def validate_native(program, inputs, mesh_dir, output):
     config = parameters(ROOT, profile, geometry, arms, mesh_dir)
     output.mkdir(parents=True, exist_ok=True)
     results = []
-    with session(config, state, output) as call:
+    with (session_factory or session)(config, state, output) as call:
         apply_boxes(call, boxes)
         planner = MoveItCarryPlanner(arms['left'], state, call)
         for stage in program.stages:
-            planner.prepare(candidate, stage.attached)
+            checking=(closing_sweep_candidate(candidate) if stage.name=='close' else candidate)
+            attached=stage.attached or (stage.name=='close' and candidate.observed_base_from_object is not None)
+            planner.prepare(checking, attached)
             before = planner.checked_states
             previous = None
             for point in stage.points:
@@ -106,7 +124,7 @@ def validate_native(program, inputs, mesh_dir, output):
                 # Rigid contact blocks the physical finger at observed width.
                 # The smaller command is pressure intent, not a smaller object.
                 jaw = max(model[5], candidate.held_jaw_model_rad) if stage.name in ('close','probe','lift','carry','hold') else model[5]
-                planner.valid(model[:5], candidate, stage.attached, jaw=jaw)
+                planner.valid(model[:5], checking, attached, jaw=jaw)
             results.append(dict(stage=stage.name, checked_states=planner.checked_states-before))
         # Negative control: a new independent obstacle intersecting the held
         # object must still fail. This never changes the recorded scene or
@@ -137,7 +155,8 @@ def validate_native(program, inputs, mesh_dir, output):
         planner.valid(model[:5],candidate,True,jaw=jaw)
     return dict(status='PASSED', stages=results, continuous_collision_proof=False,
                 independent_obstacle_rejected=rejected,scene_restored_and_rechecked=True,
-                stock_finger_surfaces=surface_audit,fixed_finger_contact=contact_audit)
+                stock_finger_surfaces=surface_audit,fixed_finger_contact=contact_audit,
+                top_calibration=calibration_review)
 
 
 def audit_native_surfaces(program,profile,arm,boxes, *, approach_mode='tool_axis',support_plane=None):

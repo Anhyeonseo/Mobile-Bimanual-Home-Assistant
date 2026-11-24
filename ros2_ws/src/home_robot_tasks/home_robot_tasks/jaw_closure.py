@@ -17,11 +17,13 @@ def _finite(value):
 
 
 def closure_plan(jaw, candidate, *, entry_clearance_m=2*SIDE_CLEARANCE_M,
-                 close_allowance_m=RIGID_CLOSE_ALLOWANCE_M):
+                 close_allowance_m=RIGID_CLOSE_ALLOWANCE_M, close_extra_raw=0):
     if not _finite(entry_clearance_m) or not 2*SIDE_CLEARANCE_M <= entry_clearance_m <= .020:
         raise ValueError('entry clearance must be within 4..20 mm')
     if not _finite(close_allowance_m) or not .001<=close_allowance_m<=.005:
         raise ValueError('close allowance must be within 1..5 mm')
+    if type(close_extra_raw) is not int or close_extra_raw < 0:
+        raise ValueError('close extra must be a nonnegative raw count')
     opening = candidate.get('width_m')
     if not _finite(opening) or not jaw.accepts(opening):
         return dict(status='SO101_JAW_SECTION_LIMIT')
@@ -48,6 +50,7 @@ def closure_plan(jaw, candidate, *, entry_clearance_m=2*SIDE_CLEARANCE_M,
     # may shorten the motion, but never move this target after contact.
     target = max(float(jaw.gaps[0]), span - close_allowance_m)
     return dict(status='BOUNDED_CLOSE', entry_gap_m=opening, visible_span_m=span,
+                **({'close_extra_raw': close_extra_raw} if close_extra_raw else {}),
                 close_allowance_m=close_allowance_m,
                 target_gap_m=target, min_search_gap_m=target,  # legacy replay field
                 upper_contact_gap_m=min(opening, span + CONTACT_UNCERTAINTY_M),

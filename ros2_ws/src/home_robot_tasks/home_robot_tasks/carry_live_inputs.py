@@ -167,12 +167,16 @@ class MeasuredFK:
 class LiveCarryInputs:
     def __init__(self,program,fk,reference,mask,intrinsics,base_from_optical,
                  platform,*,clock=time.monotonic,error_budget_m=.0006,robot_sweep_mask=None,maximum_background_depth_m=None,
-                 observation_policy='continuous_patch', stationary_hold_admission=False):
+                 observation_policy='continuous_patch', stationary_hold_admission=False, fixed_bottom_observation=False, fixed_planning_snapshot=False):
         if observation_policy not in ('continuous_patch','snapshot_then_verify'):
             raise ValueError('explicit supported observation policy required')
         self.observation_policy=observation_policy
         if stationary_hold_admission and observation_policy!='snapshot_then_verify':
             raise ValueError('held admission requires a stationary snapshot policy')
+        if (fixed_bottom_observation or fixed_planning_snapshot) and observation_policy!='snapshot_then_verify':
+            raise ValueError('fixed bottom observation requires stationary snapshot policy')
+        self.fixed_bottom_observation=fixed_bottom_observation
+        self.fixed_planning_snapshot=fixed_bottom_observation or fixed_planning_snapshot
         self.stationary_hold_admission=stationary_hold_admission
         self.admitted=False
         self.program,self.fk,self.platform,self.clock=program,fk,platform,clock
@@ -188,6 +192,47 @@ class LiveCarryInputs:
         self.validation=None;self.last_pair_stamp=-1.
         self.feedback_time=-1.
         self.epoch=0
+        self.grasp_verification_binding=None
+        self.grasp_verification=None
+
+    def bind_grasp_verifier(self, *, arm, attempt_id, camera_frame):
+        """Opt-in camera evidence for this snapshot session, before admission.
+
+        The stationary program currently controls LEFT only. The perception
+        verifier supports both arms; do not apply right-arm evidence to left.
+        """
+        with self.lock:
+            if (self.phase!='IDLE' or self.admitted or self.grasp_verification_binding is not None
+                    or self.observation_policy!='snapshot_then_verify' or arm!='left'
+                    or not isinstance(attempt_id,str) or not attempt_id
+                    or not isinstance(camera_frame,str) or not camera_frame):
+                raise ValueError('new idle left-arm snapshot verifier binding required')
+            self.grasp_verification_binding=(arm,attempt_id,self.program.capture_id,
+                                             self.program.candidate_id,camera_frame)
+
+    def add_grasp_verification(self, result):
+        """Consume cached worker output; never run image inference in serial loop."""
+        from .rgb_grasp_verification import RGBGraspResult
+        with self.lock:
+            if (not isinstance(result,RGBGraspResult) or self.grasp_verification_binding is None
+                    or (result.arm,result.attempt_id,result.capture_id,result.target_id,result.camera_frame)
+                    != self.grasp_verification_binding):
+                raise ValueError('camera/arm/attempt/target binding mismatch')
+            if result.state not in ('SUCCESS','FAILURE','UNKNOWN'):
+                raise ValueError('unknown visual verification state')
+            if not self.admitted or self.phase not in ('probe','lift','carry','hold'):
+                raise ValueError('post-close admitted verification phase required')
+            if (self.grasp_verification is not None and
+                    (result.sequence<=self.grasp_verification.sequence or result.observed_s<=self.grasp_verification.observed_s)):
+                raise ValueError('replayed verification result')
+            if not math.isfinite(result.observed_s) or not 0<=self.clock()-result.observed_s<=.2:
+                raise ValueError('stale verification result')
+            if self.grasp_verification is not None and self.grasp_verification.state=='FAILURE':
+                return  # A confirmed miss cannot be erased by a later missing image.
+            if (self.grasp_verification is not None and self.grasp_verification.state=='SUCCESS'
+                    and result.state!='SUCCESS'):
+                self.failure=ValueError('previously verified payload observation lost')
+            self.grasp_verification=result;self.generation+=1
     def reset_unarmed_history(self):
         """Explicit boundary after PREPARE, which resets MCU acquisition count."""
         with self.lock:
@@ -268,11 +313,17 @@ class LiveCarryInputs:
         color,depth,metadata=images
         try:
             stamp=record['color_time_s']
-            validation=self.scene.compare(color,depth.astype(float)*metadata['depth_scale_m'],target_only=True)
-            validation.update(environment_basis='native_checked_rgbd_planning_snapshot',
-                              live_background_revalidated=False,live_target_revalidated=True)
-            if not validation['unchanged']:
-                raise SceneValidationError('planned target changed before admission',validation)
+            if self.fixed_planning_snapshot or self.fixed_bottom_observation:
+                validation=dict(unchanged=None, fixed_bottom_observation=self.fixed_bottom_observation,
+                    fixed_planning_snapshot=True,
+                    environment_basis='native_checked_rgbd_planning_snapshot',
+                    live_background_revalidated=False,live_target_revalidated=False)
+            else:
+                validation=self.scene.compare(color,depth.astype(float)*metadata['depth_scale_m'],target_only=True)
+                validation.update(environment_basis='native_checked_rgbd_planning_snapshot',
+                                  live_background_revalidated=False,live_target_revalidated=True)
+                if not validation['unchanged']:
+                    raise SceneValidationError('planned target changed before admission',validation)
             # Lack of a matching pair can be temporary during acquisition.
             matcher=match_held_exposure if self.stationary_hold_admission else match_exposure
             try:j=matcher(history,stamp,record['depth_time_s'],self.clock())
@@ -327,16 +378,27 @@ class LiveCarryInputs:
         return f.scene_current and not self.failure and 0<=self.clock()-self.camera_time<=.2
 
     def _snapshot_feedback(self,now):
-        if not self.joints or not self.validation or not self.validation['unchanged']:
+        if not self.joints or not self.validation or not (self.validation.get('unchanged') is True or
+                ((self.fixed_planning_snapshot or self.fixed_bottom_observation) and self.validation.get('fixed_planning_snapshot') is True)):
             raise ValueError('waiting for measured scene admission')
         self._require_platform_fresh(now)
         if not 0<=now-self.feedback_time<=.2:raise ValueError('joint sample stale')
         if not self.admitted and (not 0<=now-self.scene_time<=.2 or self.last_pair_stamp<0):
             raise ValueError('scene admission stale')
         p=self.program;j=self.joints[-1]
+        relation='unknown';vision_sequence=-1;vision_s=-1.
+        result=self.grasp_verification
+        if result is not None and result.state=='SUCCESS' and not 0<=now-result.observed_s<=.2:
+            raise ValueError('previously verified payload observation stale')
+        if (result is not None and 0<=now-result.observed_s<=.2
+                and abs(result.observed_s-self.feedback_time)<=.05):
+            relation={'SUCCESS':'held','FAILURE':'empty','UNKNOWN':'unknown'}[result.state]
+            vision_sequence=result.sequence;vision_s=result.observed_s
+        if result is not None and result.state=='FAILURE':
+            relation='empty'  # Latched negative evidence, never an authorization.
         return CarryFeedback(self.generation,self.feedback_time,0.,p.capture_id,p.calibration_id,dict(p.source_sha256),
             j.positions_rad,self.platform.current_height,self.platform.base_stopped,self.platform.lift_stopped,
-            True,True,'unknown',-1,-1.,True,True,p.capture_id,p.candidate_id,self.scene_time,
+            True,True,relation,vision_sequence,vision_s,True,True,p.capture_id,p.candidate_id,self.scene_time,
             observation_policy=self.observation_policy)
 
     def _require_platform_fresh(self,now):

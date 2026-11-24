@@ -88,8 +88,15 @@ class CarryGoal:
 
 def checked_joints(arm, value):
     value = np.asarray(value, float)
-    if value.shape != (5,) or not np.isfinite(value).all() or np.any(value < arm.lo) or np.any(value > arm.hi):
-        raise ValueError("five finite in-range model joint angles required")
+    if value.shape != (5,) or not np.isfinite(value).all():
+        raise ValueError("five finite model joint angles required")
+    outside = np.flatnonzero((value < arm.lo) | (value > arm.hi))
+    if len(outside):
+        names = ('base', 'shoulder', 'elbow', 'wrist_flex', 'wrist_roll')
+        details = '; '.join(f'{names[i]}={np.rad2deg(value[i]):.2f} deg '
+                            f'(allowed {np.rad2deg(arm.lo[i]):.2f}..{np.rad2deg(arm.hi[i]):.2f})'
+                            for i in outside)
+        raise ValueError('model joint outside planning range: '+details)
     return value
 
 

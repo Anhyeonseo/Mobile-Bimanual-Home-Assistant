@@ -1,7 +1,7 @@
 """GraspNet target proposals; legacy generic-gripper checks are audit data only."""
 import hashlib
 from pathlib import Path
-import subprocess
+from threading import Lock
 import sys
 import types
 
@@ -13,21 +13,20 @@ from home_perception.grasp.handoff import CONVENTION, PRODUCER_REVISION, candida
 from home_perception.grasp.refine import SUPPORT_MARGIN_M, refine
 from home_perception.grasp.proposals import select as select_proposals
 
+from home_perception.grasp.graspnet_assets import BASELINE_REVISION, CHECKPOINT_SHA256, verify_baseline
+
 ARTIFACTS = Path(__file__).resolve().parents[2] / 'artifacts'
-BASELINE_REVISION = '280c215129f759ed8649cb4e89fc5dfee55f4f80'
 CHECKPOINT = ARTIFACTS / 'models/checkpoint-rs.tar'
-CHECKPOINT_SHA256 = '60680087c61cba2b6791614fef1519071e294f6dcaf99b3f581bb95f7c51a868'
+_import_lock = Lock()
 
 
-def _baseline():
+def _baseline(device='cuda', audit=True):
     import torch
 
     root = ARTIFACTS / 'graspnet-baseline'
-    rev = subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'], capture_output=True, text=True)
-    if rev.returncode or rev.stdout.strip() != BASELINE_REVISION:
-        raise ValueError(f'expected GraspNet baseline {BASELINE_REVISION} in {root}')
-    if not torch.cuda.is_available():
-        raise RuntimeError('GraspNet inference requires CUDA and its PointNet2 extension')
+    verify_baseline(root)
+    if device == 'cuda' and not torch.cuda.is_available():
+        raise RuntimeError('CUDA was requested but is unavailable')
     # The baseline imports its training-only nearest-neighbour extension at module import.
     # The team's 1-based torch implementation avoids a second compiled extension.
     def knn(ref, query, k=1):
@@ -36,41 +35,73 @@ def _baseline():
 
     knn_module = types.ModuleType('knn_modules')
     knn_module.knn = knn
-    original_path = sys.path[:]
-    previous_knn = sys.modules.get('knn_modules')
-    try:
-        sys.path[:0] = [str(root / name) for name in ('models', 'utils', 'pointnet2')]
-        sys.path.insert(0, str(ARTIFACTS / 'graspnet-runtime'))
-        sys.modules['knn_modules'] = knn_module
-        from graspnet import GraspNet, pred_decode
-        from collision_detector import ModelFreeCollisionDetector
-    finally:
-        sys.path[:] = original_path
-        if previous_knn is None:
-            sys.modules.pop('knn_modules', None)
-        else:
-            sys.modules['knn_modules'] = previous_knn
+    # The reference repository uses unqualified imports. Bind its modules only
+    # while loading, so a CPU worker and a native CUDA runtime can coexist.
+    names = ('knn_modules', 'pointnet2', 'pointnet2._ext', 'graspnet', 'backbone',
+             'modules', 'loss', 'pointnet2_modules', 'pointnet2_utils', 'pytorch_utils',
+             'loss_utils', 'label_generation', 'collision_detector')
+    with _import_lock:
+        original_path = sys.path[:]
+        previous = {name: sys.modules.pop(name) for name in names if name in sys.modules}
+        try:
+            sys.path[:0] = [str(root / name) for name in ('models', 'utils', 'pointnet2')]
+            if device == 'cpu':
+                from home_perception.grasp import pointnet2_cpu
+                package = types.ModuleType('pointnet2')
+                package.__path__ = []
+                package._ext = pointnet2_cpu
+                sys.modules.update({'pointnet2': package, 'pointnet2._ext': pointnet2_cpu})
+            else:
+                sys.path.insert(0, str(ARTIFACTS / 'graspnet-runtime'))
+            sys.modules['knn_modules'] = knn_module
+            from graspnet import GraspNet, pred_decode
+            ModelFreeCollisionDetector = None
+            if audit:
+                from collision_detector import ModelFreeCollisionDetector
+        finally:
+            sys.path[:] = original_path
+            for name in names:
+                sys.modules.pop(name, None)
+            sys.modules.update(previous)
     return GraspNet, pred_decode, ModelFreeCollisionDetector
 
 
-def infer(points, checkpoint):
-    import torch
+class GraspNetRuntime:
+    """Explicit process-local model lifetime. Construct once, infer many times."""
+    def __init__(self, checkpoint=CHECKPOINT, *, device='cuda', audit=True):
+        import torch
+        if device not in ('cpu', 'cuda'):
+            raise ValueError('expected cpu or cuda')
+        self.device = device
+        self.checkpoint = Path(checkpoint).resolve()
+        with self.checkpoint.open('rb') as file:
+            if hashlib.sha256(file.read()).hexdigest() != CHECKPOINT_SHA256:
+                raise ValueError('unexpected RealSense GraspNet checkpoint digest')
+            file.seek(0)
+            GraspNet, self.decode, self.detector = _baseline(device, audit)
+            net = GraspNet(input_feature_dim=0, num_view=300, num_angle=12, num_depth=4,
+                          cylinder_radius=.05, hmin=-.02, hmax_list=[.01,.02,.03,.04], is_training=False)
+            net.load_state_dict(torch.load(file, map_location='cpu', weights_only=True)['model_state_dict'], strict=True)
+        self.net = net.to(device).eval()
 
-    with checkpoint.open('rb') as file:
-        if hashlib.sha256(file.read()).hexdigest() != CHECKPOINT_SHA256:
-            raise ValueError('unexpected RealSense GraspNet checkpoint digest')
-        file.seek(0)
-        GraspNet, decode, detector = _baseline()
-        net = GraspNet(input_feature_dim=0, num_view=300, num_angle=12, num_depth=4, cylinder_radius=.05,
-                       hmin=-.02, hmax_list=[.01, .02, .03, .04], is_training=False)
-        net.load_state_dict(torch.load(file, map_location='cpu', weights_only=True)['model_state_dict'], strict=True)
-    selected = np.random.default_rng(0).choice(len(points), 20000, replace=len(points) < 20000)
-    torch.manual_seed(0)
-    cloud = torch.as_tensor(points[selected][None], dtype=torch.float32, device='cuda')
-    with torch.inference_mode():
-        net.cuda().eval()
-        rows = decode(net({'point_clouds': cloud}))[0].cpu().numpy()
-    return rows, detector
+    def __call__(self, points, checkpoint=CHECKPOINT):
+        import torch
+        if Path(checkpoint).resolve() != self.checkpoint:
+            raise ValueError('runtime/checkpoint mismatch; construct a new runtime')
+        points = np.asarray(points)
+        if points.ndim != 2 or points.shape[1] != 3 or not len(points) or not np.isfinite(points).all():
+            raise ValueError('finite nonempty XYZ point cloud required')
+        selected = np.random.default_rng(0).choice(len(points), 20000, replace=len(points) < 20000)
+        torch.manual_seed(0)
+        cloud = torch.as_tensor(points[selected][None], dtype=torch.float32, device=self.device)
+        with torch.inference_mode():
+            rows = self.decode(self.net({'point_clouds': cloud}))[0].cpu().numpy()
+        return rows, self.detector
+
+
+def infer(points, checkpoint):
+    # Historical one-shot API; resident applications explicitly own the runtime.
+    return GraspNetRuntime(checkpoint)(points, checkpoint)
 
 
 def associate(rows, intr, mask, target):
@@ -110,7 +141,7 @@ def rank_for_jaw(filtered, target, plane, height, opening_range):
     return np.vstack((fitted, outside)), rejected
 
 
-def candidates(depth, intr, masks, index, scene, plane, height, opening_range, checkpoint=CHECKPOINT, *, section_points=None):
+def candidates(depth, intr, masks, index, scene, plane, height, opening_range, checkpoint=CHECKPOINT, *, section_points=None, audit_enabled=True, inference=None):
     from home_perception.geometry.workspace import workspace_mask
 
     valid = depth > 0
@@ -121,11 +152,14 @@ def candidates(depth, intr, masks, index, scene, plane, height, opening_range, c
     points = workspace[np.linalg.norm(workspace - target.mean(axis=0), axis=1) <= .15]
     if not len(points):
         raise ValueError('no measured points in the target sampling region')
-    raw, detector = infer(points, checkpoint)
+    raw, detector = (inference or infer)(points, checkpoint)
     rows = raw[np.isfinite(raw).all(axis=1)]
     associated = associate(rows, intr, masks[index], target)
-    filtered = collision_filter(associated, scene, detector)
-    kept, rejected = rank_for_jaw(filtered, target, plane, height, opening_range)
+    audit = dict(enabled=bool(audit_enabled), authoritative=False)
+    if audit_enabled:
+        filtered = collision_filter(associated, scene, detector)
+        kept, rejected = rank_for_jaw(filtered, target, plane, height, opening_range)
+        audit.update(collision_and_empty_filtered=len(filtered), refined=len(kept), rejected_by_check=rejected)
     if section_points is None:
         section_points = target[plane.height(target) > SUPPORT_MARGIN_M]
     proposals, selection = select_proposals(associated, section_points, plane, opening_range, centered_contacts=True)
@@ -133,8 +167,7 @@ def candidates(depth, intr, masks, index, scene, plane, height, opening_range, c
               else 'no_observed_robot_width_proposal')
     return dict(tcp_convention=CONVENTION, producer_revision=PRODUCER_REVISION, baseline_revision=BASELINE_REVISION,
                 checkpoint_sha256=CHECKPOINT_SHA256, candidate_reason=reason, proposal_selection=selection,
-                legacy_parallel_jaw_audit=dict(authoritative=False, collision_and_empty_filtered=len(filtered),
-                                              refined=len(kept), rejected_by_check=rejected),
+                legacy_parallel_jaw_audit=audit,
                 counts=dict(generated=len(raw), target_associated=len(associated),
                             refined=len(proposals)),
                 refined_grasps=proposals)
