@@ -61,6 +61,7 @@ typedef struct {
  * braking margin and verified hold behavior require physical commissioning. */
 /* Base-only evidence: preserve raw lift height. Registered bottom transport
  * uses the commissioned hold envelope; legacy quiet hold uses <=2 counts. */
+bool actuator_lift_top_hold_verified(const actuator_lift_t *lift, uint32_t now_ms);
 int32_t actuator_lift_base_height(const actuator_lift_t *lift,uint32_t now_ms);
 /* Existing registered-bottom HOLDING only. Use the commissioned position
  * envelope and independently read zero-drive state, not speed/moving bits.

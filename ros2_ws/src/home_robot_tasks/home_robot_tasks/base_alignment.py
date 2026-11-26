@@ -113,6 +113,63 @@ def run_lateral_shift(plan, *, mobile, observe, enter_transport, admit, check=la
             raise RuntimeError('바퀴 명령 상태 확인 실패')
         sleep(.02)
     commanded_s = clock()-started
+    settle_wheels(mobile, observe, check=check, clock=clock, sleep=sleep, log=log,
+                  settle_ms=settle_ms, settle_timeout_s=settle_timeout_s)
+    return dict(commanded_s=commanded_s, nonzero_commands=commands, settled_s=clock()-started)
+
+
+class WheelRestWindow:
+    """Corroborate speed quantization with three independent post-zero encoders."""
+    def __init__(self):
+        self.first_command = None
+        self.samples = []
+        self.last_tick = None
+
+    def observe(self, reply, snapshot):
+        now = reply.mcu_tick_ms
+        if self.first_command is None:
+            self.first_command = now
+        if not reply.feedback_is_fresh(250) or max(map(abs, reply.velocity_raw[:3])) > 50:
+            self.samples.clear()
+            self.last_tick = None
+            return
+        if snapshot is None:
+            return
+        tick = snapshot['firmware_tick_ms']
+        ages = snapshot['sample_age_ms'][:3]
+        if snapshot['present_mask'] & 7 != 7 or max(ages) >= 250:
+            self.samples.clear()
+            self.last_tick = None
+            return
+        stamps = tuple((tick-age) & 0xffffffff for age in ages)
+        if any(not 0 < (t-self.first_command) & 0xffffffff < 0x80000000 for t in stamps):
+            return
+        if self.last_tick:
+            steps = [(t-p) & 0xffffffff for t,p in zip(stamps,self.last_tick)]
+            if max(steps) >= 250:
+                self.samples.clear()
+            elif not min(steps):
+                return
+        self.last_tick = stamps
+        positions = tuple(snapshot['positions_raw'][:3])
+        self.samples.append((stamps, positions))
+        anchor = self.samples[0][1]
+        deltas = [tuple((p-a+2048)%4096-2048 for p,a in zip(row,anchor)) for _,row in self.samples]
+        if any(max(axis)-min(axis)>2 for axis in zip(*deltas)):
+            self.samples = self.samples[-1:]
+
+    def proven(self, tick, required_ms):
+        if len(self.samples) < 6:
+            return False
+        first, last = self.samples[0][0], self.samples[-1][0]
+        # Encoder data are acquired just after the command reply.
+        return (max(min((tick-t)&0xffffffff, (t-tick)&0xffffffff) for t in last) < 250
+                and min((n-o)&0xffffffff for o,n in zip(first,last)) >= required_ms)
+
+
+def settle_wheels(mobile, observe, *, check, clock=time.monotonic, sleep=time.sleep,
+                  log=lambda event, **data: None, settle_ms=900, settle_timeout_s=3., encoder_rest=None):
+    """Keep sending zero until fresh encoder samples prove the base stationary."""
     zero_since = None
     first_zero_tick = None
     last_sample = None
@@ -136,7 +193,8 @@ def run_lateral_shift(plan, *, mobile, observe, enter_transport, admit, check=la
         if age < 250 and reply.flags & 8 and after_zero and forward:
             if zero_since is None:
                 zero_since = sample
-            if (sample-zero_since) & 0xffffffff >= settle_ms:
+            if ((sample-zero_since) & 0xffffffff >= settle_ms or
+                    (encoder_rest is not None and encoder_rest.proven(reply.mcu_tick_ms, settle_ms))):
                 break
         else:
             zero_since = None
@@ -144,4 +202,3 @@ def run_lateral_shift(plan, *, mobile, observe, enter_transport, admit, check=la
         if clock() > deadline:
             raise TimeoutError('바퀴 영속도 유지 확인 시간 초과')
         sleep(.02)
-    return dict(commanded_s=commanded_s, nonzero_commands=commands, settled_s=clock()-started)

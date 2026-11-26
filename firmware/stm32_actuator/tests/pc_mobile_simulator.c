@@ -65,6 +65,7 @@ int pc_mobile_exchange(const uint8_t *request,int length,uint32_t now,uint8_t *r
 uint32_t pc_mobile_transmissions(void){return transmitted;}
 
 #if ACTUATOR_PROTOCOL_VERSION == 2
+void pc_host_enable_checked_wheels(void){endpoint.cached_platform_positions=true;}
 void pc_host_set_attached(int attached) {host_attached=attached!=0;}
 /* Exactly one framed response, or zero while a fragmented frame is incomplete.
  * The UART fixture passes arbitrary chunks; actual C COBS/CRC parsing is used. */

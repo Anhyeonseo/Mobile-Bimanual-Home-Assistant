@@ -151,7 +151,7 @@ def add_so101_supplement(primary, geometric):
 def replay(snapshot, detections, label, side=None, *, robot_report=None, scene_boxes=None,
            grasp_run=None, perception_run=None, surface_variants=False, height_only=False, above_support_m=0., previous_preset=None,
            tabletop_calibration=False, candidate_source='graspnet-first', scene_preview=False, near_field=False,
-           left_pad_record=None, prepare_carry=False, trial_contact_offset_m=0., nominal_jaw=False, camera_mode=None, grasp_inference=None, grasp_checkpoint=None, grasp_audit=True):
+           left_pad_record=None, prepare_carry=False, trial_contact_offset_m=0., nominal_jaw=False, camera_mode=None, grasp_inference=None, grasp_checkpoint=None, grasp_audit=True, cabinet_top=False):
     if candidate_source in ('so101', 'graspnet-so101') and grasp_run:
         raise ValueError('so101 requires saved detections, not precomputed grasp exports')
     if trial_contact_offset_m and not prepare_carry:
@@ -196,6 +196,23 @@ def replay(snapshot, detections, label, side=None, *, robot_report=None, scene_b
         up_in_optical = s2_geometry.rigid(profile['base_from_optical'])[2, :3]
         observations, masks = grounding_observations(snapshot, detections, meta, depth, plane, source, clouds,
                                                      support_planes=support_planes, up_in_optical=up_in_optical)
+    if cabinet_top:
+        # Use the plane fitted around each mask, in this exposure. Keep every
+        # mask for collision geometry and preserve detector indices.
+        if grasp_run or camera_mode != 'near':
+            raise ValueError('cabinet selection requires calibrated near RGB-D masks')
+        from home_robot_tasks.pick_calibration import check_top_surface
+        cabinet = read(CONFIG/'cabinet_navigation.json')
+        for index, obj in enumerate(observations):
+            support = support_planes.get(index)
+            point = obj.get('center_xyz_m')
+            on_top = False
+            if support is not None and point is not None:
+                xyz = s2_geometry.optical_to_base(profile['base_from_optical'], point)
+                height = check_top_surface(support.to_dict(), xyz, profile) - profile['ground_z_m']
+                obj['observed_support_height_m'] = height
+                on_top = abs(height - cabinet['table_height_m']) <= cabinet['support_height_tolerance_m']
+            obj['on_requested_support'] = on_top
     result = dict(mode='offline_grasp_replay', capture_id=snapshot.name, label=label,
                   jaw_geometry_source='measured_installed_pads' if installed_jaw is not None else 'nominal_official_stl',
                   base_placement='manual_stationary', candidate_source=candidate_source,

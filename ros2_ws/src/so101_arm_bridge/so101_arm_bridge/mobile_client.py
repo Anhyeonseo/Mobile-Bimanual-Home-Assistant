@@ -33,9 +33,10 @@ class MobileClient:
         self.sequence += 1
         return self.sequence
 
-    def _exchange(self, packet, sequence, kind):
+    def _exchange(self, packet, sequence, kind, *, checked=False):
         try:
-            result = MobileStatus.decode(self.port.exchange(packet))
+            exchange = self.port.exchange_checked if checked else self.port.exchange
+            result = MobileStatus.decode(exchange(packet))
             if result.request_sequence != sequence or result.kind != kind:
                 raise MobileReplyError(packet,sequence,kind,result)
             if self.boot_id is not None and result.boot_id != self.boot_id:
@@ -110,6 +111,26 @@ class MobileClient:
             seq,
             2,
         )
+
+    def velocity_checked(self, values, valid_until_ms):
+        """Expire against the host monotonic observation deadline even across clock sync."""
+        if self.session is None:
+            raise RuntimeError("explicit arm required")
+        if self.clock.sample and self.now() - self.clock.sample[1] >= 500:
+            self.refresh_clock()
+        now = self.now()
+        remaining = min(150, valid_until_ms - now)
+        sent, received, synced = self.clock.sample
+        soft_expiry = bool(synced.capabilities & 16)
+        # Leave time for both the conservative clock bound and wire delivery.
+        # Legacy firmware latches at the packet deadline and needs a full next cycle.
+        reserve = 2 * (received - sent) + 10 if soft_expiry else 20 + 2 * self.clock.max_rtt_ms
+        if remaining <= reserve:
+            return (0, 0, 0, 0), self.velocity((0, 0, 0, 0), lifetime_ms=150)
+        deadline, _ = self.clock.deadline(now, remaining)
+        seq = self._sequence()
+        reply = self._exchange(MobileCommand(2, self.session, seq, deadline, tuple(values)).encode(), seq, 2, checked=soft_expiry)
+        return tuple(values), reply
 
     def park(self):
         if self.session is None:

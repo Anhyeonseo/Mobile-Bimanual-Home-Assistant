@@ -6,7 +6,6 @@ ICP, unified hold/evidence/mobile/STOP clients and append-only session recording
 This is a bounded commissioning trial, not general autonomous Nav2 acceptance.
 """
 import argparse
-from pulse_mobile_base import PATTERNS
 from dataclasses import asdict,replace
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 import hashlib,hmac,json,math,os,secrets,signal,subprocess,sys,threading,time
@@ -14,7 +13,8 @@ import multiprocessing,queue
 from pathlib import Path
 import numpy as np
 ROOT=Path(__file__).resolve().parents[2]
-sys.path[:0]=[str(ROOT),str(ROOT/'ros2_ws/src/home_robot_tasks'),str(ROOT/'ros2_ws/src/so101_arm_bridge')]
+sys.path[:0]=[str(ROOT),str(ROOT/'tools/run'),str(ROOT/'ros2_ws/src/home_robot_tasks'),str(ROOT/'ros2_ws/src/so101_arm_bridge')]
+from pulse_mobile_base import PATTERNS
 from home_robot_tasks.navigation_trial import NearGoal,TurnDriveTrial,swept_path_obstacle,swept_obstacle,angle,voxel_centers,validate_navigation_body
 from home_robot_tasks.nav2_trial import Nav2Trial,Nav2SensorBridge
 from home_robot_tasks.stationary_localization import StationaryScanWindow,StationaryWheelInventory,fresh_stationary
@@ -26,12 +26,16 @@ from home_robot_tasks.platform_preparation import (
 )
 
 
+NAV_DEPTH_VOXEL_M = .02
+
+
 def registered_lidar_sweep(scan,pose,mount):
     """Keep capture clock and installation offset in separate values."""
     sweep=dict(scan);c,s=math.cos(pose[2]),math.sin(pose[2])
     mount_offset=mount['base_from_lidar_translation_m']
     sweep['lidar_xy_yaw']=[pose[0]+c*mount_offset[0]-s*mount_offset[1],
                           pose[1]+s*mount_offset[0]+c*mount_offset[1],pose[2]+mount['yaw_rad']]
+    sweep['lidar_z_base_m']=mount_offset[2]
     sweep['ranges']=[v if v is not None and math.isfinite(v) else None for v in scan['ranges']]
     return sweep
 
@@ -55,6 +59,9 @@ class State:
         self.navigation_required=False
         self.stationary_window=StationaryScanWindow();self.stationary_localization=None
         self.relative_target_binding=None
+        self.cabinet_face=None
+        self.review_cabinet=False
+        self.cabinet_review=None
 
     def bind_relative_target(self,delta,now):
         """Freeze an approved body-relative correction after posture preparation.
@@ -167,11 +174,14 @@ class State:
         with self.lock:self.scan_warning=str(error)
 
     def sensor_control(self):
+        planning_while_stopped = (self.trial.state=='WAITING_SENSOR'
+                                  and getattr(self.trial,'sensor_wait_scan',None) is not None
+                                  and not self.trial.resume_required)
         return dict(goal=None if self.trial.goal is None else list(self.trial.goal),
-            execute=self.trial.state=='RUNNING' and not getattr(self.trial,'fine_alignment',False),
+            execute=(self.trial.state=='RUNNING' or planning_while_stopped) and not getattr(self.trial,'fine_alignment',False),
             motion_active=self.trial.state=='RUNNING',
             fine_twist=list(getattr(self.trial,'fine_twist',(0.,0.,0.))),
-            wheel=self.wheel_observation,navigation_revision=self.navigation_revision)
+            wheel=self.wheel_observation,navigation_revision=self.navigation_revision,review_cabinet=self.review_cabinet)
 
     def collision_twist(self):
         if getattr(self.trial,'fine_alignment',False):
@@ -193,13 +203,37 @@ class State:
             return None
         return result['hits']
 
-    def compute_corridor_hits(self,pose,goal,scan_points,depth_points,nav_twist=None):
+    def compute_corridor_hits(self,pose,goal,scan_points,depth_points,nav_twist=None,*,command_only=False):
         if pose is None or goal is None:return None
         if isinstance(self.trial,Nav2Trial):
             twist=self.collision_twist() if nav_twist is None else nav_twist
-            path=self.trial.obstacle_sweep(twist)
-            options=dict(footprint=self.trial.navigation_body['footprint_xy_m'],margin=self.trial.navigation_body['clearance_m'],return_hits=True)
-            return dict(lidar=swept_path_obstacle(scan_points,path,**options),depth=swept_path_obstacle(depth_points,path,**options))
+            body=self.trial.navigation_body
+            local_goal=None
+            if self.trial.manipulation_alignment and body.get('mode')=='measured_upper_travel':
+                dx,dy=goal[0]-pose[0],goal[1]-pose[1]
+                c,s=math.cos(pose[2]),math.sin(pose[2])
+                local_goal=(c*dx+s*dy,-s*dx+c*dy)
+            path=(self.trial.sweep(twist) if command_only else self.trial.obstacle_sweep(twist,local_goal=local_goal))
+            footprints=body.get('component_footprints', [body['footprint_xy_m']])
+            def hits(points, heights=None):
+                points=np.asarray(points,dtype=float)
+                if not points.size:
+                    return []
+                bands = heights if heights is not None else [None]*len(footprints)
+                for poly, band in zip(footprints, bands, strict=True):
+                    observed = points
+                    if band is not None:
+                        # A retained 2 cm voxel represents its whole vertical
+                        # interval. Include the body's existing clearance too.
+                        allowance = body['clearance_m'] + NAV_DEPTH_VOXEL_M/2
+                        observed = points[(points[:,2] >= band[0]-allowance)
+                                          & (points[:,2] <= band[1]+allowance)]
+                    found=swept_path_obstacle(observed,path,footprint=poly,margin=body['clearance_m'],
+                                              return_hits=True,self_mask=body.get('self_mask_xy_m'))
+                    if found:
+                        return found
+                return []
+            return dict(lidar=hits(scan_points),depth=hits(depth_points,body.get('component_z_base_m')))
         if isinstance(self.trial,TurnDriveTrial):
             a=pose[2];c,s=math.cos(a),math.sin(a)
             path=[]
@@ -402,20 +436,26 @@ def sensor_worker(state,args):
         finally:
             if compiler:compiler.join(timeout=1)
             if store:store.close()
+    from tools.run.cabinet_path_review import CabinetReview
+    cabinet_review = CabinetReview() if getattr(args, 'cabinet_route', None) else None
     def depth_worker():
         nonlocal camera_to_base,ground
         last_furniture=-math.inf
         while not state.closed.is_set():
             began=time.monotonic()
             try:
-                record,images=camera.next_frame();metadata=images[2];stamp=record['depth_time_s']
+                if getattr(args,'station_navigation',False) and not getattr(args,'furniture_reference',None):
+                    stamp,native,metadata=camera.next_navigation_depth()
+                else:
+                    record,images=camera.next_frame();metadata=images[2];stamp=record['depth_time_s']
+                    native=camera.native_depth_images[record['capture_id']]
                 if not 0<=time.monotonic()-stamp<=.8:raise ValueError('깊이 영상 지연')
                 if camera_to_base is None:
                     tf=load_sensor_frames(ROOT,depth_to_color=metadata['depth_to_color'])['transforms']
                     transforms={v['child']:np.array(v['matrix']) for v in tf}
                     camera_to_base=transforms['color_camera_optical_frame']@transforms['depth_camera_optical_frame']
                     ground=transforms['base_footprint'][2,3]
-                depth=camera.native_depth_images[record['capture_id']].astype(float)*metadata['depth_scale_m']
+                depth=native.astype(float)*metadata['depth_scale_m']
                 intr=metadata['native_depth_intrinsics'];valid=np.isfinite(depth)&(depth>=.15)&(depth<=3.5)
                 if valid.mean()<.25:raise ValueError('깊이 유효 영역 부족')
                 points=native_endpoints(depth,valid,(intr['fx'],intr['fy'],intr['ppx'],intr['ppy']),camera_to_base)
@@ -423,11 +463,13 @@ def sensor_worker(state,args):
                 # All pixels are projected; retain only endpoints that can
                 # intersect this <=30 cm trial's complete body sweep.
                 floor_height,floor=measured_floor_heights(points,ground)
-                points=points[(floor_height>.04)&(points[:,2]<ground+1.12)&(np.abs(points[:,0])<1.)&(np.abs(points[:,1])<1.)]
-                points=voxel_centers(points)
+                points=points[(floor_height>.04)&(points[:,2]<ground+getattr(args,'depth_ceiling_m',1.12))&(np.abs(points[:,0])<1.)&(np.abs(points[:,1])<1.)]
+                points=voxel_centers(points,resolution=NAV_DEPTH_VOXEL_M)
                 with state.lock:
                     state.depth_points=points.tolist();state.depth_stamp=stamp;state.depth_error=None
                     state.depth_floor=floor
+                if cabinet_review and state.nav2_control.get('review_cabinet') and state.cabinet_review is None:
+                    cabinet_review.observe(state, args, saved, depth, stamp, intr, camera_to_base)
                 if getattr(args,'furniture_reference',None) and stamp-last_furniture>=1.:
                     try:
                         furniture_queue.put_nowait((record,images[0].copy(),camera.native_depth_images[record['capture_id']].copy(),metadata))
@@ -472,6 +514,10 @@ def sensor_worker(state,args):
                     state.observe_localization(candidate,last,fit,quality['inliers'],support)
                     seed=candidate
                     with state.lock:
+                        if getattr(args,'cabinet_front_prior',None) and state.pose_stamp==last:
+                            from tools.run.cabinet_navigation import cabinet_front
+                            face = cabinet_front(points, state.pose, *args.cabinet_front_prior)
+                            state.cabinet_face = dict(stamp=last, face=face) if face else None
                         if state.pose_stamp==last:
                             # Masked rays and the accepted capture-time pose,
                             # never the accumulated SLAM grid, prove free space.
@@ -504,7 +550,7 @@ def sensor_worker(state,args):
         node.destroy_node();rclpy.shutdown()
 
 
-_SENSOR_FIELDS=('pose','pose_stamp','scan_points','scan_stamp','scan_error','scan_warning','depth_points','depth_stamp','depth_error','depth_floor','nav2_feedback','furniture','navigation_update','stationary_localization')
+_SENSOR_FIELDS=('pose','pose_stamp','scan_points','scan_stamp','scan_error','scan_warning','depth_points','depth_stamp','depth_error','depth_floor','nav2_feedback','furniture','navigation_update','stationary_localization','cabinet_face','cabinet_review')
 
 def make_trial(args,geometry,area,body):
     if getattr(args,'nav2',False):
@@ -517,12 +563,36 @@ def make_trial(args,geometry,area,body):
                          manipulation_alignment=getattr(args,'manipulation_alignment',False),fine_alignment=getattr(args,'fine_alignment',False))
     return TurnDriveTrial(geometry,area,patterns=PATTERNS,navigation_body=body) if args.turn_drive else NearGoal(geometry,area,forward_pattern=PATTERNS['forward'][1],navigation_body=body)
 
+def checked_wheel_proposal(corridor, nav, now):
+    """Bind the proposed twist to its checked sweep and the original source clocks."""
+    if not corridor or not nav.get('executing') or not nav.get('ready') or nav.get('wait_reason') or nav.get('error') or nav.get('result'):
+        return None
+    twist = nav.get('twist')
+    if (corridor['goal'] != nav.get('goal') or twist != corridor['nav_twist']
+            or not twist or not any(twist) or any(corridor['hits'].values())):
+        return None
+    sources = ((corridor['scan_stamp'], .35), (corridor['pose_stamp'], .5),
+               (corridor['depth_stamp'], .8), (nav['odom_s'], .5), (nav['depth_s'], .8),
+               (nav['observed_s'], .5), (nav['command_s'], .25))
+    if not all(0 <= now - stamp < lifetime for stamp, lifetime in sources):
+        return None
+    return dict(twist=list(twist), command_s=nav['command_s'], sequence=nav['sequence'],
+                depth_stamp=corridor['depth_stamp'], scan_stamp=corridor['scan_stamp'],
+                goal=list(nav['goal']), map_revision=nav.get('map_revision'),
+                valid_until_s=min(stamp + lifetime for stamp, lifetime in sources))
+
+
 def sensor_process_main(options,outbox,goals,closed):
     args=argparse.Namespace(**options)
+    if getattr(args, 'station_navigation', False):
+        # Scope Nav2 and the lidar publisher to this sensor worker. A dead
+        # worker must not leave publishers behind for the next pick request.
+        os.setsid()
+        os.environ['ROS_AUTOMATIC_DISCOVERY_RANGE'] = 'LOCALHOST'
     args.driver_log=(args.output/'lidar.log').open('a')
     record=SessionRecord(args.output)
     geometry=json.loads((ROOT/'config/home_assistant/s4_base.nominal.json').read_text())
-    body=json.loads((ROOT/'config/home_assistant/navigation_body.fixed.json').read_text())
+    body=getattr(args,'navigation_body',None) or json.loads((ROOT/'config/home_assistant/navigation_body.fixed.json').read_text())
     area=dict(np.load(args.area))
     trial=make_trial(args,geometry,area,body)
     local=State(trial,record);local.closed=closed;local.navigation_required=bool(getattr(args,'furniture_navigation',None))
@@ -538,27 +608,51 @@ def sensor_process_main(options,outbox,goals,closed):
                         with local.lock:local.nav2_control=control;local.wheel_observation=control.get('wheel')
                     else:goal=control
             except queue.Empty:pass
-            with local.lock:sample={k:getattr(local,k) for k in _SENSOR_FIELDS}
+            with local.lock:
+                sample={k:getattr(local,k) for k in _SENSOR_FIELDS}
+                twist=local.collision_twist()
             if sample['navigation_update'] is not None and sample['navigation_update']['revision']==navigation_ack:
                 sample['navigation_update']=None
             key=(None if goal is None else tuple(goal),sample['pose_stamp'],sample['scan_stamp'],sample['depth_stamp'],
-                 tuple(local.collision_twist()))
+                 tuple(twist))
             if key!=last_key:
                 cached=None
                 if goal is not None and sample['pose'] is not None:
                     at=time.monotonic()
                     try:
-                        twist=local.collision_twist()
                         hits=local.compute_corridor_hits(sample['pose'],goal,sample['scan_points'],sample['depth_points'],nav_twist=twist)
-                        cached=dict(goal=goal,hits=hits,pose_stamp=sample['pose_stamp'],
+                        preview_only = False
+                        if (getattr(args, 'station_navigation', False) and trial.manipulation_alignment
+                                and not trial.fine_alignment and body.get('mode') == 'measured_upper_travel'
+                                and hits['lidar'] and not hits['depth']):
+                            near = local.compute_corridor_hits(sample['pose'],goal,sample['scan_points'],[],
+                                                               nav_twist=twist,command_only=True)
+                            preview_only = not near['lidar']
+                        cached=dict(goal=goal,hits=hits,lidar_preview_only=preview_only,pose_stamp=sample['pose_stamp'],
                             scan_stamp=sample['scan_stamp'],depth_stamp=sample['depth_stamp'],
                             nav_twist=twist,
                             calculation_ms=(time.monotonic()-at)*1000)
                     except Exception as e:record.write('corridor_error',error=str(e))
                 last_key=key
-            sample['corridor_observation']=cached
+            if getattr(args, 'station_navigation', False):
+                # Geometry and the Nav2 proposal cross the process boundary together.
+                # The parent only consumes the result; large point lists delayed both
+                # the motion loop and the next obstacle report on the Jetson.
+                sample['scan_points'] = sample['depth_points'] = []
+                proposal = checked_wheel_proposal(cached, sample['nav2_feedback'], time.monotonic())
+                sample['corridor_observation'] = dict(cached, proposal=proposal) if cached else None
+            else:
+                sample['corridor_observation'] = cached
             try:outbox.put_nowait(sample)
-            except queue.Full:pass
+            except queue.Full:
+                # Never drop an observed intrusion because an older clear result is queued.
+                if cached and any(cached['hits'].values()):
+                    while not closed.is_set():
+                        try:
+                            outbox.put(sample, timeout=.02)
+                            break
+                        except queue.Full:
+                            continue
             closed.wait(.02)
     sender=threading.Thread(target=publish,daemon=True);sender.start()
     try:sensor_worker(local,args)
@@ -589,6 +683,16 @@ def sensor_bridge_worker(state,args):
                 for key in (*_SENSOR_FIELDS,'corridor_observation'):
                     if key!='navigation_update':setattr(state,key,sample[key])
                 state.apply_navigation_update(sample.get('navigation_update'))
+                if getattr(args, 'station_navigation', False) and state.trial.state in ('RUNNING','WAITING_SENSOR'):
+                    corridor = sample['corridor_observation']
+                    if (corridor and corridor['goal'] == list(state.trial.goal or ())
+                            and any(corridor['hits'].values())):
+                        state.trial.observe_obstacle(time.monotonic(), corridor['scan_stamp'],
+                                                     preview_only=corridor.get('lidar_preview_only', False))
+                        state.record.write('obstacle_observed', hits=corridor['hits'],
+                                           lidar_preview_only=corridor.get('lidar_preview_only', False),
+                                           pose=sample['pose'], goal=corridor['goal'], nav_twist=corridor['nav_twist'],
+                                           scan_stamp=corridor['scan_stamp'], depth_stamp=corridor['depth_stamp'])
                 if isinstance(state.trial,Nav2Trial):
                     state.trial.nav=state.nav2_feedback
                     state.trial.stationary_report=state.stationary_localization
@@ -602,7 +706,12 @@ def sensor_bridge_worker(state,args):
                         state.error=None
                     except ValueError as e:state.error=str(e)
     finally:
-        closed.set();process.join(timeout=7)
+        isolated = getattr(args, 'station_navigation', False)
+        closed.set();process.join(timeout=25 if isolated else 7)
+        if isolated:
+            # The group remains addressable by the worker PID after its exit.
+            try:os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:pass
         if process.is_alive():process.terminate();process.join(timeout=2)
         outbox.close();goals.close()
 

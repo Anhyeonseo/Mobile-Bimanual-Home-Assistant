@@ -40,6 +40,8 @@ class PipelineBackend:
     def _prepare_hardware(self, ctx, options):
         from .pick_hardware import UnifiedPickHardware
         from .pick_capture import model_positions
+        if self.worker is None:
+            self._prepare_worker(ctx)
         self.hardware = (self.hardware_factory or UnifiedPickHardware)(options)
         try:
             self.hardware.prepare(ctx)
@@ -133,7 +135,7 @@ class PipelineBackend:
         try:
             return self._compute(ctx,'candidates',snapshot=value['snapshot'],detections=value['detections'],
                 prompt=value['prompt'],output=output,camera_mode=value.get('camera_mode', self.options.get('camera_mode')),
-                location=value.get('location'))
+                location=value.get('location'), **({'cabinet_top': True} if value.get('operation') == 'cabinet-pick' else {}))
         except RuntimeError as exc:
             if str(exc).startswith('capture/candidate rejected:'):
                 if Path(output).is_file():ctx.artifact(output,'파지 후보 거절 근거')

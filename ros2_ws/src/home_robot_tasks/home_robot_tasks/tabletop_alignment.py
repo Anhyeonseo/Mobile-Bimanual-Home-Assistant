@@ -3,10 +3,10 @@ from dataclasses import replace
 import numpy as np
 
 
-def translated_observation(delta_xy, profile, review, group, boxes, payload):
+def translated_observation(delta_xy, profile, review, group, boxes, payload, *, maximum_m=.15):
     delta = np.asarray(delta_xy, dtype=float)
-    if delta.shape != (2,) or not np.isfinite(delta).all() or np.linalg.norm(delta) > .150000001:
-        raise ValueError('relative base translation outside the 15 cm trial envelope')
+    if delta.shape != (2,) or not np.isfinite(delta).all() or np.linalg.norm(delta) > maximum_m + 1e-9:
+        raise ValueError('relative base translation outside the trial envelope')
     offset = np.array([-delta[0], -delta[1], 0.])
     shift = np.eye(4)
     shift[:3, 3] = offset

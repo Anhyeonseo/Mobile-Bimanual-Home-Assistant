@@ -93,6 +93,16 @@ bool actuator_lift_bottom_transport_ready(const actuator_lift_t *l,uint32_t now)
         l->feedback.current_ma>=0&&l->feedback.current_ma<=l->config.maximum_current_ma&&
         l->height_um>=-l->config.tolerance_um&&l->height_um<=l->config.tolerance_um;
 }
+bool actuator_lift_top_hold_verified(const actuator_lift_t *l, uint32_t now) {
+    if (!l || !l->configured || !l->homed || l->state != LIFT_HOLDING ||
+        !l->zero_sent || l->command_raw != 0 || !fresh(l, now) ||
+        !l->feedback.healthy || !l->feedback.hold_verified) return false;
+    int32_t top = l->config.reference_top_um;
+    int64_t offset = (int64_t)l->height_um - top;
+    return top > 0 && l->reference_height_um == top && l->target_um == top &&
+           offset >= -(int64_t)l->config.tolerance_um && offset <= l->config.tolerance_um;
+}
+
 int32_t actuator_lift_base_height(const actuator_lift_t *l,uint32_t now) {
     if(l==NULL)return 0;
     int32_t height=l->height_um;

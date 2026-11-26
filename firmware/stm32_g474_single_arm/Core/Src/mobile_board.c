@@ -31,6 +31,7 @@ static actuator_lift_hold_monitor_t lift_hold_monitor;
 #endif
 #include <string.h>
 #include "actuator_core/crc32c.h"
+#include "actuator_core/wire_bytes.h"
 static MobileBoardProfile profile;
 static actuator_robot_evidence_t host_evidence;
 static bool host_evidence_bound;
@@ -94,6 +95,23 @@ static void record_board_stop(uint32_t source){
 #endif
     d[20]=interlock_ms;d[21]=have_interlocks;d[22]=lift.previous_raw;d[23]=(uint32_t)lift.height_um;
 }
+void MobileBoard_CopyPositions(uint32_t now,uint8_t out[44]){
+    const actuator_mobile_feedback_reader_t *r=MobileServoFeedback_State();
+    memset(out,0,44);
+    out[0]=1;
+    out[1]=r && r->configured;
+    actuator_write_u32_le(out+4,now);
+    for(unsigned i=0;i<4;i++){
+        bool valid=out[1] && r->axes[i].valid;
+        if(valid){
+            out[2]|=(uint8_t)(1u<<i);
+            actuator_write_u32_le(out+12+i*4,(uint32_t)r->axes[i].position_raw & 4095u);
+        }
+        actuator_write_u32_le(out+28+i*4,valid?now-r->axes[i].observed_ms:UINT32_MAX);
+    }
+    if(r)actuator_write_u32_le(out+8,r->axes[0].observed_ms);
+}
+
 void MobileBoard_Diagnostics(uint32_t out[24]){if(out)memcpy(out,first_stop_diagnostics,sizeof(first_stop_diagnostics));}
 static void board_stop(uint32_t source){record_board_stop(source);BinaryControl_LatchStop();}
 actuator_lift_endpoint_t *MobileBoard_LiftEndpoint(void){return prepared&&!supervisor.transport_only?&lift_endpoint:NULL;}
@@ -134,6 +152,7 @@ bool MobileBoard_Prepare(UART_HandleTypeDef *uart,UART_HandleTypeDef *right,cons
        !BinaryControl_AttachMobileEndpoint(&mobile_endpoint))return false;
 #if HOST_S4_UNIFIED_CANDIDATE
     mobile_endpoint.park_proven=park_proven;
+    mobile_endpoint.cached_platform_positions=true;
 #endif
     profile=*p;left_uart=uart;right_uart=right;prepared=true;return true;
 #endif
@@ -454,6 +473,12 @@ void MobileBoard_Poll(void){
 #endif
     if(!supervisor.transport_only)actuator_lift_poll(&lift,now);
 #if HOST_S4_UNIFIED_CANDIDATE
+    bool top_hold = !supervisor.transport_only && !stop_requested && !lift_endpoint.active &&
+        sample->drive_valid && sample->torque_enabled == 1 && sample->goal_velocity_raw == 0 &&
+        now - sample->mode_ms < profile.lift.feedback_timeout_ms &&
+        profile.lift.reference_top_um == supervisor.config.lift_max_um &&
+        actuator_lift_top_hold_verified(&lift, now);
+    supervisor.top_hold_tolerance_um = top_hold ? profile.lift.tolerance_um : 0;
     if(!supervisor.transport_only&&lift.state==LIFT_FAULT&&!stop_requested)board_stop(2);
 #endif
     bool base_stopped=true,modes=true;

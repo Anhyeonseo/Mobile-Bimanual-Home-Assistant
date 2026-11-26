@@ -47,6 +47,9 @@ def decode_runtime(payload):
         fault['previous_drive_sample_ms']=v[22];fault['previous_drive_valid']=bool(v[23])
         fault['sample_gap_ms']=(v[8]-v[9])&0xffffffff if v[11] else None
         fault['reported_temperature']=body[8] if not v[12] and v[13]==15 and v[14]==1 else None
+        if v[7]==8 and not v[12] and v[13]==1 and v[14]==1:
+            fault['reported_temperature']=body[1]
+            fault['temperature_register_confirmed']=True
         result['mobile_feedback']=fault
     return result
 

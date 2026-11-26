@@ -12,7 +12,7 @@ static void status(actuator_mobile_endpoint_t *e,uint8_t kind,uint32_t seq,uint3
     unsigned i;
     memset(out,0,64);out[0]='A';out[1]='S';out[2]=1;out[3]=kind;
     actuator_write_u32_le(out+4,seq);actuator_write_u32_le(out+8,now);actuator_write_u32_le(out+12,e->boot_id);
-    actuator_write_u32_le(out+16,UINT32_C(0x00000007) | (e->park_proven ? 8u : 0u)); /* commands, feedback, clock; no lift height controller */
+    actuator_write_u32_le(out+16,UINT32_C(0x00000007) | (e->park_proven ? 8u : 0u) | (e->cached_platform_positions ? 16u : 0u)); /* commands, feedback, clock; no lift height controller */
     actuator_write_u32_le(out+20,s->session);actuator_write_u32_le(out+24,s->sequence);out[28]=(uint8_t)s->state;out[29]=(uint8_t)s->reason;
     out[30]=(s->have_feedback?1u:0u)|(s->feedback.velocity_modes_verified?2u:0u)|
         (s->feedback.lift_homed?4u:0u)|(actuator_mobile_measured_stopped(s,now)?8u:0u)|

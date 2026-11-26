@@ -37,6 +37,7 @@ bool MobileBoard_MaintenanceAllowed(void);
 bool MobileBoard_Commission(const uint8_t request[36],uint8_t response[64],bool host_idle);
 bool MobileBoard_StopActive(void);
 /* Cached first-stop evidence only; never reads/writes motor registers. */
+void MobileBoard_CopyPositions(uint32_t now,uint8_t out[44]);
 void MobileBoard_Diagnostics(uint32_t out[24]);
 /* Idempotent. Preserves torque; no automatic rearm/reboot recovery. */
 void MobileBoard_RequestStop(void);

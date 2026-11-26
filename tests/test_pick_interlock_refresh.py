@@ -15,6 +15,7 @@ def reader_fixture(flags, *, fault=0, elapsed=.01):
     def lift_status():
         flag=flags[min(index[0],len(flags)-1)];index[0]+=1
         now[0]+=elapsed
+        mobile.feedback_tick_ms += 1
         return replace(sample,flags=flag)
     packet=NS(positions_urad=(0,)*12)
     adapter=NS(keepalive=lambda:events.append('keepalive'),
@@ -57,3 +58,27 @@ def test_fault_motion_or_missing_hold_is_not_retried(flags,fault):
     reader,inputs,_,index=reader_fixture(flags,fault=fault)
     with pytest.raises(ValueError):reader.refresh()
     assert index[0]==1 and inputs.generation==0
+
+def test_parked_noisy_wheel_reacquires_a_new_sweep_before_grasp():
+    from home_robot_tasks.unified_carry_inputs import read_stationary_sample
+    now=[0.]
+    reads=[]
+    def read():
+        now[0] += .015
+        reads.append(now[0])
+        if len(reads)<=4:
+            raise PlatformInterlockPending('same parked wheel sweep', 133061)
+        return 'new measured quiet sweep'
+    assert read_stationary_sample(read, lambda: None, lambda: now[0], .2)=='new measured quiet sweep'
+    assert len(reads)==5
+
+
+def test_frozen_parked_sweep_still_expires():
+    from home_robot_tasks.unified_carry_inputs import read_stationary_sample
+    now=[0.]
+    def read():
+        now[0] += .02
+        raise PlatformInterlockPending('frozen parked sweep', 133061)
+    with pytest.raises(PlatformInterlockPending):
+        read_stationary_sample(read, lambda: None, lambda: now[0], .1)
+    assert .1 <= now[0] <= .12

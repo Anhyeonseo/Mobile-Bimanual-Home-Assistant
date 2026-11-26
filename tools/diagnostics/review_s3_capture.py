@@ -148,7 +148,7 @@ def choose_observation(observations, capture_id, profile, meta, source, label, l
             raise ValueError('unknown observation status')
         # A detected object with unusable depth still occupies its image position.
         # Dropping it could turn the right-hand cup into a false 'left cup'.
-        if o['label'] == label and (o['status'] != 'rejected' or o.get('failure')=='INVALID_DEPTH'):
+        if o.get('on_requested_support', True) and o['label'] == label and (o['status'] != 'rejected' or o.get('failure')=='INVALID_DEPTH'):
             box = np.asarray(o['box_xyxy'], dtype=float)
             if (box.shape != (4,) or not np.isfinite(box).all() or not 0 <= box[0] < box[2] <= meta['color_intrinsics']['width']
                     or not 0 <= box[1] < box[3] <= meta['color_intrinsics']['height']):

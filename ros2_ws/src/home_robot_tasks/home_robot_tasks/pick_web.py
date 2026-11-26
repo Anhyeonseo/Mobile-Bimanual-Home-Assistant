@@ -39,6 +39,12 @@ def handler_for(station):
             path = urlsplit(self.path).path
             if path == '/':
                 return self.respond(200, template.read_text().replace('__TOKEN__', token).encode(), 'text/html; charset=utf-8')
+            if path == '/api/cabinet-map' and station.backend.mode == 'station':
+                from tools.run.cabinet_navigation import map_preview
+                try:
+                    return self.respond(200, map_preview())
+                except (ValueError, OSError) as exc:
+                    return self.respond(409, {'error':str(exc)})
             if path == '/api/status':
                 return self.respond(200, station.snapshot())
             if path.startswith('/api/artifacts/'):
@@ -67,7 +73,7 @@ def handler_for(station):
                 if not isinstance(data, dict):
                     raise ValueError('object required')
                 if self.path == '/api/requests':
-                    options = {k:data[k] for k in ('operation','supported_empty_bottom','supported_empty_top','supported_startup_release','scene_unchanged') if k in data}
+                    options = {k:data[k] for k in ('operation','supported_empty_bottom','supported_empty_top','supported_startup_release','scene_unchanged','initial_pose') if k in data}
                     return self.respond(202, {'id':station.submit(data.get('text'), **options)})
                 if self.path == '/api/reset':
                     return self.respond(202, {'requested':station.request_reset(supported_empty=data.get('supported_empty',False))})

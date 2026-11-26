@@ -16,8 +16,17 @@ static bool healthy(const actuator_mobile_supervisor_t *s, uint32_t now_ms) {
         s->feedback.velocity_modes_verified && (s->transport_only || s->feedback.lift_homed);
 }
 static bool lift_inside(const actuator_mobile_supervisor_t *s) {
+    int64_t upper = s->config.lift_max_um;
+    if (s->target_raw[3] == 0) upper += s->top_hold_tolerance_um;
     return s->transport_only || (s->feedback.lift_position_um >= s->config.lift_min_um &&
-        s->feedback.lift_position_um <= s->config.lift_max_um);
+        s->feedback.lift_position_um <= upper);
+}
+static bool lift_motion_allowed(const actuator_mobile_supervisor_t *s, int32_t velocity) {
+    if (velocity == 0) return true;
+    if (s->feedback.lift_position_um > s->config.lift_max_um) return false;
+    if (velocity > 0)
+        return s->top_hold_tolerance_um == 0 && s->feedback.lift_position_um < s->config.lift_max_um;
+    return s->feedback.lift_position_um > s->config.lift_min_um;
 }
 bool actuator_mobile_init(actuator_mobile_supervisor_t *s,
     const actuator_mobile_config_t *config) {
@@ -80,7 +89,7 @@ bool actuator_mobile_arm(actuator_mobile_supervisor_t *s,
     uint32_t session, uint32_t now_ms) {
     if (s == NULL) return false;
     actuator_mobile_poll(s, now_ms);
-    if (session == 0u || session <= s->session || session <= s->last_parked_session ||
+    if (s->wheel_temperature_hold || session == 0u || session <= s->session || session <= s->last_parked_session ||
         (s->state != ACTUATOR_MOBILE_DISABLED && s->state != ACTUATOR_MOBILE_STOP_LATCHED) ||
         !actuator_mobile_measured_stopped(s, now_ms)) return false;
     s->session = session;
@@ -95,13 +104,15 @@ void actuator_mobile_poll(actuator_mobile_supervisor_t *s, uint32_t now_ms) {
         (s->state != ACTUATOR_MOBILE_READY && s->state != ACTUATOR_MOBILE_ACTIVE)) return;
     if (!healthy(s, now_ms)) {
         latch(s, ACTUATOR_MOBILE_REASON_FEEDBACK);
-    } else if (!lift_inside(s) ||
-        (s->target_raw[3] > 0 && s->feedback.lift_position_um >= s->config.lift_max_um) ||
-        (s->target_raw[3] < 0 && s->feedback.lift_position_um <= s->config.lift_min_um)) {
+    } else if (!lift_inside(s) || !lift_motion_allowed(s, s->target_raw[3])) {
         latch(s, ACTUATOR_MOBILE_REASON_LIFT_LIMIT);
     } else if (s->state == ACTUATOR_MOBILE_ACTIVE &&
         (uint32_t)(now_ms - s->command_ms) >= s->command_valid_for_ms) {
         latch(s, ACTUATOR_MOBILE_REASON_COMMAND_TIMEOUT);
+    } else if (s->state == ACTUATOR_MOBILE_ACTIVE && s->checked_wheel_lifetime_ms &&
+               (uint32_t)(now_ms - s->command_ms) >= s->checked_wheel_lifetime_ms) {
+        memset(s->target_raw, 0, sizeof(s->target_raw));
+        s->checked_wheel_lifetime_ms = 0;
     }
 }
 bool actuator_mobile_command(actuator_mobile_supervisor_t *s, uint32_t session,
@@ -117,12 +128,13 @@ bool actuator_mobile_command(actuator_mobile_supervisor_t *s, uint32_t session,
         if (velocity_raw[i] < -s->config.max_velocity_raw[i] ||
             velocity_raw[i] > s->config.max_velocity_raw[i]) return false;
     }
-    if ((velocity_raw[3] > 0 && s->feedback.lift_position_um >= s->config.lift_max_um) ||
-        (velocity_raw[3] < 0 && s->feedback.lift_position_um <= s->config.lift_min_um))
-        return false;
+    /* Hold tolerance is only for wheel commands; it never extends lift travel. */
+    if (!lift_motion_allowed(s, velocity_raw[3])) return false;
     memcpy(s->target_raw, velocity_raw, sizeof(s->target_raw));
+    if (s->wheel_temperature_hold) memset(s->target_raw, 0, 3 * sizeof(s->target_raw[0]));
     s->sequence = sequence;
     s->have_sequence = true;
+    s->checked_wheel_lifetime_ms = 0;
     s->command_ms = now_ms;
     s->command_valid_for_ms = s->config.command_timeout_ms;
     s->state = ACTUATOR_MOBILE_ACTIVE;

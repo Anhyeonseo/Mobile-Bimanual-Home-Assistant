@@ -119,6 +119,34 @@ static int mobile_tests(void) {
     CHECK(actuator_mobile_arm(&s, 2, 200));
     actuator_mobile_stop(&s);
     CHECK(s.reason == ACTUATOR_MOBILE_REASON_REQUEST);
+    /* Above the registered top, only zero-lift wheel commands use the
+     * verified hold envelope. Keep raw feedback available to the caller. */
+    c.lift_max_um = 654588;
+    const int offsets[] = {21, 2000, 2001};
+    for (unsigned i = 0; i < 3; ++i) {
+        int extra = offsets[i];
+        CHECK(actuator_mobile_init(&s, &c));
+        s.top_hold_tolerance_um = 2000;
+        f.observed_ms = 1; f.lift_position_um = c.lift_max_um;
+        CHECK(actuator_mobile_feedback(&s, &f, 1));
+        CHECK(actuator_mobile_arm(&s, 1, 1));
+        f.observed_ms = 2; f.lift_position_um += extra;
+        CHECK(actuator_mobile_feedback(&s, &f, 2));
+        if (extra > 2000) {
+            CHECK(s.reason == ACTUATOR_MOBILE_REASON_LIFT_LIMIT);
+            continue;
+        }
+        goal[3] = 0;
+        CHECK(actuator_mobile_command(&s, 1, 1, goal, 2));
+        CHECK(s.feedback.lift_position_um == c.lift_max_um + extra);
+        goal[3] = 1;
+        CHECK(!actuator_mobile_command(&s, 1, 2, goal, 2));
+        goal[3] = -1;
+        CHECK(!actuator_mobile_command(&s, 1, 2, goal, 2));
+        s.top_hold_tolerance_um = 0;
+        actuator_mobile_poll(&s, 2);
+        CHECK(s.reason == ACTUATOR_MOBILE_REASON_LIFT_LIMIT);
+    }
     c.max_velocity_raw[0] = 32768;
     CHECK(!actuator_mobile_init(&s, &c));
     CHECK(!s.configured && s.state == ACTUATOR_MOBILE_DISABLED);

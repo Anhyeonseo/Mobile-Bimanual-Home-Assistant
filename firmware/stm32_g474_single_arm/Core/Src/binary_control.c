@@ -4111,7 +4111,15 @@ static void Host_HandleBinaryFrame(
                 for(unsigned i=3;i<36;i++)if(request->payload[i])valid=false;
                 if(valid){
                     uint8_t op=request->payload[2];bool ok=true;
-                    if(MobileBoard_IsConfigured())ok=false;
+                    if(MobileBoard_IsConfigured()){
+#if HOST_S4_UNIFIED_CANDIDATE
+                        if(op==0){
+                            MobileBoard_CopyPositions(HAL_GetTick(),response.payload+1);
+                            response.payload[0]=0;response.payload_length=45;
+                        }
+#endif
+                        ok=false; /* unified firmware retains its own bus reader */
+                    }
                     if(op && (host_v2_executor_clock_active || host_v2_terminal_settle_active))ok=false;
                     if(ok && op==1){
                         if(host_stop_latched||MobileBoard_TransportOnly())ok=false;

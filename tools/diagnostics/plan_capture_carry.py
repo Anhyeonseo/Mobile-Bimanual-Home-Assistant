@@ -156,7 +156,7 @@ def plan(args, *, session_factory=session, preview_base_xy=None):
     if preview_base_xy is not None:
         from home_robot_tasks.tabletop_alignment import translated_observation
         review, group, boxes, payload = translated_observation(
-            preview_base_xy, profile, review, group, boxes, payload)
+            preview_base_xy, profile, review, group, boxes, payload, maximum_m=.30 if getattr(args, 'cabinet_placement', False) else .15)
     calibrated_top = review.get('lift_reference_basis') in TOP_BASES
     if calibrated_top and grasp_policy is not None and not inspection:
         # Retain central grasps first. Outer contacts still require the full route and scene checks.

@@ -387,5 +387,9 @@ def test_runtime_device_failure_preserves_raw_temperature_jump_without_overheat_
     message=describe_runtime_fault(d)
     assert '9번' in message and '71°C' in message and '32°C' in message and '자동 재출발 없음' in message
     assert '과열' not in message
+    f[13]=1
+    f[17:22]=struct.unpack('<5I',bytes([0,90])+bytes(18))
+    confirmed=decode_runtime(b'\0'+struct.pack('<65I',*(old+board+f)))['mobile_feedback']
+    assert confirmed['reported_temperature']==90 and confirmed['temperature_register_confirmed']
     f[1]=4
     with pytest.raises(ValueError):decode_runtime(b'\0'+struct.pack('<65I',*(old+board+f)))

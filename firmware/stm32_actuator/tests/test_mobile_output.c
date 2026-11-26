@@ -57,7 +57,26 @@ static void timer_edge(uint32_t origin) {
     actuator_mobile_output_poll(&o,origin+10399,10,origin+5199);
     CHECK(o.fault==MOBILE_OUTPUT_SCHEDULE && o.stop_requested);
 }
+static void wheel_temperature_zero(void) {
+    actuator_mobile_supervisor_t s; actuator_mobile_output_t o;
+    CHECK(actuator_mobile_init(&s,&limits)); observe(&s,0);
+    CHECK(actuator_mobile_output_init(&o,&s,&config,0)); CHECK(actuator_mobile_arm(&s,1,0));
+    int32_t v[4]={20,30,40,0}; CHECK(actuator_mobile_command(&s,1,1,v,0));
+    for(uint32_t us=0;us<=1000;us+=100)actuator_mobile_output_poll(&o,us,us/1000,0);
+    actuator_bus_job_t *w=&o.router.jobs[ACTUATOR_BUS_WORK_WHEELS];
+    CHECK(w->pending && w->bytes[8]==20);
+    s.wheel_temperature_hold=true;
+    actuator_mobile_output_poll(&o,1100,1,0);
+    CHECK(w->pending && !w->bytes[8] && !w->bytes[11] && !w->bytes[14]);
+    const uint8_t *bytes; size_t n; uint32_t token; actuator_bus_work_t kind;
+    CHECK(actuator_bus_router_next(&o.router,1100,1000,&bytes,&n,&token,&kind));
+    CHECK(kind==ACTUATOR_BUS_WORK_WHEELS && !s.wheel_zero_written);
+    CHECK(actuator_bus_router_complete(&o.router,token,1200,true));
+    actuator_mobile_output_completed(&o,kind,1);
+    CHECK(s.wheel_zero_written && s.wheel_zero_ms==1);
+}
 int main(void) {
+    wheel_temperature_zero();
     timer_edge(0);timer_edge(UINT32_MAX-2500u);
     exercise(0,0);exercise(UINT32_MAX-20000u,UINT32_MAX-30000u);
     actuator_mobile_supervisor_t s;actuator_mobile_output_t o;

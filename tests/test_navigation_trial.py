@@ -713,3 +713,25 @@ def test_fine_candidate_is_collision_bound_and_never_dispatches_nav2_followpath(
     s.trial._fine_observe(1)
     assert s.sensor_control()['motion_active'] is False
     assert s.corridor_hits() is None  # old nonzero candidate does not match observation phase
+
+
+def test_departure_logs_spike_late_duplicate_and_new_stationary_window(monkeypatch):
+    from so101_arm_bridge.mobile_wire import MobileStatus
+    from types import SimpleNamespace as NS
+    now = [0.]
+    rows = []
+    arms = []
+    readings = iter([(10,10,0), (30,30,50), (50,50,0), (70,70,0),
+                     (180,70,0), (190,190,0)])
+    def status():
+        mcu,tick,speed = next(readings)
+        return MobileStatus(5,1,mcu,2,7,0,0,0,0,31,tick,(0,speed,0,0),654588,0)
+    monkeypatch.setattr(platform_preparation, 'supported_lift_is_holding', lambda _:True)
+    platform_preparation.arm_observed_stationary(lambda:None,NS(status=status,arm=arms.append),
+        clock=lambda:now[0], sleep=lambda dt:now.__setitem__(0,now[0]+dt),
+        on_sample=lambda **row:rows.append(row))
+    assert arms == [1]
+    assert [r['reason'] for r in rows] == ['quiet','nonzero speed','quiet','quiet','stale','quiet']
+    assert rows[1]['wheel_velocity_raw'] == [0,50,0]
+    assert rows[-2]['sample_age_ms'] == 110
+    assert rows[-1]['distinct_samples'] == 3 and rows[-1]['span_ms'] == 140

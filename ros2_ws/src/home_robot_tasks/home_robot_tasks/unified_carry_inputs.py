@@ -5,6 +5,7 @@ the MCU's independently measured wheel-stop window, including its established
 encoder corroboration of noisy speed bytes. No legacy AP packet is fabricated.
 """
 import math
+import time
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 
@@ -13,6 +14,35 @@ from .carry_live_inputs import ObservationNotFresh
 
 class PlatformInterlockPending(ObservationNotFresh):
     """Fresh lift hold exists, but the aggregate movement admission is absent."""
+
+    def __init__(self, message, mobile_tick=None):
+        super().__init__(message)
+        self.mobile_tick = mobile_tick
+
+
+def read_stationary_sample(read, check, clock, budget_s, *, on_pending=None):
+    """Allow the MCU to publish the next wheel sweep while servicing the hold."""
+    deadline = clock() + budget_s
+    rejected_sweeps = set()
+    attempts = 0
+    while True:
+        check()
+        try:
+            return read()
+        except ObservationNotFresh as error:
+            if isinstance(error, PlatformInterlockPending) and error.mobile_tick is not None:
+                rejected_sweeps.add(error.mobile_tick)
+                if len(rejected_sweeps) >= 3 or clock() >= deadline:
+                    raise
+                if on_pending:
+                    on_pending()
+                # Fresh AS/LS reads also service the arm heartbeat. Polling one
+                # cached AS sweep three times did not observe three failures.
+                time.sleep(.005)
+            else:
+                attempts += 1
+                if on_pending is not None or attempts >= 3 or clock() >= deadline:
+                    raise
 
 
 def controller_lift_height_m(height_um, profile=None, *, board=None):
@@ -98,7 +128,7 @@ class UnifiedPlatformGuard:
             # acquire a new complete sample before deciding that proof is lost.
             raise PlatformInterlockPending(
                 '리프트 높이 유지 관측은 있으나 이동 인터록 재확인이 필요합니다 '
-                f'(flags={lift.flags}, encoder={lift.position_raw})')
+                f'(flags={lift.flags}, encoder={lift.position_raw})', mobile.feedback_tick_ms)
         if self.supported_top:
             from .pick_calibration import top_model_height
             height = top_model_height(lift, self.profile, self.board, self.top_reference,
@@ -117,7 +147,7 @@ class UnifiedPlatformGuard:
 
     def require_fresh(self, now):
         if not 0 <= now-self.stamp <= self.maximum_age_s:
-            raise ValueError('integrated platform sample stale')
+            raise ObservationNotFresh('integrated platform sample stale')
         if not self.base_stopped or not self.lift_stopped:
             raise ValueError('stationary platform unconfirmed')
 
@@ -131,14 +161,9 @@ class UnifiedObservationReader:
         self.interlock_refreshes = 0
 
     def refresh(self):
-        started = self.clock()
-        for attempt in range(3):
-            try:
-                return self._refresh_once()
-            except PlatformInterlockPending:
-                if attempt == 2 or self.clock()-started >= .1:
-                    raise
-                self.interlock_refreshes += 1
+        def pending():
+            self.interlock_refreshes += 1
+        return read_stationary_sample(self._refresh_once, lambda: None, self.clock, .1, on_pending=pending)
 
     def _refresh_once(self):
         self.adapter.keepalive()

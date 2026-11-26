@@ -1,0 +1,50 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>수납장 접근과 지우개 정렬</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f4f1;color:#202d30;font:15px/1.5 system-ui,sans-serif}main{max-width:1310px;margin:auto;padding:26px 32px}h1{font-size:30px;letter-spacing:-1px;margin:0}h2{font-size:19px;margin:0}p{margin:6px 0 14px;color:#4d5c5d}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}section{background:white;padding:18px;border-radius:12px;min-width:0}.row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.row select{max-width:100%}select,input{accent-color:#087a70;font:inherit}select{border:1px solid #aaa;border-radius:5px;background:white;padding:4px 7px}canvas,#photo{width:100%;aspect-ratio:4/3;display:block;margin:12px 0;background:#eee;object-fit:contain}input{width:100%}.legend,.caption{font-size:13px;color:#48555a}.legend span{white-space:nowrap;margin-right:10px}.metric{font-weight:650;margin:9px 0 3px}#delta{background:#e9f2ef;padding:10px 16px;border-radius:8px;margin-top:14px}.noimg[hidden],img[hidden]{display:none!important}.noimg{padding:32px}footer{margin-top:12px;font-size:13px;color:#516064}@media(max-width:720px){main{padding:15px}.grid{grid-template-columns:1fr}}
+</style><main><h1>수납장 접근과 지우개 정렬</h1><p id="result"></p>
+<div class="grid"><section><div class="row"><h2>기록된 주행 위치</h2><select id="zoom" aria-label="지도 범위"><option>수납장 주변</option><option>방 전체</option></select></div>
+<canvas id="map" width="760" height="570" aria-label="기존 지도, 수납장 관측점과 라이다 추정 궤적"></canvas>
+<div class="legend"><span style="color:#036d67">━ 라이다 추정 경로·차체</span><span style="color:#a54422">⊕ 지도 관측 목표</span><span style="color:#835486">■ 과거 수납장 관측 셀</span></div>
+<label class="row" for="time"><b>주행 기록 시점</b><output id="seconds"></output></label><input id="time" type="range" min="0" step="1"><div id="remaining" class="metric"></div>
+<div class="caption">화살표는 차체 정면과 목표 방향. 어두운 회색은 점유, 옅은 회색은 미관측 공간.</div></section>
+<section><div class="row"><h2>지우개가 보인 위치</h2><select id="which" aria-label="촬영 비교"></select></div>
+<img id="photo" alt="촬영 영상 위 대상 상자와 깊이 측정점"><div id="missing" class="noimg" hidden>이 기록에 연결된 촬영이 없습니다.</div>
+<div class="legend"><span style="color:#036d67">□ 검토한 지우개</span><span style="color:#a75a22">□ 다른 탐지 후보</span><span>● 표면 깊이 측정점</span></div>
+<div class="metric" id="coords"></div><div class="caption" id="photoTime"></div><div id="delta"></div></section></div><footer>후속 사진과 주행 로그는 별도 시점에 기록됨. 지도상의 목표는 과거 카메라 관측 위치이며, 파지 정차점은 현재 물체와 팔 경로로 결정해야 함.</footer></main>
+<script id="run" type="application/json">__REPLAY_DATA__</script><script>
+'use strict';
+const d=JSON.parse(document.querySelector('#run').textContent), el=id=>document.getElementById(id);
+const cv=el('map'), c=cv.getContext('2d'), image=new Image(), poses=d.poses, goal=d.goal;
+const cm=n=>(100*n).toFixed(1), deg=n=>(Math.atan2(Math.sin(n),Math.cos(n))*180/Math.PI).toFixed(1);
+el('result').textContent='시험 결과 · '+d.status;
+const time=el('time');time.max=poses.length-1;time.value=time.max;
+function draw(){
+ const idx=Number(time.value), [t,x,y,yaw]=poses[idx], [ox,oy]=d.origin;
+ const mw=d.cell*d.size[0],mh=d.cell*d.size[1],local=el('zoom').selectedIndex===0;
+ const xs=[goal[0],...poses.map(p=>p[1]),...d.cabinet.map(p=>p[0])],ys=[goal[1],...poses.map(p=>p[2]),...d.cabinet.map(p=>p[1])];
+ const xmin=local?Math.min(...xs)-.32:ox, xmax=local?Math.max(...xs)+.32:ox+mw;
+ const ymin=local?Math.min(...ys)-.32:oy, ymax=local?Math.max(...ys)+.32:oy+mh;
+ const scale=Math.min(cv.width/(xmax-xmin),cv.height/(ymax-ymin)), X=v=>cv.width/2+(v-(xmax+xmin)/2)*scale,Y=v=>cv.height/2-(v-(ymax+ymin)/2)*scale;
+ c.fillStyle='#d2d2d2';c.fillRect(0,0,cv.width,cv.height);c.imageSmoothingEnabled=false;
+ if(image.complete&&image.naturalWidth)c.drawImage(image,X(ox),Y(oy+mh),mw*scale,mh*scale);
+ c.fillStyle='#97649ca8';for(const [a,b] of d.cabinet)c.fillRect(X(a-.025),Y(b+.025),.05*scale,.05*scale);
+ function line(points,color,width,close=false){c.beginPath();points.forEach(([a,b],i)=>i?c.lineTo(X(a),Y(b)):c.moveTo(X(a),Y(b)));if(close){c.closePath();c.fillStyle='#16897b25';c.fill()}c.strokeStyle=color;c.lineWidth=width;c.stroke()}
+ line(poses.slice(0,idx+1).map(p=>p.slice(1,3)),'#04786e',4);
+ function arrow(a,b,r,color,len){let end=[a+len*Math.cos(r),b+len*Math.sin(r)];line([[a,b],end],color,3);for(const angle of [-.52,.52])line([end,[end[0]-.035*Math.cos(r+angle),end[1]-.035*Math.sin(r+angle)]],color,3)}
+ line(d.footprint.map(([a,b])=>[x+a*Math.cos(yaw)-b*Math.sin(yaw),y+a*Math.sin(yaw)+b*Math.cos(yaw)]),'#08796e',2,true);
+ arrow(x,y,yaw,'#08796e',.17);arrow(...goal,'#ac451e',.13);
+ function marker(a,b,r,color){c.beginPath();c.arc(X(a),Y(b),r,0,2*Math.PI);c.fillStyle='white';c.fill();c.strokeStyle=color;c.lineWidth=3;c.stroke()}
+ marker(goal[0],goal[1],6,'#ac451e');marker(x,y,4,'#08796e');
+ const step=local?.25:1; c.fillStyle='#fff';c.fillRect(9,cv.height-36,step*scale+20,29);c.fillStyle='#394749';c.font='13px sans-serif';c.fillText(step<1?'25 cm':'1 m',18,cv.height-18);c.fillRect(18,cv.height-13,step*scale,2);
+ el('seconds').textContent=t.toFixed(1)+' / '+poses.at(-1)[0].toFixed(1)+'초';el('remaining').textContent='지도 목표까지 '+cm(Math.hypot(x-goal[0],y-goal[1]))+' cm · 방향 차이 '+Math.abs(deg(yaw-goal[2]))+'°';
+}
+time.oninput=draw;el('zoom').onchange=draw;image.onload=draw;image.src=d.map;
+const which=el('which');for(const [key,label] of [['observation','주행 후 별도 촬영'],['reference','이전 파지 성공']]){if(d[key])which.add(new Option(label,key))}
+function photo(){const a=d[which.value];if(!a){el('photo').hidden=true;el('missing').hidden=false;return}el('photo').src=a.photo;
+ el('coords').textContent='차체 중심 기준 · 전방 '+cm(a.xyz[0])+' cm · '+(a.xyz[1]>=0?'왼쪽 ':'오른쪽 ')+cm(Math.abs(a.xyz[1]))+' cm';
+ el('photoTime').textContent=new Date(a.date).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false})+' KST · 그림 속 박스 '+a.count+'개';}
+if(d.observation&&d.reference){const q=d.observation.xyz,r=d.reference.xyz;
+ el('delta').textContent='성공 사진과 비교한 지우개 표면점 · '+(q[0]>=r[0]?'앞으로 ':'뒤로 ')+cm(Math.abs(q[0]-r[0]))+' cm, '+(q[1]>=r[1]?'왼쪽 ':'오른쪽 ')+cm(Math.abs(q[1]-r[1]))+' cm';}else el('delta').hidden=true;
+which.onchange=photo;draw();photo();
+</script></html>

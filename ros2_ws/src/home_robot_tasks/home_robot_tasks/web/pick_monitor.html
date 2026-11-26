@@ -8,7 +8,7 @@
 <header><div><div class="eyebrow">MOBILE BIMANUAL HOME ASSISTANT</div><h1>Pick Station</h1><div class="muted">고정 위치 집기 · 임시 작업 모니터</div></div><div class="tag" id="connection">연결 중</div></header>
 <div class="mode" id="mode">실행 모드를 확인하고 있습니다.</div>
 <div class="grid"><section class="card"><div class="statusline"><span class="dot"></span><span class="small muted">CURRENT STEP</span></div><div class="hero" id="phase">프로그램 준비</div><div class="metric" id="elapsed">—</div><div class="small muted" id="detail"></div>
-<div id="stationOptions" class="operation" hidden><label>작업<select id="operation"><option value="observe-rise-pick">하단 관측 → 최상단 상승 → 집기</option><option value="top-pregrasp-check" selected>최상단 · 손끝 높이 점검</option><option value="top-pick">최상단 · 실물 파지</option><option value="top-inspect">최상단 · 카메라 검사</option><option value="top-align-pick">최상단 · 통합 파지 (필요 시 베이스 이동)</option><option value="top-align">최상단 · 베이스 좌우 정렬 (왼팔 기준)</option><option value="bottom-pick">최하단 · 실물 파지</option><option id="resumeOption" value="resume-top-pick" hidden>이전 하단 관측 → 현재 높이에서 이어 집기</option></select></label><label id="bottomConfirm" class="operator-confirm" hidden><input id="supportedBottom" type="checkbox"> <span id="confirmLabel"></span></label><div id="operationHint" class="small muted"></div></div>
+<div id="stationOptions" class="operation" hidden><label>작업<select id="operation"><option value="cabinet-top">최상단 고정 · 수납장 주행 후 집기</option><option value="cabinet-pick">하단 출발 · 수납장 주행 후 집기</option><option value="observe-rise-pick">하단 관측 → 최상단 상승 → 집기</option><option value="top-pregrasp-check" selected>최상단 · 손끝 높이 점검</option><option value="top-pick">최상단 · 실물 파지</option><option value="top-inspect">최상단 · 카메라 검사</option><option value="top-align-pick">최상단 · 통합 파지 (필요 시 베이스 이동)</option><option value="top-align">최상단 · 베이스 좌우 정렬 (왼팔 기준)</option><option value="bottom-pick">최하단 · 실물 파지</option><option id="resumeOption" value="resume-top-pick" hidden>이전 하단 관측 → 현재 높이에서 이어 집기</option></select></label><div id="mapStart" hidden><p id="mapPrompt">지도에서 로봇의 현재 위치를 누르고, 이어서 바라보는 쪽을 누르세요. 초록 점은 수납장 관측 위치입니다.</p><canvas id="cabinetMap" style="display:block;width:min(100%,300px);height:auto;cursor:crosshair"></canvas><input type="hidden" id="mapPose"></div><label id="bottomConfirm" class="operator-confirm" hidden><input id="supportedBottom" type="checkbox"> <span id="confirmLabel"></span></label><div id="operationHint" class="small muted"></div></div>
 <form class="request" id="form"><input id="request" aria-label="작업 요청" placeholder="예: 노란 테이프를 집어줘" required maxlength="160"><button id="submit" disabled>집기 요청</button></form><button type="button" class="stop" id="cancel">작업 중단</button><button type="button" id="reset" disabled>픽 스테이션 초기화</button><div class="small error" id="message" role="status"></div><div class="small muted" id="blocked"></div><div class="small muted" id="stageContext"></div><div id="stages"></div></section>
 <section class="card"><h2>관측 이미지</h2><div class="preview" id="preview"><div class="empty">새 요청의 촬영·탐지 결과가<br>이곳에 표시됩니다.</div></div><div class="assets" id="assets"></div><div class="result" id="result">아직 완료된 요청이 없습니다.</div><div class="small muted" id="recovery" hidden></div></section></div>
 <section class="card bottom"><h2>진행 기록</h2><div class="logs" id="logs" aria-live="polite"></div></section>
@@ -16,12 +16,44 @@
 <footer>로컬 전용 · 작업 중에는 중복 요청을 받지 않습니다. 궤적 완료와 물체 집기 성공은 별도로 표시합니다.</footer>
 </main><script>
 const token='__TOKEN__';const $=id=>document.getElementById(id);let state=null,previewId=null,inFlight=false,resumeShown=false;
-const operationNames={'top-pregrasp-check':'최상단 · 손끝 높이 점검','top-pick':'최상단 · 실물 파지','observe-rise-pick':'하단 관측 → 최상단 상승 → 집기','bottom-pick':'최하단 · 실물 파지','top-inspect':'최상단 · 카메라 검사','top-align':'최상단 · 베이스 좌우 정렬','top-align-pick':'최상단 · 통합 파지','resume-top-pick':'이전 관측으로 이어 집기'};
+const operationNames={'cabinet-top':'최상단 고정 · 수납장 주행 후 집기','cabinet-pick':'수납장 · 지도 주행 후 집기','top-pregrasp-check':'최상단 · 손끝 높이 점검','top-pick':'최상단 · 실물 파지','observe-rise-pick':'하단 관측 → 최상단 상승 → 집기','bottom-pick':'최하단 · 실물 파지','top-inspect':'최상단 · 카메라 검사','top-align':'최상단 · 베이스 좌우 정렬','top-align-pick':'최상단 · 통합 파지','resume-top-pick':'이전 관측으로 이어 집기'};
 try{const saved=localStorage.getItem('pick-station-operation-v2');if(saved&&saved!=='resume-top-pick'&&operationNames[saved])$('operation').value=saved;}catch{}
 const stageNames=[['CAPTURING','새 촬영'],['DETECTING','물체 탐지'],['GENERATING_GRASPS','파지 후보 생성'],['PLANNING','경로 계획·검사'],['EXECUTING','파지 실행'],['VERIFYING','결과 확인']];
-function plannedStages(){const rows=stageNames.slice();if(state?.mode==='station'){if($('operation').value==='top-pregrasp-check')return [...rows.slice(0,4),['EXECUTING','열린 집게 접근·재촬영']];if($('operation').value==='resume-top-pick')return [['PREPARING_PICK','이전 관측·현재 자세 연결'],...rows.slice(3)];if($('operation').value==='top-pick')rows[5]=['VERIFYING','동작 완료 확인'];if($('operation').value==='top-inspect')return rows.slice(0,3);if($('operation').value==='top-align-pick')return [...rows.slice(0,3),['PLANNING','현재 위치 계획 · 필요 시 재배치·재계획'],rows[4],['VERIFYING','동작 완료 확인']];if($('operation').value==='top-align')return [...rows.slice(0,3),['ALIGNING','베이스 좌우 정렬']];if($('operation').value!=='top-pick')rows.splice(3,0,['PREPARING_PICK','장치 준비·재관측']);if($('operation').value==='observe-rise-pick')rows.splice(4,0,['LIFTING','리프트 상승']);}return rows;}
+function plannedStages(){const rows=stageNames.slice();if(state?.mode==='station'){if($('operation').value==='top-pregrasp-check')return [...rows.slice(0,4),['EXECUTING','열린 집게 접근·재촬영']];if($('operation').value==='resume-top-pick')return [['PREPARING_PICK','이전 관측·현재 자세 연결'],...rows.slice(3)];if($('operation').value==='top-pick')rows[5]=['VERIFYING','동작 완료 확인'];if($('operation').value==='top-inspect')return rows.slice(0,3);if(['cabinet-top','cabinet-pick','top-align-pick'].includes($('operation').value))return [...($('operation').value==='cabinet-pick'?[['NAVIGATING','수납장까지 지도 주행'],['LIFTING','하단 관측·리프트 상승']]:$('operation').value==='cabinet-top'?[['NAVIGATING','수납장까지 지도 주행']]:[]),...rows.slice(0,3),['PLANNING','현재 위치 계획 · 필요 시 재배치·재계획'],rows[4],['VERIFYING','동작 완료 확인']];if($('operation').value==='top-align')return [...rows.slice(0,3),['ALIGNING','베이스 좌우 정렬']];if($('operation').value!=='top-pick')rows.splice(3,0,['PREPARING_PICK','장치 준비·재관측']);if($('operation').value==='observe-rise-pick')rows.splice(4,0,['LIFTING','리프트 상승']);}return rows;}
 const resultNames={PREGRASP_OBSERVED:'손끝 점검 촬영 완료',OBSERVED_ONLY:'카메라 검사 완료',SUCCEEDED:'성공',FAILED:'실패',REPOSITION_REVIEW_REQUIRED:'현재 위치 경로 없음 · 재배치 검토',CANCELLED:'중단됨',UNVERIFIED:'파지 성공 확인 부족',PLANNED_ONLY:'계획 검증 완료',STOP_UNCONFIRMED:'정지 확인 필요'};
 function seconds(n){return n==null?'—':n.toFixed(1)+'초'}
+let cabinetMapRequested=false, cabinetGrid=null, startPixel=null, headingPixel=null;
+function drawCabinetMap(){
+  const {grid:g,view}=cabinetGrid,c=$('cabinetMap'),b=c.getContext('2d');
+  c.width=g.width;c.height=g.height;
+  const img=b.createImageData(g.width,g.height);
+  for(let y=0;y<g.height;y++)for(let x=0;x<g.width;x++){
+    const v=g.data[y*g.width+x],i=((g.height-1-y)*g.width+x)*4;
+    img.data.set([v<0?162:v>=65?39:246,v<0?169:v>=65?46:247,v<0?176:v>=65?51:248,255],i);
+  }
+  b.putImageData(img,0,0);
+  function point(x,y,color){b.fillStyle=color;b.beginPath();b.arc(x,y,2.5,0,2*Math.PI);b.fill()}
+  point((view[0]-g.origin[0])/g.resolution,g.height-(view[1]-g.origin[1])/g.resolution,'#148052');
+  if(startPixel)point(...startPixel,'#265cba');
+  if(headingPixel){b.strokeStyle='#265cba';b.lineWidth=1.5;b.beginPath();b.moveTo(...startPixel);b.lineTo(...headingPixel);b.stroke()}
+}
+async function loadCabinetMap(){
+  cabinetMapRequested=true;
+  try{const r=await fetch('/api/cabinet-map');const data=await r.json();if(!r.ok)throw Error(data.error);
+    cabinetGrid=data;drawCabinetMap();
+  }catch(e){$('mapPrompt').textContent='수납장 지도 열기 실패 · '+e.message}
+}
+$('cabinetMap').onclick=e=>{
+  if(!cabinetGrid||!state?.accepting)return;
+  const c=$('cabinetMap'),r=c.getBoundingClientRect(),g=cabinetGrid.grid;
+  const p=[(e.clientX-r.left)*g.width/r.width,(e.clientY-r.top)*g.height/r.height];
+  if(!startPixel||headingPixel){startPixel=p;headingPixel=null;$('mapPose').value='';}
+  else if(Math.hypot(p[0]-startPixel[0],p[1]-startPixel[1])>1){
+    headingPixel=p;$('mapPose').value=[g.origin[0]+g.resolution*startPixel[0],
+      g.origin[1]+g.resolution*(g.height-startPixel[1]),Math.atan2(startPixel[1]-p[1],p[0]-startPixel[0])].join(',');
+  }
+  drawCabinetMap();
+};
 function updateOperation(){
   const interactive=state?.mode==='station';
   $('stationOptions').hidden=!interactive;
@@ -33,24 +65,29 @@ function updateOperation(){
   const adaptive=$('operation').value==='top-align-pick';
   const align=adaptive||$('operation').value==='top-align';
   const check=$('operation').value==='top-pregrasp-check';
-  const top=check||resume||align||$('operation').value==='top-pick';
+  const cabinetTop=$('operation').value==='cabinet-top';
+  const top=cabinetTop||check||resume||align||$('operation').value==='top-pick';
   const rise=$('operation').value==='observe-rise-pick';
-  const physical=top||rise||$('operation').value==='bottom-pick';
+  const cabinet=cabinetTop||$('operation').value==='cabinet-pick';
+  $('mapStart').hidden=!cabinet;
+  if(cabinet&&!cabinetMapRequested)loadCabinetMap();
+  const physical=cabinet||top||rise||$('operation').value==='bottom-pick';
   $('confirmLabel').textContent='리프트가 실제 '+(resume?'이전 상승 완료 높이':top?'최상단':'최하단')+'에 있고 양팔·리프트는 힘이 꺼져도 내려앉지 않게 받쳐 고정했으며 양쪽 그리퍼가 비어 있습니다. 준비 중 필요한 경우 모터 힘을 한 번 끄는 데 동의합니다.';
   if($('operation').value==='top-pick')$('confirmLabel').textContent+=' 본체는 고정된 상태로 팔만 시험합니다.';
+  if(cabinet)$('confirmLabel').textContent+=' 빈 양팔은 접혀 있고 이동 경로에 손·받침·케이블이 없습니다.';
   if(align)$('confirmLabel').textContent+=' 베이스 좌우로 30 cm 이상 비어 있고, 전원선 여유가 있으며, 이동 중 바로 정지할 수 있게 옆에서 지켜봅니다.';
   if(resume)$('confirmLabel').textContent+=' 베이스·물체·주변 장애물은 이전 하단 관측 그대로입니다.';
   $('bottomConfirm').hidden=!physical;
   $('operation').disabled=inFlight||!state.accepting;
   $('supportedBottom').disabled=inFlight||!state.accepting;
-  $('operationHint').textContent=check?'베이스를 고정하고 열린 집게로 상판 위 점검 위치까지 접근합니다. 그 자리에서 촬영하고 정지합니다.':adaptive?'현재 위치에서 먼저 촬영하고 파지 경로를 검사합니다. 도달 가능한 경로가 있으면 바로 집습니다. 현재 후보의 경로가 소진되면 베이스를 한 번 옮기고, 정지를 확인한 뒤 새 촬영으로 다시 계획합니다.':align?'광각 RGB-D 한 번 → 물체 base 좌표 → 왼팔 목표 위치와의 차이만큼 베이스를 천천히 좌우 이동 → 정지 확인. 팔·리프트는 움직이지 않습니다. 이동 후에는 제어기 리셋과 «픽 스테이션 초기화»가 필요합니다.':resume?'저장된 하단 사진·좌표·후보를 사용합니다. 이전 실측 높이에 현재 엔코더 차이를 반영하고 현재 팔 자세로 다시 계획하며, 물체 재탐지와 리프트 상승은 반복하지 않습니다.':rise?'최하단에서 물체를 관측한 뒤 리프트를 올려 집습니다. 상승 통로와 받침의 간섭이 없는지 확인하세요.':$('operation').value==='top-pick'?'상단 유지 · 바퀴 검사와 리프트 이동 없음. 근거리 RGB-D 한 번 → 탐지 → 후보 → 경로·충돌 검사 → 물체 단면에서 높이 가산 없이 닫고 들어 올리기. 실행 전 사진 비교·파지 후 재촬영 없음. 성공 여부는 직접 확인합니다.':physical?'요청하면 자세 유지, 새 촬영, 충돌 검사, 왼팔 파지와 결과 확인이 진행됩니다.':'실제 D415로 촬영합니다. 깊이가 부족하면 근거리로 다시 촬영합니다. 카메라 검사에서는 팔이 움직이지 않습니다.';
+  $('operationHint').textContent=cabinetTop?'리프트를 최상단에 유지한 채 수납장으로 이동하고 주차 후 촬영·파지합니다.':cabinet?'저장 지도에서 수납장 앞으로 이동한 뒤, 현장에서 촬영해 리프트를 올리고 집습니다.':check?'베이스를 고정하고 열린 집게로 상판 위 점검 위치까지 접근합니다. 그 자리에서 촬영하고 정지합니다.':adaptive?'현재 위치에서 먼저 촬영하고 파지 경로를 검사합니다. 도달 가능한 경로가 있으면 바로 집습니다. 현재 후보의 경로가 소진되면 베이스를 한 번 옮기고, 정지를 확인한 뒤 새 촬영으로 다시 계획합니다.':align?'광각 RGB-D 한 번 → 물체 base 좌표 → 왼팔 목표 위치와의 차이만큼 베이스를 천천히 좌우 이동 → 정지 확인. 팔·리프트는 움직이지 않습니다. 이동 후에는 제어기 리셋과 «픽 스테이션 초기화»가 필요합니다.':resume?'저장된 하단 사진·좌표·후보를 사용합니다. 이전 실측 높이에 현재 엔코더 차이를 반영하고 현재 팔 자세로 다시 계획하며, 물체 재탐지와 리프트 상승은 반복하지 않습니다.':rise?'최하단에서 물체를 관측한 뒤 리프트를 올려 집습니다. 상승 통로와 받침의 간섭이 없는지 확인하세요.':$('operation').value==='top-pick'?'상단 유지 · 바퀴 검사와 리프트 이동 없음. 근거리 RGB-D 한 번 → 탐지 → 후보 → 경로·충돌 검사 → 물체 단면에서 높이 가산 없이 닫고 들어 올리기. 실행 전 사진 비교·파지 후 재촬영 없음. 성공 여부는 직접 확인합니다.':physical?'요청하면 자세 유지, 새 촬영, 충돌 검사, 왼팔 파지와 결과 확인이 진행됩니다.':'실제 D415로 촬영합니다. 깊이가 부족하면 근거리로 다시 촬영합니다. 카메라 검사에서는 팔이 움직이지 않습니다.';
   $('submit').textContent=check?'손끝 점검 요청':adaptive?'통합 파지 요청':align?'정렬 이동 요청':physical?'집기 요청':'촬영·후보 확인';
   $('submit').disabled=!state.accepting||inFlight||(physical&&!$('supportedBottom').checked);
 }
 $('operation').onchange=()=>{try{localStorage.setItem('pick-station-operation-v2',$('operation').value)}catch{}$('supportedBottom').checked=false;if(state)render(state);else updateOperation()};
 $('supportedBottom').onchange=updateOperation;
 async function post(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Pick-Token':token},body:JSON.stringify(data)});const value=await r.json();if(!r.ok)throw Error(value.error||r.status);return value}
-$('form').onsubmit=async e=>{e.preventDefault();if(inFlight||$('submit').disabled)return;inFlight=true;$('submit').disabled=true;$('message').textContent='';try{const data={text:$('request').value};if(state?.mode==='station'){data.operation=$('operation').value;data.supported_empty_bottom=['bottom-pick','observe-rise-pick'].includes(data.operation)&&$('supportedBottom').checked;data.supported_empty_top=['top-pregrasp-check','top-pick','resume-top-pick','top-align','top-align-pick'].includes(data.operation)&&$('supportedBottom').checked;data.supported_startup_release=['top-pregrasp-check','top-pick','bottom-pick','observe-rise-pick','resume-top-pick','top-align','top-align-pick'].includes(data.operation)&&$('supportedBottom').checked;if(data.operation==='resume-top-pick')data.scene_unchanged=$('supportedBottom').checked}await post('/api/requests',data);if(state?.mode==='station')$('supportedBottom').checked=false}catch(e){$('message').textContent=e.message}finally{inFlight=false;await poll()}};
+$('form').onsubmit=async e=>{e.preventDefault();if(inFlight||$('submit').disabled)return;inFlight=true;$('submit').disabled=true;$('message').textContent='';try{const data={text:$('request').value};if(state?.mode==='station'){const cabinetTop=$('operation').value==='cabinet-top';data.operation=cabinetTop?'cabinet-pick':$('operation').value;if(data.operation==='cabinet-pick'){const parts=$('mapPose').value.trim().split(/[ ,]+/);if(parts.length!==3||parts.some(v=>!v||!Number.isFinite(Number(v))))throw Error('지도에서 현재 위치와 방향을 선택하세요.');data.initial_pose=parts.map(Number)}data.supported_empty_bottom=!cabinetTop&&['bottom-pick','observe-rise-pick','cabinet-pick'].includes(data.operation)&&$('supportedBottom').checked;data.supported_empty_top=(cabinetTop||['top-pregrasp-check','top-pick','resume-top-pick','top-align','top-align-pick'].includes(data.operation))&&$('supportedBottom').checked;data.supported_startup_release=['top-pregrasp-check','top-pick','bottom-pick','observe-rise-pick','resume-top-pick','top-align','top-align-pick'].includes(data.operation)&&$('supportedBottom').checked;if(data.operation==='resume-top-pick')data.scene_unchanged=$('supportedBottom').checked}await post('/api/requests',data);if(state?.mode==='station')$('supportedBottom').checked=false;if(data.operation==='cabinet-pick'){startPixel=headingPixel=null;$('mapPose').value='';drawCabinetMap()}}catch(e){$('message').textContent=e.message}finally{inFlight=false;await poll()}};
 $('cancel').onclick=async()=>{try{const r=await post('/api/cancel',{});$('message').textContent=r.requested?'중단 요청을 보냈습니다. 정지 확인을 기다립니다.':'진행 중인 요청이 없습니다.'}catch(e){$('message').textContent=e.message}};
 $('reset').onclick=async()=>{if(inFlight||$('reset').disabled)return;
 const supported=!!state.reset_requires_support,nextTest=!!state.next_test_ready;

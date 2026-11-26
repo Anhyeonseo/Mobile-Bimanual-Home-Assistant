@@ -18,16 +18,17 @@ def measured_hold_source(snapshot, anchor, limits, sent_s, received_s):
     if (snapshot.status_code or snapshot.joint_count != 12 or snapshot.present_mask != 4095
             or len(snapshot.positions_urad) != 12 or len(snapshot.sample_age_ms) != 12
             or len(anchor) != 12 or not all(math.isfinite(v) for v in (sent_s, received_s))
-            or not 0 <= received_s - sent_s < .1
-            or any(type(age) is not int or not 0 <= age < 250 for age in snapshot.sample_age_ms)):
+            or received_s < sent_s
+            or any(type(age) is not int or not 0 <= age <= 65535 for age in snapshot.sample_age_ms)):
         raise ValueError('fresh complete measured arm snapshot required')
     for i, position in enumerate(snapshot.positions_urad):
         if (not limits.minimum_urad[i] <= position <= limits.maximum_urad[i]
                 or abs(position - anchor[i]) > 49088):  # Existing profile: 32 encoder counts.
             raise ValueError('measured arm left supported current-pose envelope')
     stamp = sent_s - max(snapshot.sample_age_ms) / 1000
-    if received_s - stamp >= .25:
-        raise ValueError('arm evidence expired in transit')
+    if received_s-sent_s >= .1 or max(snapshot.sample_age_ms) >= 250 or received_s-stamp >= .25:
+        from .carry_live_inputs import ObservationNotFresh
+        raise ObservationNotFresh('arm evidence expired in transit')
     return stamp
 
 
@@ -168,7 +169,7 @@ def _reference_supported(observe, lift, *, top_um, clock, sleep):
 
 
 def arm_observed_stationary(observe, mobile, *, clock=time.monotonic, sleep=time.sleep,
-                            on_deferred=None, transport_only=False, session=1):
+                            on_deferred=None, on_sample=None, timeout_s=3., transport_only=False, session=1):
     """Wait parked, including a correlated rejection before a session exists.
 
     Only a healthy, same-boot rejection proving no session was armed can return
@@ -177,57 +178,95 @@ def arm_observed_stationary(observe, mobile, *, clock=time.monotonic, sleep=time
     from so101_arm_bridge.mobile_client import MobileReplyError
     from so101_arm_bridge.mobile_wire import MobileStatus
 
-    deadline = clock() + 3
-    quiet_since = last_tick = None
+    from .carry_live_inputs import ObservationNotFresh
+
+    if not math.isfinite(timeout_s) or timeout_s <= 0:
+        raise ValueError('positive stationary observation interval required')
+    deadline = clock() + timeout_s
+    first_tick = last_tick = None
     samples = 0
-    while True:
-        if clock() >= deadline:
-            raise TimeoutError('출발 전 정지 관측 대기 시간 초과')
-        observation = observe()
+    reason = 'no sample'
+    while clock() < deadline:
+        try:
+            observation = observe()
+        except ObservationNotFresh as error:
+            first_tick = last_tick = None
+            samples = 0
+            reason = 'arm observation stale'
+            if on_sample:
+                on_sample(reason=reason, detail=str(error))
+            sleep(.02)
+            continue
         if not transport_only and not supported_lift_is_holding(observation):
             raise RuntimeError('리프트 유지 상태 확인 실패')
+        sent = clock()
         feedback = mobile.status()
-        if feedback.feedback_is_fresh(100) and not any(feedback.velocity_raw):
-            if quiet_since is None:
-                quiet_since = clock()
-            if feedback.feedback_tick_ms != last_tick:
-                last_tick = feedback.feedback_tick_ms
-                samples += 1
-            if samples >= 3 and clock() - quiet_since >= .1:
-                if clock() >= deadline:
-                    raise TimeoutError('출발 전 정지 관측 대기 시간 초과')
-                try:
-                    mobile.arm(session)
-                    return
-                except MobileReplyError as exc:
-                    diagnostics = exc.diagnostics
-                    response = MobileStatus(**diagnostics['response'])
-                    command = diagnostics.get('command', {})
-                    remaining = (command.get('valid_until_ms', response.mcu_tick_ms)
-                                 - response.mcu_tick_ms) & 0xffffffff
-                    unarmed_speed_race = (
-                        diagnostics['expected_kind'] == 1 and diagnostics['expected_sequence'] == 0
-                        and response.kind == 129 and response.request_sequence == 0
-                        and mobile.boot_id is not None and response.boot_id == mobile.boot_id
-                        and response.state == 0 and response.session == 0
-                        and response.sequence == 0 and response.reason == 0
-                        and response.flags == (51 if transport_only else 23)
-                        and response.capabilities & 7 == 7 and response.feedback_is_fresh(100)
-                        and any(response.velocity_raw) and command.get('opcode') == 1
-                        and command.get('session') == session and command.get('sequence') == 0
-                        and tuple(command.get('velocity_raw', ())) == (0, 0, 0, 0)
-                        and 0 < remaining <= 200
-                    )
-                    if not unarmed_speed_race:
-                        raise
-                    if on_deferred is not None:
-                        on_deferred(diagnostics)
-                    quiet_since = last_tick = None
-                    samples = 0
+        received = clock()
+        tick = feedback.feedback_tick_ms
+        step = None if last_tick is None else (tick-last_tick) & 0xffffffff
+        rtt_ms = (received-sent)*1000
+        # Account for transfer time in the original 100ms observation budget.
+        remaining_ms = 100-math.ceil(rtt_ms)
+        if remaining_ms <= 0 or not feedback.feedback_is_fresh(remaining_ms):
+            reason = 'stale'
+        elif any(feedback.velocity_raw):
+            reason = 'nonzero speed'
+        elif step == 0:
+            reason = 'duplicate'
+        elif step is not None and step >= 0x80000000:
+            raise RuntimeError('wheel observation tick regressed')
         else:
-            quiet_since = last_tick = None
+            if first_tick is None or (step is not None and step > 250):
+                first_tick = tick
+                samples = 0
+            last_tick = tick
+            samples += 1
+            reason = 'quiet'
+        # A late read of the same quiet MCU sample carries no new evidence.
+        # A nonzero speed always breaks the window, including on a late reply.
+        if any(feedback.velocity_raw) or (reason == 'stale' and tick != last_tick):
+            first_tick = last_tick = None
             samples = 0
+        span_ms = (tick-first_tick) & 0xffffffff if first_tick is not None else 0
+        if on_sample:
+            on_sample(reason=reason, sample_tick_ms=tick, mcu_tick_ms=feedback.mcu_tick_ms,
+                      sample_age_ms=(feedback.mcu_tick_ms-tick) & 0xffffffff,
+                      host_sent_s=sent, host_received_s=received, round_trip_ms=rtt_ms,
+                      wheel_velocity_raw=list(feedback.velocity_raw[:3]), lift_velocity_raw=feedback.velocity_raw[3],
+                      flags=feedback.flags, boot_id=feedback.boot_id, state=feedback.state,
+                      session=feedback.session, distinct_samples=samples, span_ms=span_ms)
+        if reason == 'quiet' and samples >= 3 and span_ms >= 100 and clock() < deadline:
+            try:
+                mobile.arm(session)
+                return
+            except MobileReplyError as exc:
+                diagnostics = exc.diagnostics
+                response = MobileStatus(**diagnostics['response'])
+                command = diagnostics.get('command', {})
+                remaining = (command.get('valid_until_ms', response.mcu_tick_ms)
+                             - response.mcu_tick_ms) & 0xffffffff
+                unarmed_speed_race = (
+                    diagnostics['expected_kind'] == 1 and diagnostics['expected_sequence'] == 0
+                    and response.kind == 129 and response.request_sequence == 0
+                    and mobile.boot_id is not None and response.boot_id == mobile.boot_id
+                    and response.state == 0 and response.session == 0
+                    and response.sequence == 0 and response.reason == 0
+                    and response.flags == (51 if transport_only else 23)
+                    and response.capabilities & 7 == 7 and response.feedback_is_fresh(100)
+                    and any(response.velocity_raw) and command.get('opcode') == 1
+                    and command.get('session') == session and command.get('sequence') == 0
+                    and tuple(command.get('velocity_raw', ())) == (0, 0, 0, 0)
+                    and 0 < remaining <= 200
+                )
+                if not unarmed_speed_race:
+                    raise
+                reason = 'controller reported nonzero speed at arm'
+                if on_deferred is not None:
+                    on_deferred(diagnostics)
+                first_tick = last_tick = None
+                samples = 0
         sleep(.02)
+    raise TimeoutError(f'출발 전 정지 관측 대기 시간 초과 ({reason}, {samples}개 표본)')
 
 
 def enter_base_transport(observe, evidence, *, clock=time.monotonic, sleep=time.sleep):

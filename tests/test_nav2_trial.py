@@ -544,3 +544,188 @@ def test_blocked_relative_goal_stays_frozen_and_does_not_authorize_start():
     assert s.trial.goal is not s.trial.target_pose
     assert s.request is None and s.nonzero==0
     with pytest.raises(ValueError):s.bind_relative_target([0,0,0],now)
+
+
+@pytest.mark.parametrize('blocked',[False,True])
+def test_station_waits_for_new_scan_and_matching_corridor(blocked):
+    t=trial()
+    p=(0,0,0)
+    t.start(10,p,operator_confirmed=True)
+    def step(at,scan,fresh,clear,**changes):
+        t.nav=feedback(t,at,**changes)
+        return t.command(at,p,at,scan_stamp=scan,sensors_fresh=fresh,corridor_clear=clear)
+    assert not any(step(10.4,10.026,False,False))
+    assert not any(step(13.,12.96,False,False))
+    assert t.state=='WAITING_SENSOR' and not t.resume_required
+    assert not any(step(13.1,10.026,True,True))
+    assert t.state=='WAITING_SENSOR'
+    assert not any(step(13.2,13.18,True,not blocked))
+    if blocked:
+        assert t.state=='WAITING_OBSTACLE' and t.collision_hold and t.resume_required
+    else:
+        assert t.state=='RUNNING'
+        assert not any(step(13.21,13.18,True,True,command_s=13.19))
+        assert any(step(13.25,13.21,True,True))
+
+
+def test_checked_command_moves_on_recovery_cycle_and_new_obstacle_stops():
+    t = trial()
+    pose = (0, 0, 0)
+    t.start(10, pose, operator_confirmed=True)
+    twist = [.016, 0, 0]
+
+    def step(at, stamp, fresh, clear, checked, **changes):
+        t.nav = feedback(t, at, **changes)
+        return t.command(at, pose, at, scan_stamp=stamp, sensors_fresh=fresh,
+                         corridor_clear=clear, checked_twist=checked)
+
+    assert not any(step(10.4, 10., False, False, None))
+    assert any(step(10.63, 10.61, True, True, twist, command_s=10.57))
+    assert not any(step(10.65, 10.61, True, True, [-.016, 0, 0]))
+    assert not any(step(10.67, 10.66, True, False, twist, odom_s=9.))
+    assert t.collision_hold and t.resume_required
+
+
+def test_nav2_projects_newest_bracketed_depth_without_starving_on_faster_camera():
+    from collections import deque
+    from types import SimpleNamespace
+    from home_robot_tasks.nav2_trial import Nav2SensorBridge
+    bridge = SimpleNamespace(depth_frames=deque(), last_depth=0)
+    project = lambda stamp, end, now: Nav2SensorBridge.depth_at_known_pose(
+        bridge, stamp, str(stamp), [(10., (0, 0, 0)), (end, (0, 0, 0))], now)
+    assert project(10.10, 10.0, 10.12) is None
+    assert project(10.17, 10.0, 10.18) is None
+    assert project(10.25, 10.20, 10.27) == (10.17, '10.17')
+    bridge.last_depth = 10.17
+    assert project(10.25, 10.20, 10.28) is None
+    assert project(11.2, 10.30, 11.23) is None
+
+
+def test_station_sweep_binds_sensor_expiry_action_and_nav_zero():
+    from tools.run.navigation_trial_web import checked_wheel_proposal
+
+    t = trial()
+    t.start(10., (0,0,0), operator_confirmed=True)
+    t.nav = feedback(t, 10.5, sequence=3)
+    corridor = dict(goal=list(t.goal), nav_twist=t.nav['twist'], pose_stamp=10.4, scan_stamp=10.25,
+                    depth_stamp=9.9, hits={'depth': [], 'lidar': []})
+    checked = checked_wheel_proposal(corridor, t.nav, 10.5)
+    assert checked['valid_until_s'] == pytest.approx(10.60)
+    def step(at):
+        return t.command(at, (0,0,0), at, sensors_fresh=True, corridor_clear=True, scan_stamp=10.25,
+                         checked_twist=corridor['nav_twist'], checked_proposal=checked)
+    assert any(step(10.52))
+    assert not any(step(10.61))
+    t.nav['twist'] = [0., 0., 0.]
+    assert not any(step(10.55))
+    assert checked_wheel_proposal(corridor, t.nav, 10.55) is None
+    t.nav.update(twist=corridor['nav_twist'], sequence=4)
+    assert not any(step(10.55))
+    corridor['hits']['depth'] = [[.2,0.,.3]]
+    assert checked_wheel_proposal(corridor, t.nav, 10.55) is None
+
+
+def test_upper_parking_screens_to_goal_plus_tolerance_and_keeps_detour_preview():
+    from navigation_trial_web import State
+    t = trial()
+    t.manipulation_alignment = True
+    t.arrival_xy = .03
+    t.navigation_body = dict(t.navigation_body, mode='measured_upper_travel')
+    state = State(t, None)
+    origin = [.3, .4, math.pi/2]
+    goal = [.3, .46, math.pi/2]
+    front = max(p[0] for p in t.navigation_body['footprint_xy_m'])
+    hit = [[front+.105,0]]
+    beyond = [[front+.16,0]]
+    twist = (.008,0,0)
+    assert state.compute_corridor_hits(origin, goal, hit, hit, twist)['depth']
+    assert not any(state.compute_corridor_hits(origin, goal, beyond, beyond, twist).values())
+    for other in ([.36,.4,0], [.3,.34,0]):
+        assert state.compute_corridor_hits(origin, other, beyond, [], twist)['lidar']
+    t.manipulation_alignment = False
+    assert state.compute_corridor_hits(origin, goal, beyond, [], twist)['lidar']
+
+
+@pytest.mark.parametrize('code,stale,rejected', [(208,False,True),(206,False,True),(205,False,False),
+                                                 (207,False,False),(208,True,False)])
+def test_parked_candidate_rejection_belongs_to_requested_goal(code, stale, rejected):
+    from home_robot_tasks.nav2_trial import Nav2SensorBridge
+    from types import SimpleNamespace as NS
+    from threading import RLock
+    b=Nav2SensorBridge.__new__(Nav2SensorBridge)
+    goal=[1.,2.,0.]
+    b.goal=goal; b.planned_goal=[.8,2.,0.] if stale else goal
+    b.state=NS(lock=RLock(), nav2_control={'goal':goal}, nav2_feedback={})
+    b.processes=[]; b.error=b.active=b.result=b.wait_reason=b.path=None
+    b.apply_navigation_update=b.publish_pose_depth=b.activate=lambda:None
+    b.plan_revision=b.map_revision=None; b.activated=b.plan_accepted=True
+    b.last_depth=b.last_pose=b.command_s=0.; b.twist=(0.,0.,0.); b.sequence=0
+    b.collision_twist=lambda now:b.twist
+    b.plan_future=NS(done=lambda:True,result=lambda:NS(status=6,result=NS(error_code=code)))
+    b.tick()
+    feedback=b.state.nav2_feedback
+    assert feedback['error'] is None and feedback['ready'] is False
+    assert feedback['rejected_goal'] == (goal if rejected else None)
+
+
+def test_raised_arm_depth_is_checked_at_component_height():
+    from navigation_trial_web import State
+    t = trial()
+    def rectangle(front):
+        return [[-.12,-.20],[front,-.20],[front,.20],[-.12,.20]]
+    body = dict(footprint_xy_m=rectangle(.25), self_mask_xy_m=rectangle(.20),
+                component_footprints=[rectangle(.20),rectangle(.25)],
+                component_z_base_m=[[-.05,1.04],[.833,1.10]], clearance_m=.03)
+    t.navigation_body=body
+    state=State(t,None)
+    pose,goal,twist = [0,0,0],[.3,0,0],[.008,0,0]
+    def hits(points):
+        return state.compute_corridor_hits(pose,goal,[[.425,-.13]],points,twist)
+    assert hits([[.425,-.13,.73]]) == dict(lidar=[[.425,-.13]],depth=[])
+    assert hits([[.425,-.13,.80]])['depth']  # voxel and arm clearance overlap
+    assert hits([[.425,-.13,.95]])['depth']
+    assert hits([[.36,-.13,.73]])['depth']  # fixed chassis still blocks
+    del body['component_z_base_m']
+    assert hits([[.425,-.13,.73]])['depth']
+
+
+def test_saved_depth_critic_only_enabled_with_height_scene(tmp_path):
+    import yaml
+    from home_robot_tasks.nav2_trial import nav2_trial_config
+    from tools.run.navigation_trial_web import ROOT
+    template = yaml.safe_load((ROOT/'config/nav2.alohamini.candidate.yaml').read_text())
+    scene = tmp_path/'saved-depth.scene'
+    cfg = nav2_trial_config(template, ROOT, saved_scene=scene)
+    dwb = cfg['/s4_nav2_trial/controller_server']['ros__parameters']['FollowPath']
+    assert dwb['critics'][0] == 'SavedDepth'
+    assert dwb['SavedDepth.scene'] == str(scene)
+    assert 'ObstacleFootprint' in dwb['critics']
+    layers = cfg['/s4_nav2_trial/global_costmap/global_costmap']['ros__parameters']['plugins']
+    assert layers.index('saved_centres') > layers.index('inflation_layer')
+    old = nav2_trial_config(template, ROOT)
+    assert 'SavedDepth' not in old['/s4_nav2_trial/controller_server']['ros__parameters']['FollowPath']['critics']
+
+
+def test_extended_lidar_hold_requires_new_clear_scan_and_command():
+    from navigation_trial_web import checked_wheel_proposal
+    t=trial()
+    pose=(0,0,0)
+    t.start(10,pose,operator_confirmed=True)
+    t.nav=feedback(t,10.1)
+    assert not any(t.command(10.1,pose,10.1,sensors_fresh=True,corridor_clear=False,
+                             scan_stamp=10.08,lidar_preview_only=True))
+    assert t.state=='WAITING_SENSOR' and not t.resume_required
+    for at,scan,command,move in [(10.15,10.08,10.14,False),(10.2,10.18,10.09,False),
+                                 (10.25,10.23,10.24,True)]:
+        t.nav=feedback(t,at,command_s=command,sequence=5)
+        twist=t.nav['twist']
+        corridor=dict(goal=list(t.goal),nav_twist=twist,hits={'lidar':[],'depth':[]},
+                      scan_stamp=scan,depth_stamp=at,pose_stamp=at)
+        checked=checked_wheel_proposal(corridor,t.nav,at)
+        raw=t.command(at,pose,at,sensors_fresh=True,corridor_clear=True,scan_stamp=scan,
+                      checked_twist=twist,checked_proposal=checked)
+        assert any(raw)==move
+    assert t.first_preview_scan is None
+    t.observe_obstacle(11,11,preview_only=True)
+    t.observe_obstacle(13,13,preview_only=True)
+    assert t.resume_required and t.state=='WAITING_OBSTACLE'

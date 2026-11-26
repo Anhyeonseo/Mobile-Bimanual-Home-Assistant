@@ -114,12 +114,12 @@ class PickCompute:
                     count=len(result.get('group', {}).get('refined_grasps', [])),
                     depth_fraction=matches[0].get('valid_depth_fraction') if len(matches)==1 else None)
 
-    def candidates(self, snapshot, detections, prompt, output, camera_mode=None, location=None):
+    def candidates(self, snapshot, detections, prompt, output, camera_mode=None, location=None, cabinet_top=False):
         from tools.diagnostics.replay_s3_grasp import replay
         from tools.diagnostics.plan_capture_carry import serial
         snapshot = Path(snapshot)
         report = json.loads((snapshot/'robot_capture.json').read_text())
-        result = replay(snapshot,Path(detections),prompt,side=location,robot_report=report,prepare_carry=True,
+        result = replay(snapshot,Path(detections),prompt,side=location,robot_report=report,prepare_carry=True,cabinet_top=cabinet_top,
                         candidate_source=self.options.get('candidate_source','so101'),
                         camera_mode=camera_mode,grasp_inference=self.grasp,
                         grasp_checkpoint=self.grasp.checkpoint if self.grasp else None, grasp_audit=False)
@@ -158,6 +158,44 @@ class PickCompute:
         target = optical_to_base(profile['base_from_optical'], point)
         check_top_surface(prepared['support_plane'], target, profile)
         return target
+
+    def cabinet_placement(self, prepared, report, output, candidates):
+        from tools.diagnostics.plan_capture_carry import plan
+        from tools.lib.pick_planning import station_plan_options
+        from home_robot_tasks.carry_planning import better_lateral_pinch, tabletop_route_rank, compare_lateral_pinch
+        import hashlib
+        out = Path(output)
+        out.mkdir()
+        origin = json.loads(Path(report).read_text())
+        if origin['prepared_sha256'] != hashlib.sha256(Path(prepared).read_bytes()).hexdigest():
+            raise ValueError('정렬 검토와 촬영 기록이 일치하지 않습니다.')
+        def quality(r):
+            q = (r.get('plan') or {}).get('carry_quality') or {}
+            margin, alignment = q.get('tabletop_contact_margin'), q.get('tabletop_pinch_alignment')
+            rank = tabletop_route_rank(margin, alignment) if margin and alignment else None
+            return rank, compare_lateral_pinch(margin, alignment)
+        before, _ = quality(origin)
+        rows, selected, best_rank = [], None, None
+        for i, candidate in enumerate(candidates):
+            options = station_plan_options(Path(prepared), out/f'pose-{i}', Path(self.options['mobile_mesh_dir']))
+            options.cabinet_placement = True
+            r = plan(options, session_factory=self.planner, preview_base_xy=candidate['delta'])
+            rank, compare_more = quality(r)
+            rows.append(dict(**candidate, status=r['status'], sweep_clear=r.get('observed_sweep_clear'),
+                             visible=r.get('within_camera_view'), quality=rank))
+            if r['status'] == 'PLANNER_ERROR':
+                raise ValueError('정렬 후보 MoveIt 검사 실패 · '+str(r.get('reason')))
+            if (r['status'] == 'HYPOTHETICAL_ROUTE_FOUND' and r.get('observed_sweep_clear') is True
+                    and r.get('within_camera_view') is True and rank is not None
+                    and (before is None or better_lateral_pinch(before, rank)
+                         or (rank == before and not compare_more))
+                    and (best_rank is None or rank > best_rank)):
+                selected, best_rank = candidate, rank
+                if not compare_more:
+                    break
+        summary = dict(capture_id=origin['capture_id'], samples=rows, selected=selected)
+        (out/'summary.json').write_text(json.dumps(summary, indent=2))
+        return summary
 
     def reposition_review(self, prepared, report, output):
         from tools.diagnostics.review_tabletop_pick import review

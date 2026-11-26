@@ -96,7 +96,7 @@ void MobileServoFeedback_OnUartError(UART_HandleTypeDef *uart) {
 }
 bool MobileServoFeedback_EnterTransport(void) {
     if(!reader.configured || reader.fault!=MOBILE_FEEDBACK_OK || reader.active ||
-       gate_token || launching || reader.temperature_pending)return false;
+       gate_token || launching || reader.supervisor->wheel_temperature_hold)return false;
     reader.supervisor->transport_only=true;reader.cursor=0;reader.dirty=0;
     return true;
 }
@@ -153,6 +153,9 @@ void MobileServoFeedback_Poll(void) {
     /* Pending velocity zero takes precedence. Afterwards READ remains possible
      * with motion inhibited, to obtain independent post-STOP evidence. */
     if (output->configured && output->stop_requested && !output->stop_written) return;
+    if (reader.temperature_pending && !reader.supervisor->wheel_zero_written &&
+        (reader.supervisor->state == ACTUATOR_MOBILE_READY ||
+         reader.supervisor->state == ACTUATOR_MOBILE_ACTIVE)) return;
     if (!fits_arm_window(now, budget_us)) return;
     uint32_t token;
     if (!ServoTransport_BeginReadOnly(left_uart, &token)) return;

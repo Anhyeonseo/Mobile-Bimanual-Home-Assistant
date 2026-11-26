@@ -23,6 +23,12 @@ CONFIG = ROOT/'config/home_assistant'
 OWNER = 'pick-station'
 
 
+def read_while_held(read, check):
+    """Reacquire timing-only failures during a stationary hold using new I/O."""
+    from .unified_carry_inputs import UnifiedPlatformGuard, read_stationary_sample
+    return read_stationary_sample(read, check, time.perf_counter, UnifiedPlatformGuard.maximum_age_s)
+
+
 def prepare_execution_inputs(checked, profile, guard, options):
     """Pure bundle admission/image setup; no controller or camera handles.
 
@@ -110,10 +116,6 @@ class UnifiedPickHardware:
         self.diagnostic_context=ctx
         import serial
         from .camera_evidence import load_capture_profile
-        from .s2_rgbd_acquisition import Capture
-        from .stationary_rgbd import pick_depth_exposure_us
-        from functools import partial
-        from .pick_camera_process import PickCameraProcess
         # Load execution-only modules before holding torque starts. A cold
         # import must not consume the short measured-evidence lease later.
         from . import carry_bundle, device_ports
@@ -160,6 +162,8 @@ class UnifiedPickHardware:
         check_anchor_inventory(setup, json.loads((CONFIG/'arm_ranges.development.json').read_text()))
         if setup.get('startup_release'):
             ctx.note('받침 확인에 따라 남아 있던 모터 힘 해제 완료 · 전체 토크 OFF 실측 확인')
+        if top and self.options.get('map_navigation'):
+            self.travel_inventory = setup['unpowered_observations'][-1]
         if top:
             # inspect() has already proven this inventory window stationary with
             # all drives unpowered. Raw position is modulo one revolution, so
@@ -169,10 +173,8 @@ class UnifiedPickHardware:
             if not self.options.get('resume_height_source') and not TOP_RAW_OBSERVED[0] <= pos <= TOP_RAW_OBSERVED[1]:
                 ctx.note(f'과거 상단 관측값 {TOP_RAW_OBSERVED[0]}–{TOP_RAW_OBSERVED[1]}과 다름 · '
                          '사용자가 확인한 기계적 최상단에서 새 기준을 등록합니다.')
-        self.camera=self.resources.enter_context(PickCameraProcess(
-            partial(Capture,self.profile,self.reference,retain_frame=True,depth_exposure_us=pick_depth_exposure_us(self.options.get('camera_mode', 'wide'))),
-            self._consume))
-        ctx.note('카메라 별도 프로세스 준비 완료',camera_runtime=self.camera.runtime_info)
+        if not self.options.get('map_navigation'):
+            self.start_camera(ctx)
         ctx.check()
         boot=setup['commission_final']['boot_id']
         preview=UnifiedArmAdapter(self.transport,CONFIG/'arm_ranges.development.json',pick_board=board)
@@ -196,8 +198,10 @@ class UnifiedPickHardware:
             ctx.check()
             if time.monotonic()>deadline:raise TimeoutError('initial hold timed out')
             self.adapter.poll(OWNER);time.sleep(.01)
-        def observe():
-            ctx.check();self.camera.check();self.adapter.keepalive()
+        def read_preparation():
+            ctx.check()
+            if self.camera is not None:self.camera.check()
+            self.adapter.keepalive()
             sent=time.monotonic();packet=self.adapter.feedback_snapshot();received=time.monotonic()
             measured_hold_source(packet,self.anchor.positions_urad,self.adapter.motion_limits,sent,received)
             self.evidence.publish_mcu_snapshot(packet,sent,received,arms_safe=True,lift_hold=False,payload_safe=True)
@@ -208,6 +212,10 @@ class UnifiedPickHardware:
                 error.lift_status=asdict(status)
                 raise error
             return status
+        def observe():
+            if self.rising or getattr(self, 'base_moving', False):
+                return read_preparation()
+            return read_while_held(read_preparation, ctx.check)
         top_reference = None
         if top:
             def observe_top():
@@ -244,7 +252,32 @@ class UnifiedPickHardware:
         self.prepared=True
         while len(self.history)<3:
             ctx.pause(.05)
-        ctx.note('카메라·컨트롤러 유지 준비 완료',actual_lift_m=actual)
+        endpoint = '상단' if top else '하단'
+        ctx.note(f'컨트롤러 {endpoint} 유지 준비 완료' if self.camera is None else '카메라·컨트롤러 유지 준비 완료',actual_lift_m=actual)
+
+    def start_camera(self, ctx):
+        from .s2_rgbd_acquisition import Capture
+        from .stationary_rgbd import pick_depth_exposure_us
+        from functools import partial
+        from .pick_camera_process import PickCameraProcess
+        camera = PickCameraProcess(
+            partial(Capture, self.profile, self.reference, retain_frame=True,
+                    depth_exposure_us=pick_depth_exposure_us(self.options.get('camera_mode', 'wide'))),
+            self._consume)
+        if self.prepared:
+            # The controller owner keeps renewing its hold during D415 startup.
+            pending = self.jobs.submit(camera.__enter__)
+            try:
+                ctx.wait(pending)
+            except BaseException:
+                if not pending.cancel():
+                    pending.add_done_callback(lambda _: camera.__exit__(None, None, None))
+                raise
+            self.resources.push(camera)
+            self.camera = camera
+        else:
+            self.camera = self.resources.enter_context(camera)
+        ctx.note('카메라 별도 프로세스 준비 완료', camera_runtime=camera.runtime_info)
 
     def _consume(self, record, images):
         with self.lock:
@@ -275,9 +308,7 @@ class UnifiedPickHardware:
             self.service_trace.append(record)
 
     def _tick(self):
-        from .carry_live_inputs import joint_exposure, ObservationNotFresh
-        from .platform_preparation import measured_hold_source
-        self.camera.check()
+        if self.camera is not None:self.camera.check()
         if self.session is not None:
             index=min(self.session.index,len(self.session.program.stages)-1)
             phase=self.session.program.stages[index].name
@@ -298,6 +329,12 @@ class UnifiedPickHardware:
             with self.inputs.lock:
                 self.history=deque(self.inputs.joints,maxlen=80)
             return
+        context = getattr(self, 'diagnostic_context', None)
+        return read_while_held(self._read_idle_hold, context.check if context else lambda: None)
+
+    def _read_idle_hold(self):
+        from .carry_live_inputs import joint_exposure, ObservationNotFresh
+        from .platform_preparation import measured_hold_source
         self.adapter.keepalive()
         sent=time.monotonic();packet=self.adapter.feedback_snapshot();received=time.monotonic()
         measured_hold_source(packet,self.anchor.positions_urad,self.adapter.motion_limits,sent,received)
@@ -617,11 +654,24 @@ class UnifiedPickHardware:
     def hold_pose(self):
         if self.session is None or self.session.state!='HOLDING' or not self.history:
             raise ValueError('stationary post-pick hold required')
-        self.guard.require_fresh(time.monotonic())
-        sample=self.history[-1]
-        if not 0<=time.monotonic()-sample.lower_s<=.2:
-            raise ValueError('post-pick joints stale')
-        return np.asarray(sample.positions_rad),self.inputs.fk(sample.positions_rad)
+        def measured_pose():
+            self.guard.require_fresh(time.monotonic())
+            sample = self.history[-1]
+            if not 0 <= time.monotonic()-sample.lower_s <= .2:
+                from .carry_live_inputs import ObservationNotFresh
+                raise ObservationNotFresh('post-pick joints stale')
+            return np.asarray(sample.positions_rad), self.inputs.fk(sample.positions_rad)
+
+        from .carry_live_inputs import ObservationNotFresh
+        try:
+            return measured_pose()
+        except ObservationNotFresh:
+            def refresh():
+                self.reader.refresh()
+                with self.inputs.lock:
+                    self.history = deque(self.inputs.joints, maxlen=80)
+                return measured_pose()
+            return read_while_held(refresh, self.diagnostic_context.check)
 
     def confirm_verification_frame(self, ctx, snapshot, detection_path, prompt):
         """Recheck the verified object's depth/pixels in a fresh held frame.
@@ -698,9 +748,12 @@ class UnifiedPickHardware:
         self.guard.require_fresh(time.monotonic())
         from .platform_preparation import measured_hold_source
         from .carry_live_inputs import joint_exposure
-        sent=time.monotonic();packet=self.adapter.feedback_snapshot();received=time.monotonic()
-        measured_hold_source(packet,packet.positions_urad,self.adapter.motion_limits,sent,received)
-        sample=joint_exposure(packet,sent,received)
+        def read_next_anchor():
+            self.adapter.keepalive()
+            sent=time.monotonic();packet=self.adapter.feedback_snapshot();received=time.monotonic()
+            measured_hold_source(packet,packet.positions_urad,self.adapter.motion_limits,sent,received)
+            return packet, joint_exposure(packet,sent,received)
+        packet,sample=read_while_held(read_next_anchor,ctx.check)
         with self.lock:
             self.session=self.inputs=self.reader=None
             self.latest=None

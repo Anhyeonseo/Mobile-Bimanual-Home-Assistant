@@ -41,11 +41,21 @@ static void queue_stop(actuator_mobile_output_t *o,uint32_t now) {
         if(o->fault==MOBILE_OUTPUT_OK)o->fault=MOBILE_OUTPUT_QUEUE;
     }
 }
+static bool zero_wheels_packet(const uint8_t *p, size_t n) {
+    return n == 17 && p[5] == 46 && p[6] == 2 &&
+        p[7] == ACTUATOR_WHEEL_0_ID && !p[8] && !p[9] &&
+        p[10] == ACTUATOR_WHEEL_1_ID && !p[11] && !p[12] &&
+        p[13] == ACTUATOR_WHEEL_2_ID && !p[14] && !p[15];
+}
 void actuator_mobile_output_poll(actuator_mobile_output_t *o,uint32_t us,uint32_t ms,uint32_t arm_epoch) {
     if(o==NULL || !o->configured)return;
     o->feedback_due=false;o->available_us=0;
     actuator_mobile_poll(o->supervisor,ms);
     actuator_shared_bus_poll(&o->router.bus,us);
+    actuator_bus_job_t *wheels = &o->router.jobs[ACTUATOR_BUS_WORK_WHEELS];
+    bool hold = o->supervisor->wheel_temperature_hold;
+    if (hold && wheels->pending && !zero_wheels_packet(wheels->bytes, wheels->length))
+        wheels->pending = false;
     /* Check queued deadlines even when another UART owner prevents dequeue.
      * A later periodic refresh must not hide a missed transmission deadline. */
     for(unsigned i=0;i<ACTUATOR_BUS_WORK_COUNT;i++)if(o->router.jobs[i].pending) {
@@ -117,6 +127,9 @@ void actuator_mobile_output_poll(actuator_mobile_output_t *o,uint32_t us,uint32_
         if(remaining<=1) {actuator_mobile_output_stop(o,MOBILE_OUTPUT_COMMAND_EXPIRING);queue_stop(o,us);return;}
         if((uint64_t)(remaining-1)*1000u<lifetime)lifetime=(remaining-1)*1000u;
     }
+    if (hold) memset(motor_velocity, 0, 3 * sizeof(motor_velocity[0]));
+    if (hold && !o->supervisor->wheel_zero_written && !wheels->pending)
+        window.due |= ACTUATOR_SCHEDULE_WHEELS;
     const actuator_motor_group_id_t groups[2]={ACTUATOR_GROUP_BASE_WHEELS,ACTUATOR_GROUP_LIFT};
     const actuator_bus_work_t kinds[2]={ACTUATOR_BUS_WORK_WHEELS,ACTUATOR_BUS_WORK_LIFT};
     const uint32_t budget[2]={o->config.wheels_budget_us,o->config.lift_budget_us};
@@ -131,6 +144,11 @@ void actuator_mobile_output_poll(actuator_mobile_output_t *o,uint32_t us,uint32_
 }
 void actuator_mobile_output_completed(actuator_mobile_output_t *o,actuator_bus_work_t kind,uint32_t ms) {
     if(o==NULL || !o->configured || o->router.bus.active || o->router.bus.faulted || kind!=o->router.bus.owner)return;
+    if (kind == ACTUATOR_BUS_WORK_WHEELS && o->supervisor->wheel_temperature_hold &&
+        !o->supervisor->wheel_zero_written && zero_wheels_packet(o->router.active_bytes, o->router.active_length)) {
+        o->supervisor->wheel_zero_written = true;
+        o->supervisor->wheel_zero_ms = ms;
+    }
     if(o->lift_control!=NULL) {
         const uint8_t *p=o->router.active_bytes;
         bool zero_lift=kind==ACTUATOR_BUS_WORK_LIFT && o->router.active_length==11 && p[5]==46 && p[7]==ACTUATOR_LIFT_ID && !p[8] && !p[9];

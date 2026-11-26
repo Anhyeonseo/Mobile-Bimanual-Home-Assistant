@@ -241,3 +241,35 @@ def test_board_admission_failure_is_not_a_mobile_acknowledgement(status, message
     transport = StreamValidationTransportV2(RejectedOutput())
     with pytest.raises(StreamTransportV2Error, match=message):
         transport.exchange_mobile(MobileCommand(1, 1, 0, 100).encode())
+
+
+def test_checked_sweep_renews_then_expires_to_zero_and_missing_heartbeat_latches(library):
+    client, _, serial, clock = make_clients(library)
+    serial.library.pc_host_enable_checked_wheels()
+    client.synchronize()
+    client.arm(11)
+    wheels = (55, -42, 13, 0)
+    for _ in range(20):
+        clock[0] += 30
+        applied, reply = client.velocity_checked(wheels, clock[0] + 55)
+        assert applied == wheels and reply.state == 2
+        clock[0] += 1
+        assert client.status().velocity_raw == wheels
+    clock[0] += 55
+    assert client.status().velocity_raw == (0, 0, 0, 0)
+    assert client.status().state == 2
+    applied, reply = client.velocity_checked(wheels, clock[0] - 1)
+    assert not any(applied) and reply.state == 2
+    clock[0] += 151
+    assert client.status().state == 3
+
+
+def test_park_reaches_firmware_through_station_transport(library):
+    client, _, serial, clock = make_clients(library)
+    serial.library.pc_mobile_set_park_proof(1)
+    client.synchronize()
+    client.arm(7)
+    clock[0] += 1
+    client.velocity((0, 0, 0, 0))
+    clock[0] += 1
+    assert client.park().session == 0

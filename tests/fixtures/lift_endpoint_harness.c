@@ -62,3 +62,9 @@ int lift_test_transport_sample(unsigned now,unsigned stamp,unsigned drive_stamp,
 }
 int lift_test_transport_ready(unsigned now){return actuator_lift_bottom_transport_ready(&l,now);}
 void lift_test_transport_target(int height){l.target_um=height;}
+
+void lift_test_upper_scale(void){
+ l.config.reference_top_um=l.config.maximum_height_um=654588;
+ l.config.um_per_turn=87287;l.config.tolerance_um=2000;
+}
+int lift_test_top_verified(unsigned now){return actuator_lift_top_hold_verified(&l,now);}

@@ -33,7 +33,12 @@ typedef struct {
     bool configured, have_feedback, have_sequence;
     /* Explicit one-way transport session: wheels only; fourth-axis commands forbidden. */
     bool transport_only;
+    /* Board refreshes this from measured top-hold evidence. Zero disables it. */
+    int32_t top_hold_tolerance_um;
     uint32_t session, last_parked_session, sequence, command_ms, command_valid_for_ms;
+    uint32_t checked_wheel_lifetime_ms; /* zero: ordinary command semantics */
+    bool wheel_temperature_hold, wheel_zero_written;
+    uint32_t wheel_zero_ms;
     int32_t target_raw[ACTUATOR_MOBILE_AXES];
 } actuator_mobile_supervisor_t;
 

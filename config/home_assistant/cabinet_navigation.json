@@ -1,0 +1,15 @@
+{
+  "support_id": "home-storage-01",
+  "table_height_m": 0.80,
+  "support_height_tolerance_m": 0.08,
+  "pick_reference_xy_m": [0.341, 0.124],
+  "support_anchor_xy_m": [1.175, -0.075],
+  "view_id": 28,
+  "view_xy_yaw": [1.0678454029733147, -0.604440307976042, 0.7853125097797876],
+  "files": {
+    "map": {"path": "s4-navigation-20261114/map/occupancy.json", "sha256": "7b883850e1a39d3c529f0d80b6266aebe976de3f9c032c3e260511d56dbf2dc8"},
+    "visibility": {"path": "s4-navigation-20261114/map/visibility.json", "sha256": "51c2d6b72003e63acb0ebf3c8f3cc520b7853965b4e4c1f1b03ea72b0ced87a7"},
+    "depth_voxels": {"path": "s4-room-mapping-20261113-ray-depth-v1/ray-evidence.npz", "sha256": "27b140ff0932cecbfa05ce3020912669a91afca810c562cac9d564efbb4f3155"},
+    "area": {"path": "s4-lift-width-20261114/movement-area.npz", "sha256": "fb52e08226d2ff8951fd9c8ab458ae29ba120e3bebbfc77ec8171687e1059135"}
+  }
+}

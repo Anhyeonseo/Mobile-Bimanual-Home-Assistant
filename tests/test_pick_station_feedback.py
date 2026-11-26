@@ -7,8 +7,8 @@ from home_robot_tasks.pick_hardware import UnifiedPickHardware
 import home_robot_tasks.pick_hardware as hardware
 
 
-def fixture(monkeypatch, *, sent=10., rtt=.025814481, mask=4095, positions=(0,)*12):
-    clock=iter([sent,sent+rtt,sent+rtt+.001,sent+rtt+.005])
+def fixture(monkeypatch, *, sent=10., rtt=.025814481, mask=4095, positions=(0,)*12, times=None):
+    clock=iter(times or [sent,sent+rtt,sent+rtt+.001,sent+rtt+.005])
     monkeypatch.setattr(hardware.time,'monotonic',lambda:next(clock))
     events=[]
     packet=NS(status_code=0,joint_count=12,present_mask=mask,
@@ -34,10 +34,17 @@ def test_isolated_25ms_reply_is_discarded_without_refreshing_pose(monkeypatch):
 
 
 def test_continued_delays_expire_original_200ms_evidence(monkeypatch):
-    h,events=fixture(monkeypatch,sent=10.1)
+    h,events=fixture(monkeypatch,times=[10.1,10.13,10.14,10.17,10.18,10.21])
     with pytest.raises(ObservationNotFresh):h.tick()
     assert h.history[-1].lower_s==9.9
-    assert events==['keepalive']
+    assert events==['keepalive']*3
+
+
+def test_reacquires_after_recorded_93ms_reply_before_departure(monkeypatch):
+    h,events=fixture(monkeypatch,times=[10.1,10.19325,10.194,10.198,10.199,10.202])
+    h.tick()
+    assert events==['keepalive','keepalive','publish_measured','platform_checked']
+    assert h.history[-1].lower_s==pytest.approx(10.194-.101)
 
 
 @pytest.mark.parametrize('kw',[dict(mask=2047),dict(positions=(50000,)*12)])

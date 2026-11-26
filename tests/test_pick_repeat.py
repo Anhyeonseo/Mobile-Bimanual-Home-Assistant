@@ -47,7 +47,7 @@ def test_next_test_retires_only_existing_hold_clears_trial_and_preserves_owner(m
     h.reader=NS(refresh=lambda:events.append('read'));h.inputs=object()
     h.latest=('old image',);h.contact_tcp='old contact';h.verification_anchor='old pose'
     h.guard=NS(require_fresh=lambda now:None,height=.630)
-    h.adapter.feedback_snapshot=lambda:packet
+    h.adapter.keepalive=lambda:None;h.adapter.feedback_snapshot=lambda:packet
     monkeypatch.setattr(carry_live_inputs,'joint_exposure',lambda *a:NS(positions_rad=(0.,)*12))
     adapter=h.adapter;guard=h.guard
     try:
@@ -119,7 +119,7 @@ def test_empty_hold_reset_clears_capture_without_torque_or_stop(monkeypatch):
     from home_robot_tasks import carry_live_inputs
     h,packet,_=stop_hardware(monkeypatch);h.options={'single_capture_test':True}
     h.latest=('old pixels',);h.guard=NS(require_fresh=lambda now:None)
-    h.tick=lambda:None;h.adapter.feedback_snapshot=lambda:packet
+    h.tick=lambda:None;h.adapter.keepalive=lambda:None;h.adapter.feedback_snapshot=lambda:packet
     monkeypatch.setattr(carry_live_inputs,'joint_exposure',lambda *a:NS(positions_rad=(0.,)*12))
     try:
         h.prepare_next_test(NS(check=lambda:None,note=lambda msg:None))

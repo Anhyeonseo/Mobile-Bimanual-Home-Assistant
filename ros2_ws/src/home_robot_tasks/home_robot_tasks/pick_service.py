@@ -152,7 +152,7 @@ class PickStation:
             return result
 
     def submit(self, text, *, operation=None, supported_empty_bottom=False, supported_empty_top=False,
-               supported_startup_release=False, scene_unchanged=False):
+               supported_startup_release=False, scene_unchanged=False, initial_pose=None):
         try:
             target, prompt, location = parse_pick_request(text)
         except ValueError as exc:
@@ -170,9 +170,15 @@ class PickStation:
                 operation = self.backend.check_operation(operation, supported_empty_bottom, supported_empty_top)
             elif operation is not None or supported_empty_bottom or supported_empty_top or supported_startup_release:
                 raise Rejected('현재 실행 모드에서 지원하지 않는 요청입니다.')
+            if operation == 'cabinet-pick' and (
+                    not isinstance(initial_pose, (list, tuple)) or len(initial_pose) != 3
+                    or not all(type(v) in (int, float) and math.isfinite(v) for v in initial_pose)):
+                raise Rejected('현재 지도 위치 x, y와 방향 yaw(rad)을 입력하세요.')
             identifier = uuid.uuid4().hex
             self.pending = dict(id=identifier, text=text.strip(), target=target, prompt=prompt,
                                 submitted_at=datetime.now(timezone.utc).isoformat())
+            if operation == 'cabinet-pick':
+                self.pending['initial_pose'] = list(initial_pose)
             if location is not None:
                 self.pending['location'] = location
             if operation:
@@ -273,10 +279,15 @@ class PickStation:
                 stages=stages[:-1]+(('VERIFYING','동작 완료 확인','verify'),)
             if request.get('operation')=='resume-top-pick':
                 stages=(('PREPARING_PICK','이전 관측·현재 자세 연결','prepare_resume'),)+STAGES[3:]
-            if request.get('operation') == 'top-align-pick':
+            if request.get('operation') in ('top-align-pick', 'cabinet-pick'):
                 stages = STAGES[:3] + (
                     ('PLANNING', '현재 위치 계획 · 필요 시 재배치·재계획', 'plan_with_reposition'),
                     STAGES[4], ('VERIFYING', '동작 완료 확인', 'verify'))
+            if request.get('operation') == 'cabinet-pick':
+                navigation = (('NAVIGATING', '수납장까지 지도 주행', 'navigate_cabinet'),)
+                if request.get('supported_empty_bottom'):
+                    navigation += (('LIFTING', '하단 관측·리프트 상승', 'prepare_cabinet_height'),)
+                stages = navigation + stages
             if request.get('operation')=='top-pregrasp-check':
                 stages=STAGES[:4]+(('EXECUTING','열린 집게 접근·재촬영','execute'),)
             if request.get('operation')=='top-align':

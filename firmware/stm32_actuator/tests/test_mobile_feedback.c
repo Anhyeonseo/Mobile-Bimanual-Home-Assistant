@@ -202,7 +202,8 @@ static bool read_temperature(uint8_t temperature,bool bad_voltage){
     assert(actuator_mobile_feedback_begin(&r,now,true,req,&token));
     assert(!r.reading_mode);telemetry(data);data[7]=temperature;
     if(bad_voltage)data[6]=1;
-    size_t n=reply(bytes,req[2],0,data,15);
+    assert(req[5]==(r.temperature_pending?63:56) && req[6]==(r.temperature_pending?1:15));
+    size_t n=reply(bytes,req[2],0,r.temperature_pending?&temperature:data,req[6]);
     assert(actuator_mobile_feedback_feed(&r,token,bytes,n,now));
     return actuator_mobile_feedback_commit(&r,token,now+1,true,true);
 }
@@ -234,7 +235,7 @@ static void temperature_confirmation(uint32_t start){
             assert(!read_temperature(71,false));assert(r.fault==MOBILE_FEEDBACK_DEVICE);
         }else{
             assert(read_temperature(35,false)&&!r.temperature_pending&&r.temperature_recovered==1);
-            assert(r.axes[0].observed_ms!=previous&&r.axes[0].temperature==35);
+            assert(r.axes[0].observed_ms==previous&&r.axes[0].temperature==30);
             r.cursor=0;assert(read_temperature(76,false));
             assert(r.temperature_pending&&r.temperature_rechecks==2);
             assert(!read_temperature(76,false)); /* Consecutive hot replies still stop. */
@@ -250,7 +251,7 @@ static void recorded_temperature_spikes(uint32_t start){
         assert(r.axes[axis].observed_ms==previous&&r.temperature_pending);
         assert(read_temperature(34,false));
         assert(r.fault==MOBILE_FEEDBACK_OK&&r.temperature_recovered==1);
-        assert(r.axes[axis].temperature==34);
+        assert(r.axes[axis].temperature==30 && r.axes[axis].observed_ms==previous);
     }
     /* Real thermal rise at the threshold never enters confirmation. */
     setup(start);sweep();r.confirm_temperature_spike=true;r.cursor=0;
@@ -269,13 +270,42 @@ static void recurrent_isolated_temperature_spikes(uint32_t start){
             assert(read_temperature(35,false));
             assert(!r.temperature_pending&&r.temperature_recovered==k+1);
             assert(r.fault==MOBILE_FEEDBACK_OK&&r.failure_count==0);
+            r.cursor=axis;
+            assert(read_temperature(35,false)); /* a new full telemetry frame */
         }
         r.cursor=axis;assert(read_temperature(79,false));
         assert(!read_temperature(79,false));
         assert(r.fault==MOBILE_FEEDBACK_DEVICE&&r.failure_count==1);
     }
 }
+static void moving_wheel_temperature(uint32_t start) {
+    setup(start); sweep(); publish();
+    assert(actuator_mobile_arm(&s,1,now+1));
+    int32_t drive[4]={20,20,20,0};
+    assert(actuator_mobile_command(&s,1,1,drive,now+1));
+    r.confirm_temperature_spike=true; r.cursor=1; r.config.sample_timeout_ms=250;
+    r.axes[1].temperature=33; r.axes[1].observed_ms=now+4-50;
+    uint32_t previous=r.axes[1].observed_ms;
+    assert(read_temperature(90,false));
+    assert(s.wheel_temperature_hold && !s.wheel_zero_written && r.axes[1].observed_ms==previous);
+    uint8_t req[8]; uint32_t token;
+    assert(!actuator_mobile_feedback_begin(&r,now+2,true,req,&token));
+    assert(actuator_mobile_command(&s,1,2,drive,now+2));
+    for(unsigned i=0;i<3;++i)assert(!s.target_raw[i]);
+    s.wheel_zero_written=true; s.wheel_zero_ms=now+2;
+    assert(read_temperature(33,false));
+    assert(!r.temperature_pending && s.wheel_temperature_hold && r.axes[1].observed_ms==previous);
+    for(unsigned i=0;i<4;i++) read_one();
+    r.axes[2].velocity_raw=20;
+    actuator_mobile_feedback_reader_poll(&r,now+1);
+    assert(s.wheel_temperature_hold);
+    r.axes[2].velocity_raw=0;
+    actuator_mobile_feedback_reader_poll(&r,now+1);
+    assert(!s.wheel_temperature_hold && !s.target_raw[0]);
+    assert(actuator_mobile_command(&s,1,3,drive,now+1) && s.target_raw[0]==20);
+}
 int main(void) {
+    moving_wheel_temperature(200); moving_wheel_temperature(UINT32_MAX-40);
     good_sweep_and_expiry(100);good_sweep_and_expiry(UINT32_MAX-24);
     bad_mode_and_recovery();corruption_and_terminal();timeout_and_overflow();
     decode_and_device_limits();missing_lift_and_modes();drive_readback();

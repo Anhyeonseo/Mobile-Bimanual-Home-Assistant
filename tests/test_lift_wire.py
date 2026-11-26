@@ -432,3 +432,19 @@ def test_established_hold_tolerates_bounded_jitter_but_never_walks_its_anchor(li
         t = 100 + i*60
         assert lib.lift_test_report(t,t,3832+delta,50,1,1,1,1) == 3
     assert lib.lift_test_report(580,580,3835,50,1,1,1,1) == 0
+
+
+def test_registered_top_hold_for_wheels(lift):
+    lib, request = lift
+    lib.lift_test_upper_scale()
+    lib.lift_test_sample(1, 1000, 0, 0, 0, 1)
+    assert request(LiftCommand(8, 10, 1, 200, 42, 654588), 1).kind == 8
+    assert not lib.lift_test_top_verified(1)
+    lib.lift_test_zero(1)
+    assert lib.lift_test_sample(2, 1001, 0, 0, 1, 1)
+    assert lib.lift_test_top_verified(2)
+    assert lib.lift_test_base_height(2) == 654609
+    assert not lib.lift_test_move(2, 654589)
+    assert not lib.lift_test_top_verified(102)
+    lib.lift_test_sample(3, 1001, 0, 0, 0, 1)
+    assert not lib.lift_test_top_verified(3)

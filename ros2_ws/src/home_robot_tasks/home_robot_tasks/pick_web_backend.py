@@ -1,5 +1,6 @@
 """Interactive station. One device owner, with a camera-only path at the lift top."""
 import json
+import math
 from pathlib import Path
 from hashlib import sha256
 
@@ -90,6 +91,11 @@ class WebPickBackend(PipelineBackend):
                 raise Rejected('팔 자세 유지 중에는 베이스를 움직이지 않습니다. 다음 시험 준비나 초기화 후 다시 요청하세요.')
             if not self.options.get('top_baseline') or not Path(self.options['top_baseline']).is_file():
                 raise Rejected('이 로봇의 제어기 보정 기준 파일을 열 수 없습니다.')
+        elif operation == 'cabinet-pick':
+            if supported_empty_bottom == supported_empty_top or self.hardware is not None:
+                raise Rejected('빈 양팔을 접고 현재 리프트 끝 위치를 확인한 뒤 새 세션으로 시작하세요.')
+            if supported_empty_top and not Path(self.options.get('top_baseline') or '').is_file():
+                raise Rejected('상단 보정 기준 파일을 열 수 없습니다.')
         elif operation in ('top-pick', 'top-pregrasp-check', 'bottom-pick', 'observe-rise-pick'):
             top = operation in ('top-pick', 'top-pregrasp-check')
             if confirmations != (not top, top):
@@ -129,10 +135,50 @@ class WebPickBackend(PipelineBackend):
         ctx.artifact(folder/'color.png', '새 광각 촬영' if mode == 'wide' else '새 근거리 촬영')
         return dict(snapshot=str(folder), camera_mode=mode)
 
+    def navigate_cabinet(self, ctx, request):
+        from tools.run.cabinet_navigation import load_route, drive_to_view, prepare_upper_route, bind_upper_start, navigate_upper_front
+        args, trial = load_route(request['initial_pose'], ctx.folder/'navigation')
+        if not args.driver.is_file() or not Path(args.lidar_port).exists():
+            raise Rejected('수납장 주행용 LDS-01 장치와 드라이버를 확인해 주세요.')
+        top = request['supported_empty_top']
+        if top:
+            args, trial = prepare_upper_route(ctx, self.options['serial_port'], args, trial)
+        options = dict(self.options, execute=True, supported_empty_top=top, supported_empty_bottom=not top,
+                       baseline=self.options['top_baseline' if top else 'baseline'],
+                       map_navigation=True, camera_mode='near', rise_after_observation=not top,
+                       single_capture_test=True, fixed_base_station=False,
+                       supported_startup_release=request.get('supported_startup_release', False))
+        self._prepare_hardware(ctx, options)
+        if top:
+            bind_upper_start(self.hardware, args.navigation_body)
+        park_pose = (navigate_upper_front if top else drive_to_view)(ctx, self.hardware, args, trial)
+        self.cabinet_navigation = (args, trial, park_pose) if top else None
+        self.hardware.start_camera(ctx)
+        ctx.note('관측 위치 주차 완료 · 지우개를 찾아 팔이 닿는 정차 위치와 파지 경로 확인')
+        return request
+
+    def prepare_cabinet_height(self, ctx, request):
+        # The bottom capture provides obstacle geometry for the existing lift sweep.
+        lower = Context(ctx.station, ctx.folder/'bottom')
+        lower.deadline = ctx.deadline
+        lower.folder.mkdir()
+        value = self._capture_held(lower, dict(request, camera_mode='near'))
+        value = super().detect(lower, value)
+        value = super().candidates(lower, value)
+        self._rise_from_capture(lower, value)
+        # The empty robot is parked at the verified top. The next capture and
+        # its bounded depth retry use the same policy as a fresh top pick.
+        self.after_motion = False
+        return request
+
     def capture(self, ctx, request):
         if self.worker is None:
             self._prepare_worker(ctx)
         operation = request['operation']
+        if operation == 'cabinet-pick':
+            if self.hardware is None or not self.hardware.guard.supported_top:
+                raise Rejected('수납장 주행 후 상단 도착 관측이 필요합니다.')
+            return self._capture_held(ctx, dict(request, camera_mode='near'))
         if operation == 'top-pregrasp-check':
             request = dict(request, operation='top-pick', pregrasp_check=True)
             operation = 'top-pick'
@@ -166,7 +212,38 @@ class WebPickBackend(PipelineBackend):
     def detect(self, ctx, value):
         if value['operation'] in ('top-inspect', 'top-align') or value.get('preview_only'):
             return self._detect_camera(ctx, value)
+        if (value['operation'] == 'cabinet-pick' and value.get('supported_empty_top')
+                and not value.get('after_pick_alignment')):
+            return self._find_on_cabinet(ctx, value)
         return super().detect(ctx, value)
+
+    def _find_on_cabinet(self, ctx, value):
+        from tools.run.cabinet_navigation import drive_to_pick_pose, reviewed_view_shift, search_views
+        args, trial, pose = self.cabinet_navigation
+        views = iter(search_views(args.observed_cabinet_face, pose))
+        attempt = 0
+        while True:
+            try:
+                return super().detect(ctx, value)
+            except Rejected as exc:
+                if str(exc) not in ('target detection failed: NO_DETECTIONS',
+                                    'target detection failed: requested description did not match'):
+                    raise
+                for goal in views:
+                    shift = reviewed_view_shift(trial, pose, goal)
+                    if shift:
+                        break
+                else:
+                    raise
+            attempt += 1
+            search = Context(ctx.station, ctx.folder/f'cabinet-search-{attempt}')
+            search.folder.mkdir()
+            search.deadline = ctx.deadline
+            search.progress('현재 화면에 대상 없음 · 수납장 앞면을 따라 다른 관측 위치로 이동')
+            motion = drive_to_pick_pose(search, self.hardware, self.cabinet_navigation, shift)
+            pose = motion['pose']
+            self.cabinet_navigation = (args, trial, pose)
+            value = self.capture(search, {k:v for k,v in value.items() if k != 'snapshot'})
 
     def _detect_camera(self, ctx, value):
         ctx.progress('광각 물체 탐지·분할 중' if value['camera_mode'] == 'wide' else '근거리 물체 탐지·분할 중')
@@ -270,6 +347,8 @@ class WebPickBackend(PipelineBackend):
 
     def plan_with_reposition(self, ctx, value):
         """The same hardware owner handles the first pick plan, the base and the retry."""
+        if value.get('operation') == 'cabinet-pick' and value.get('supported_empty_top'):
+            return self._plan_cabinet_pick(ctx, value)
         original = None
         try:
             original = self.plan(ctx, value)
@@ -310,6 +389,10 @@ class WebPickBackend(PipelineBackend):
         with ctx.station.lock:
             ctx.station.data['current']['reposition']['motion'] = motion
         ctx.check()
+        retry, candidates = self._observe_after_park(ctx, value)
+        return self.plan(retry, candidates)
+
+    def _observe_after_park(self, ctx, value):
         retry = Context(ctx.station, ctx.folder/'after-reposition')
         retry.folder.mkdir()
         retry.deadline = ctx.deadline
@@ -317,10 +400,61 @@ class WebPickBackend(PipelineBackend):
         request = {key: value[key] for key in (
             'id','text','target','prompt','location','operation','supported_empty_top',
             'supported_empty_bottom','supported_startup_release') if key in value}
+        if request.get('operation') == 'cabinet-pick':
+            request['after_pick_alignment'] = True
         observed = self.capture(retry, request)
         detected = self.detect(retry, observed)
         candidates = self.candidates(retry, detected)
-        return self.plan(retry, candidates)
+        return retry, candidates
+
+    def _plan_cabinet_pick(self, ctx, value):
+        from tools.run.cabinet_navigation import CONFIG, cabinet_gap_reached, drive_to_pick_pose, placement_candidates
+        reference = json.loads((CONFIG/'cabinet_navigation.json').read_text())['pick_reference_xy_m']
+        visited = []
+        while True:
+            original = None
+            try:
+                original = self.plan(ctx, value)
+            except PlanningRejected as exc:
+                if not exc.recovery.get('base_reposition_candidate') or len(visited) >= 2:
+                    raise
+                recovery = exc.recovery
+            else:
+                if visited:
+                    return original
+                recovery = dict(capture_id=Path(value['snapshot']).name, reason='align_to_observed_target')
+
+            args, trial, pose = self.cabinet_navigation
+            target = self._compute(ctx, 'reposition_target', prepared=value['prepared'],
+                snapshot=value['snapshot'], prompt=value['prompt'], capture_id=recovery['capture_id'],
+                camera_mode=value['camera_mode'])
+            face_yaw = args.observed_cabinet_face['yaw']
+            if original is not None and not original['compare_lateral'] and math.dist(target[:2], reference) <= trial.arrival_xy:
+                return original
+            positions = [p for p in placement_candidates(trial, pose, target, reference, face_yaw)
+                         if cabinet_gap_reached(p['goal'], args.observed_cabinet_face, trial.navigation_body)
+                         and all(math.dist(old[:2], p['goal'][:2]) > .03 for old in visited)]
+            ctx.progress('지우개와 실측 파지 위치의 앞뒤·좌우 오차가 작은 정차점부터 검사')
+            folder = ctx.folder/'alignment-review'
+            review = self._compute(ctx, 'cabinet_placement', prepared=value['prepared'],
+                report=str(ctx.folder/'checked/planning/report.json'), output=str(folder), candidates=positions)
+            ctx.artifact(folder/'summary.json', '수납장 정렬 후보와 팔 경로')
+            selected = review['selected']
+            if selected is None:
+                if original is not None:
+                    return original
+                raise Rejected('현재 관측에서 차체가 지나가고 팔이 지우개를 집어 올릴 정차점을 찾지 못했습니다.')
+            if selected not in positions or review['capture_id'] != Path(value['snapshot']).name:
+                raise Rejected('현재 촬영에 연결된 정차 후보가 아닙니다.')
+            with ctx.station.lock:
+                ctx.station.data['current']['reposition'] = dict(plan=selected, recovery=recovery)
+            ctx.progress('라이다·깊이로 수납장 여유 확인하며 파지 위치로 주행')
+            motion = drive_to_pick_pose(ctx, self.hardware, self.cabinet_navigation, selected)
+            visited.append(pose)
+            self.cabinet_navigation = (args, trial, motion['pose'])
+            with ctx.station.lock:
+                ctx.station.data['current']['reposition']['motion'] = motion
+            ctx, value = self._observe_after_park(ctx, value)
 
     def prepare_pick(self, ctx, value):
         if not value.get('preview_only'):
@@ -355,15 +489,7 @@ class WebPickBackend(PipelineBackend):
     def rise(self, ctx, value):
         if value['operation'] != 'observe-rise-pick':
             raise Rejected('리프트 상승 작업이 아닙니다.')
-        ctx.progress('하단 관측 기준으로 리프트 상승 경로 검사 중')
-        proof=self._compute(ctx,'lift_preflight',prepared=value['prepared'],
-                            output=str(ctx.folder/'lift-check'),board=self.hardware.guard.board)
-        ctx.artifact(Path(proof['report']),'리프트 상승 경로 검사')
-        ctx.check()
-        # A failed request after movement cannot retry as an unchanged bottom hold.
-        self.after_motion=True
-        ctx.progress('리프트 최상단으로 상승 중')
-        self.hardware.rise_to_pick_height(ctx,proof)
+        proof = self._rise_from_capture(ctx, value)
         folder,images,evidence=self.hardware.capture(ctx,subfolder='arrival')
         self._compute(ctx,'save',folder=str(folder),images=images,evidence=evidence)
         ctx.artifact(folder/'robot_capture.json','상승 후 계획 시작 자세')
@@ -373,8 +499,20 @@ class WebPickBackend(PipelineBackend):
         ctx.note('하단 사진·좌표·후보 고정 · 상승 후 물체 비교 생략 · 현재 팔 자세로 계획')
         return dict(value,prepared=prepared)
 
+    def _rise_from_capture(self, ctx, value):
+        ctx.progress('하단 관측 기준으로 리프트 상승 경로 검사 중')
+        proof=self._compute(ctx,'lift_preflight',prepared=value['prepared'],
+                            output=str(ctx.folder/'lift-check'),board=self.hardware.guard.board)
+        ctx.artifact(Path(proof['report']),'리프트 상승 경로 검사')
+        ctx.check()
+        # A failed request after movement cannot retry as an unchanged bottom hold.
+        self.after_motion=True
+        ctx.progress('리프트 최상단으로 상승 중')
+        self.hardware.rise_to_pick_height(ctx,proof)
+        return proof
+
     def verify(self, ctx, value):
-        if value.get('operation') != 'top-pick' or self.options.get('plan_only'):
+        if value.get('operation') not in ('top-pick', 'cabinet-pick') or self.options.get('plan_only'):
             return super().verify(ctx, value)
         if self.hardware.session is None or self.hardware.session.state != 'HOLDING':
             raise ValueError('팔 동작 완료 상태를 확인하지 못했습니다.')

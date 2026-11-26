@@ -13,7 +13,9 @@ bool actuator_mobile_framed_reply(actuator_mobile_endpoint_t *endpoint,
     response->sequence=request->sequence;response->sender_time_ms=now_ms;
     response->payload_length=1;response->payload[0]=2;
     const uint8_t *p=request->payload;
-    if(request->flags!=0 || request->payload_length!=ACTUATOR_MOBILE_WIRE_SIZE || p[0]!='A' || p[1]!='M' || p[2]!=1 ||
+    bool checked=request->flags==1 && request->payload_length==ACTUATOR_MOBILE_WIRE_SIZE &&
+        p[3]==ACTUATOR_MOBILE_WIRE_VELOCITY && !read32(p+28) && endpoint && endpoint->cached_platform_positions;
+    if((request->flags!=0 && !checked) || request->payload_length!=ACTUATOR_MOBILE_WIRE_SIZE || p[0]!='A' || p[1]!='M' || p[2]!=1 ||
        p[3]<1 || p[3]>7 || read32(p+32)!=actuator_crc32c(p,32))return true;
     if(endpoint==NULL || endpoint->supervisor==NULL) {response->payload[0]=1;return true;}
     /* Outer frame is complete and CRC checked: discard any raw-stream residue.
@@ -22,6 +24,14 @@ bool actuator_mobile_framed_reply(actuator_mobile_endpoint_t *endpoint,
     bool replied=false;
     for(unsigned i=0;i<ACTUATOR_MOBILE_WIRE_SIZE;i++)
         replied=actuator_mobile_endpoint_feed(endpoint,p[i],now_ms,response->payload+1) || replied;
+    if(checked && replied && response->payload[4]==ACTUATOR_MOBILE_WIRE_VELOCITY){
+        /* The checked sweep expires independently of the ordinary 150 ms
+         * station heartbeat. Expired geometry drops all wheel targets to zero;
+         * a lost heartbeat still latches the original communication fault. */
+        actuator_mobile_supervisor_t *s=endpoint->supervisor;
+        s->checked_wheel_lifetime_ms=s->command_valid_for_ms;
+        s->command_valid_for_ms=s->config.command_timeout_ms<150?s->config.command_timeout_ms:150;
+    }
     if(replied) {response->payload[0]=0;response->payload_length=1+ACTUATOR_MOBILE_STATUS_SIZE;}
     return true;
 }

@@ -70,6 +70,23 @@ void actuator_mobile_feedback_reader_poll(actuator_mobile_feedback_reader_t *r, 
     }
     if (!complete || (r->supervisor->have_feedback &&
         !fresh(r->supervisor->feedback.observed_ms, now, r->config.sample_timeout_ms))) invalidate(r);
+    actuator_mobile_supervisor_t *s = r->supervisor;
+    if (s->wheel_temperature_hold && s->wheel_zero_written && !r->temperature_pending &&
+        r->fault == MOBILE_FEEDBACK_OK) {
+        bool stopped = true;
+        for (unsigned i = 0; i < 3; ++i) {
+            const actuator_mobile_axis_sample_t *a = &r->axes[i];
+            uint32_t age = now - s->wheel_zero_ms;
+            stopped = stopped && a->valid && now - a->observed_ms < age &&
+                a->velocity_raw >= -s->config.stopped_velocity_raw &&
+                a->velocity_raw <= s->config.stopped_velocity_raw &&
+                (!r->read_drive_state || (a->drive_valid && a->torque_enabled == 1 &&
+                    a->goal_velocity_raw == 0 && now - a->mode_ms < age));
+        }
+        if (stopped) s->wheel_temperature_hold = false;
+        else if (now - s->wheel_zero_ms >= s->config.command_timeout_ms)
+            fail(r, MOBILE_FEEDBACK_TIMEOUT);
+    }
     actuator_mobile_poll(r->supervisor, now);
 }
 bool actuator_mobile_feedback_begin(actuator_mobile_feedback_reader_t *r,
@@ -78,19 +95,26 @@ bool actuator_mobile_feedback_begin(actuator_mobile_feedback_reader_t *r,
     actuator_mobile_feedback_reader_poll(r, now);
     if (request == NULL || token == NULL || !quiet || r->active ||
         r->fault != MOBILE_FEEDBACK_OK || r->token == UINT32_MAX) return false;
+    if (r->temperature_pending && !r->supervisor->wheel_zero_written &&
+        (r->supervisor->state == ACTUATOR_MOBILE_READY || r->supervisor->state == ACTUATOR_MOBILE_ACTIVE))
+        return false;
     unsigned axis = r->cursor % (r->supervisor->transport_only ? 3u : 4u);
     /* Proactively refresh before expiry. A mode read replaces one telemetry
      * opportunity; do not keep returning to the same motor and starve peers. */
     uint32_t refresh=r->config.mode_timeout_ms/2u;
     if(r->read_drive_state && refresh>r->config.sample_timeout_ms/2u)refresh=r->config.sample_timeout_ms/2u;
     bool mode = !r->temperature_pending && (!r->axes[axis].mode_verified || now - r->axes[axis].mode_ms >= refresh);
+    /* A short addressed read of register 63 has a different reply length
+     * from a bulk telemetry packet. A late duplicate bulk reply cannot
+     * confirm (or clear) an overtemperature by masquerading as the reread. */
     uint8_t mode_length=r->read_drive_state?16u:1u;
-    if (actuator_sts3215_build_read(actuator_mobile_axis_id(axis), mode ? 33u : 56u,
-            mode ? mode_length : 15u, request) != ACTUATOR_STS3215_PACKET_OK) return false;
+    uint8_t reg = r->temperature_pending ? 63u : mode ? 33u : 56u;
+    uint8_t length = r->temperature_pending ? 1u : mode ? mode_length : 15u;
+    if (actuator_sts3215_build_read(actuator_mobile_axis_id(axis), reg, length, request) != ACTUATOR_STS3215_PACKET_OK) return false;
     r->rejected_fields=0;
     r->axis = (uint8_t)axis; r->reading_mode = mode; r->started_ms = now;
     r->active = true; r->reply_ready = false; r->received_bytes = 0;
-    actuator_sts_response_init(&r->parser, actuator_mobile_axis_id(axis), mode ? mode_length : 15u);
+    actuator_sts_response_init(&r->parser, actuator_mobile_axis_id(axis), length);
     *token = ++r->token; return true;
 }
 bool actuator_mobile_feedback_feed(actuator_mobile_feedback_reader_t *r,
@@ -122,7 +146,18 @@ bool actuator_mobile_feedback_commit(actuator_mobile_feedback_reader_t *r,
     if (r->fault != MOBILE_FEEDBACK_OK || !r->reply_ready || !tx_done || !quiet) return false;
     const uint8_t *data = actuator_sts_response_data(&r->parser);
     actuator_mobile_axis_sample_t sample = r->axes[r->axis];
-    if (r->reading_mode) {
+    if (r->temperature_pending) {
+        if (data[0] > r->config.axes[r->axis].maximum_temperature) {
+            r->rejected_fields = MOBILE_FEEDBACK_FIELD_TEMPERATURE;
+            fail(r, MOBILE_FEEDBACK_DEVICE);
+            return false;
+        }
+        r->temperature_pending = false;
+        if (r->temperature_recovered != UINT32_MAX) ++r->temperature_recovered;
+        if (r->supervisor->state == ACTUATOR_MOBILE_DISABLED)
+            r->supervisor->wheel_temperature_hold = false;
+        /* Temperature alone does not renew position, velocity or mode. */
+    } else if (r->reading_mode) {
         if (data[0] != 1u) { r->rejected_fields=MOBILE_FEEDBACK_FIELD_MODE; fail(r, MOBILE_FEEDBACK_MODE); return false; }
         sample.mode_ms = r->started_ms; sample.mode_verified = true;
         if(r->read_drive_state){
@@ -160,6 +195,10 @@ bool actuator_mobile_feedback_commit(actuator_mobile_feedback_reader_t *r,
                fresh(previous->observed_ms,now,r->config.sample_timeout_ms/2u) &&
                (unsigned)previous->temperature+10u<=c->maximum_temperature &&
                sample.temperature>=(unsigned)previous->temperature+20u){
+                actuator_mobile_supervisor_t *s = r->supervisor;
+                if (!s->wheel_temperature_hold) s->wheel_zero_written = false;
+                s->wheel_temperature_hold = true;
+                memset(s->target_raw, 0, 3 * sizeof(s->target_raw[0]));
                 r->temperature_pending=true;r->temperature_recheck_seen_mask|=(uint8_t)(1u<<r->axis);
                 r->temperature_last_recheck_ms[r->axis]=now;
                 if(r->temperature_rechecks!=UINT32_MAX)++r->temperature_rechecks;
@@ -167,10 +206,6 @@ bool actuator_mobile_feedback_commit(actuator_mobile_feedback_reader_t *r,
                 return true;
             }
             fail(r,MOBILE_FEEDBACK_DEVICE);return false;
-        }
-        if(r->temperature_pending){
-            r->temperature_pending=false;
-            if(r->temperature_recovered!=UINT32_MAX)++r->temperature_recovered;
         }
         if (sample.valid && (r->started_ms - sample.observed_ms == 0u ||
             r->started_ms - sample.observed_ms >= UINT32_C(0x80000000))) return false;
@@ -229,6 +264,8 @@ bool actuator_mobile_feedback_reset(actuator_mobile_feedback_reader_t *r, bool q
         r->supervisor->state == ACTUATOR_MOBILE_READY || r->supervisor->state == ACTUATOR_MOBILE_ACTIVE) return false;
     memset(r->axes, 0, sizeof(r->axes)); r->active = false; r->reply_ready = false;
     r->dirty = 0; r->cursor = 0; r->fault = MOBILE_FEEDBACK_OK;r->temperature_pending=false;
+    r->supervisor->wheel_temperature_hold = false;
+    r->supervisor->wheel_zero_written = false;
     r->supervisor->have_feedback = false; invalidate(r); return true;
 }
 

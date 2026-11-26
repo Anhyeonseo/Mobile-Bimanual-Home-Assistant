@@ -107,7 +107,12 @@ class Capture:
                 frames=self.pipeline.wait_for_frames(1000)
                 if all(str(f.get_frame_timestamp_domain())=='timestamp_domain.global_time' for f in (frames.get_color_frame(),frames.get_depth_frame())):valid+=1
             if valid<30:raise ValueError('camera global timestamp conversion did not settle')
-            self._record(frames)
+            validated = self._record(frames)
+            if self.retain_native_depth:
+                self.native_profile_id = frames.get_depth_frame().profile.unique_id()
+                self.native_metadata = self.images[validated['capture_id']][2]
+                self.native_number = validated['depth_frame']['number']
+                self.native_timestamp = validated['depth_frame']['timestamp_ms']
             return self
         except BaseException:
             self.__exit__(None,None,None)
@@ -195,6 +200,27 @@ class Capture:
         self.images.clear()
         self.native_depth_images.clear()
         return images
+    def next_navigation_depth(self):
+        """Native D415 depth on the stream calibrated at open. No color alignment or RGB copy."""
+        import numpy as np
+        deadline = time.monotonic() + 1.
+        while (remaining := deadline - time.monotonic()) > 0:
+            frame = self.pipeline.wait_for_frames(max(1, int(remaining * 1000))).get_depth_frame()
+            if not frame or frame.profile.unique_id() != self.native_profile_id:
+                raise ValueError('navigation depth stream changed')
+            number, timestamp = frame.get_frame_number(), frame.get_timestamp()
+            if number < self.native_number or timestamp < self.native_timestamp:
+                raise ValueError('navigation depth stream regressed')
+            try:
+                stamp = self.clock.convert(timestamp, str(frame.get_frame_timestamp_domain()))
+            except StaleCameraFrame:
+                continue
+            if number == self.native_number or timestamp == self.native_timestamp:
+                continue
+            self.native_number, self.native_timestamp = number, timestamp
+            return stamp, np.asanyarray(frame.get_data()).copy(), self.native_metadata
+        raise ValueError('no fresh navigation depth exposure')
+
     def next_frame(self, timeout_ms=1000):
         """Return a new pair; repeated SDK stream frames retain their old exposure.
 

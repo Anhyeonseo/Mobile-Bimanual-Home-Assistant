@@ -4,6 +4,7 @@ This commissioning controller measures goal progress with LiDAR registration.
 Raw output is bounded; it is not a calibrated SI-speed or full Nav2 acceptance.
 Construction, preview and readiness never authorize wheel output.
 """
+from functools import lru_cache
 import math
 import hashlib
 import numpy as np
@@ -241,7 +242,22 @@ class TurnDriveTrial(NearGoal):
         return tuple(round(v/peak*limit) for v in pattern)+(0,)
 
 
-def swept_path_obstacle(points_base,path_base,*,footprint,margin=.03,return_hits=False):
+@lru_cache(maxsize=64)
+def _sweep_geometry(footprint, margin):
+    # Fixed component geometry is shared by every scan, depth frame and twist.
+    poly=np.asarray(footprint,float);edges=np.roll(poly,-1,axis=0)-poly
+    normals=np.column_stack((edges[:,1],-edges[:,0]))/np.linalg.norm(edges,axis=1)[:,None]
+    bounds=np.sum(normals*poly,axis=1)
+    inflated=[]
+    for i in range(len(poly)):
+        pair=np.stack((normals[i-1],normals[i]))
+        if abs(np.linalg.det(pair))>1e-12:
+            inflated.append(np.linalg.solve(pair,[bounds[i-1]+margin,bounds[i]+margin]))
+    radius=max(float(np.max(np.linalg.norm(poly,axis=1))),max((float(np.linalg.norm(v)) for v in inflated),default=math.inf))
+    return normals, bounds, radius
+
+
+def swept_path_obstacle(points_base,path_base,*,footprint,margin=.03,return_hits=False,self_mask=None):
     """Full fixed body swept through sampled translations AND rotations."""
     p=np.asarray(points_base,dtype=float)
     if p.size==0:return [] if return_hits else False
@@ -249,16 +265,15 @@ def swept_path_obstacle(points_base,path_base,*,footprint,margin=.03,return_hits
     if not np.isfinite(xy).all():
         if return_hits:raise ValueError('nonfinite obstacle observation')
         return True
-    poly=np.asarray(footprint,float);edges=np.roll(poly,-1,axis=0)-poly
-    normals=np.column_stack((edges[:,1],-edges[:,0]))/np.linalg.norm(edges,axis=1)[:,None]
-    bounds=np.sum(normals*poly,axis=1)
-    p=p[~np.all(xy@normals.T<=bounds+1e-12,axis=1)]
-    inflated=[]
-    for i in range(len(poly)):
-        pair=np.stack((normals[i-1],normals[i]))
-        if abs(np.linalg.det(pair))>1e-12:
-            inflated.append(np.linalg.solve(pair,[bounds[i-1]+margin,bounds[i]+margin]))
-    radius=max(float(np.max(np.linalg.norm(poly,axis=1))),max((float(np.linalg.norm(v)) for v in inflated),default=math.inf))
+    normals,bounds,radius=_sweep_geometry(tuple(map(tuple,footprint)),margin)
+    if self_mask is None:
+        inside_self=np.all(xy@normals.T<=bounds+1e-12,axis=1)
+    else:
+        mask=np.asarray(self_mask,float)
+        edges=np.roll(mask,-1,axis=0)-mask
+        outward=np.column_stack((edges[:,1],-edges[:,0]))/np.linalg.norm(edges,axis=1)[:,None]
+        inside_self=np.all(xy@outward.T<=np.sum(mask*outward,axis=1)+1e-12,axis=1)
+    p=p[~inside_self]
     for x,y,yaw in path_base:
         c,s=math.cos(yaw),math.sin(yaw)
         delta=p[:,:2]-[x,y]

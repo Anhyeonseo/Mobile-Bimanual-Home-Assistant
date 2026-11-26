@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>cabinet_saved_depth</name>
+  <version>0.1.0</version>
+  <description>Height-matched archived depth collision checks for DWB trajectories.</description>
+  <maintainer email="noreply@github.com">dasom</maintainer>
+  <license>Apache-2.0</license>
+  <depend>dwb_core</depend>
+  <depend>pluginlib</depend>
+</package>

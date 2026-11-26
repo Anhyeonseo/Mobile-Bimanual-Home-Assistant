@@ -3,6 +3,7 @@
 Planning is permitted while parked. FollowPath is sent only after the web
 operator starts; no serial device, motor enable or reset is owned here.
 """
+from collections import deque
 import math
 import time
 from pathlib import Path
@@ -43,6 +44,9 @@ class Nav2Trial(TurnDriveTrial):
         self.nav={};self.required_map_revision=None;self.phase='NAV2';self.motion_since=math.inf
         self.active_timeout_s=max(180,450*distance)
         self.collision_hold=False
+        self.sensor_wait_scan=None
+        self.sensor_wait_depth=None
+        self.first_preview_scan=None
         if type(manipulation_alignment) is not bool or (manipulation_alignment and target_pose is None):
             raise ValueError('alignment requires an explicit map goal')
         self.manipulation_alignment=manipulation_alignment
@@ -112,7 +116,7 @@ class Nav2Trial(TurnDriveTrial):
 
     def resume(self,now,*args,**kwargs):
         super().resume(now,*args,**kwargs);self.motion_since=now
-        self.collision_hold=False;self.phase='NAV2'
+        self.collision_hold=False;self.first_preview_scan=None;self.phase='NAV2'
         if self.fine_alignment:self._fine_observe(now)
 
     def backend_ready(self):
@@ -133,8 +137,13 @@ class Nav2Trial(TurnDriveTrial):
         # the fused LiDAR/RGB-D map, plus the independent live swept-body gate.
         # The offline centre/yaw lattice screens destination candidates only;
         # snapping every live pose to it adds a second, discontinuous veto.
-        return (pose is not None and self.start_pose is not None
-                and math.dist(pose[:2],self.start_pose[:2])<=self.distance+.2)
+        if pose is None or self.start_pose is None or math.dist(pose[:2],self.start_pose[:2])>self.distance+.2:
+            return False
+        if self.navigation_body and self.navigation_body.get('mode') == 'measured_upper_travel':
+            c,s = math.cos(pose[2]), math.sin(pose[2])
+            return all(self.map_free((pose[0]+c*x-s*y, pose[1]+s*x+c*y, pose[2]+yaw))
+                       for x,y,yaw in self.sweep(self.nav.get('twist',(0.,0.,0.))))
+        return True
 
     def sweep(self,twist):
         # One second at the actually bounded command, plus the fixed 3 cm body
@@ -146,13 +155,24 @@ class Nav2Trial(TurnDriveTrial):
             result.append((a*vx-b*vy,b*vx+a*vy,w*t))
         return result
 
-    def obstacle_sweep(self,twist):
-        # One second at commissioning speed is under 1 cm. Keep a 15 cm
-        # early-stop translation zone; pure rotation uses the original sweep.
-        path=self.sweep(twist)
-        distance=math.hypot(*path[-1][:2])
-        scale=max(1.,.15/distance) if distance>1e-5 else 1.
-        return [(x*scale,y*scale,yaw) for x,y,yaw in path]
+    def obstacle_sweep(self, twist, *, local_goal=None):
+        path = self.sweep(twist)
+        x, y, _ = path[-1]
+        distance = math.hypot(x, y)
+        if distance <= 1e-5:
+            return path
+        lookahead = .15
+        if local_goal is not None:
+            gx, gy = local_goal
+            along = (gx*x + gy*y) / distance
+            across = abs(gx*y - gy*x) / distance
+            # Only shorten the extra preview on a final approach aimed at the
+            # goal. Include parking tolerance, the whole measured command
+            # sweep and its rotation. Detours retain the full obstacle zone.
+            if along > 0 and across <= self.arrival_xy:
+                lookahead = min(lookahead, math.hypot(gx, gy) + self.arrival_xy)
+        scale = max(1., lookahead/distance)
+        return [(x*scale, y*scale, yaw) for x, y, yaw in path]
 
     def _fine_observe(self,now):
         self.state='VERIFYING_ALIGNMENT';self.phase='FINE_OBSERVE'
@@ -230,19 +250,71 @@ class Nav2Trial(TurnDriveTrial):
             return zero
         return self.fine_raw
 
-    def command(self,now,pose,pose_stamp,*,sensors_fresh,corridor_clear):
+    def observe_obstacle(self, now, scan_stamp, *, preview_only=False):
+        # Even a single return stops the wheels. An intrusion confined to the
+        # extended preview may clear on a fresh scan or a checked Nav2 detour.
+        if preview_only and scan_stamp is not None and not self.resume_required:
+            if self.first_preview_scan is None:
+                self.first_preview_scan = scan_stamp
+            if scan_stamp - self.first_preview_scan < 2.:
+                self.sensor_wait_scan = scan_stamp
+                self.pause(now, 'WAITING_SENSOR')
+                return
+        self.pause(now, 'WAITING_OBSTACLE')
+        self.collision_hold = self.resume_required = True
+        self.phase = 'OBSTACLE_STOP'
+
+    def command(self,now,pose,pose_stamp,*,sensors_fresh,corridor_clear,scan_stamp=None,checked_twist=None,checked_proposal=None,lidar_preview_only=False):
         nav=self.nav
         if self.fine_alignment:
             return self._fine_command(now,pose,pose_stamp,sensors_fresh=sensors_fresh,corridor_clear=corridor_clear)
+        # An observed intrusion takes precedence even if Nav2 odometry is late.
+        if (sensors_fresh and not corridor_clear and nav.get('result') != 'SUCCEEDED'
+                and self.state in ('RUNNING', *self.WAITING)):
+            self.observe_obstacle(now, scan_stamp, preview_only=lidar_preview_only)
+            return (0,0,0,0)
         current=(nav.get('goal')==list(self.goal or ()) and 0<=now-nav.get('observed_s',-1)<=.5
                  and (self.required_map_revision is None or nav.get('map_revision')==self.required_map_revision))
         sensors_fresh=(sensors_fresh and current and 0<=now-nav.get('odom_s',-1)<=.5
                        and 0<=now-nav.get('depth_s',-1)<=.8)
         if current and nav.get('error') and self.state in ('RUNNING',*self.WAITING):
             raise InvalidTask('Nav2: '+nav['error'])
+        # The station owns the zero-wheel heartbeat while waiting. Keep the
+        # planner producing proposals, but admit none on missing evidence.
+        if (scan_stamp is not None and not self.resume_required and
+                (self.state=='RUNNING' or (self.state=='WAITING_SENSOR' and self.sensor_wait_scan is not None))):
+            if not sensors_fresh or not 0 <= now-pose_stamp <= .5:
+                if self.sensor_wait_scan is None:
+                    self.sensor_wait_scan = scan_stamp
+                    self.sensor_wait_depth = nav.get('depth_s')
+                self.pause(now,'WAITING_SENSOR')
+                return (0,0,0,0)
+            if self.state=='WAITING_SENSOR' and corridor_clear:
+                if self.first_preview_scan is not None:
+                    if scan_stamp <= self.sensor_wait_scan:
+                        return (0,0,0,0)
+                    if nav.get('result') != 'SUCCEEDED' and (
+                            checked_proposal is None or checked_proposal.get('scan_stamp') != scan_stamp
+                            or checked_proposal.get('command_s', -1) <= max(self.bad_since, self.sensor_wait_scan)
+                            or now >= checked_proposal['valid_until_s']):
+                        return (0,0,0,0)
+                new_depth = (checked_proposal is not None and self.sensor_wait_depth is not None
+                             and checked_proposal['depth_stamp'] > self.sensor_wait_depth)
+                if (scan_stamp <= self.sensor_wait_scan and not new_depth) or not nav.get('ready') or nav.get('wait_reason'):
+                    return (0,0,0,0)
+                if not self.route_valid(pose):
+                    raise InvalidTask('current path outside reviewed map or trial envelope')
+                paused_since = self.bad_since
+                self.recovery_ready=True
+                self.resume(now,pose,pose_stamp,operator_confirmed=True,sensors_fresh=True,corridor_clear=True)
+                self.sensor_wait_scan=None
+                self.sensor_wait_depth=None
+                if checked_twist is None:
+                    return (0,0,0,0)
+                # The sensor worker checked a proposal made during this pause.
+                self.motion_since = paused_since
         if current and nav.get('wait_reason') and self.state=='RUNNING':
             self.pause(now,'WAITING_OBSTACLE')
-        immediate_obstacle=sensors_fresh and not corridor_clear
         if self.state in self.WAITING:corridor_clear=corridor_clear and self.backend_ready()
         if (self.state in ('RUNNING',*self.WAITING) and sensors_fresh and 0<=now-pose_stamp<=.5
                 and nav.get('goal')==list(self.goal) and 0<=now-nav.get('observed_s',-1)<=.5
@@ -250,12 +322,6 @@ class Nav2Trial(TurnDriveTrial):
             if math.dist(pose[:2],self.goal[:2])>self.arrival_xy or abs(angle(pose[2]-self.goal[2]))>self.arrival_yaw:
                 raise InvalidTask('Nav2 result disagrees with measured destination')
             self.state='SETTLING';return (0,0,0,0)
-        # Planner obstacles can be routed around. Fresh endpoints in the
-        # immediate body sweep stop first, independently of the planner.
-        # A zero twist or disappearing endpoint cannot automatically restart.
-        if self.state in ('RUNNING',*self.WAITING) and immediate_obstacle:
-            self.pause(now,'WAITING_OBSTACLE')
-            self.collision_hold=True;self.resume_required=True;self.phase='OBSTACLE_STOP'
         if not self.admit_command(now,pose,pose_stamp,sensors_fresh=sensors_fresh,corridor_clear=corridor_clear):
             return (0,0,0,0)
         if nav.get('goal')!=list(self.goal) or not 0<=now-nav.get('observed_s',-1)<=.5:
@@ -264,7 +330,19 @@ class Nav2Trial(TurnDriveTrial):
         stamp=nav.get('command_s',-1)
         if (not nav.get('ready') or not nav.get('executing') or stamp<=self.motion_since or not 0<=now-stamp<=.25):
             return (0,0,0,0)
-        twist=nav['twist'];raw=self.model.raw_command(twist)
+        twist=nav['twist']
+        if checked_proposal is not None:
+            if (not any(twist) or not now < checked_proposal['valid_until_s']
+                    or checked_proposal['command_s'] <= self.motion_since
+                    or checked_proposal['command_s'] > stamp
+                    or checked_proposal['sequence'] != nav.get('sequence')
+                    or checked_proposal['goal'] != nav['goal']
+                    or checked_proposal['map_revision'] != nav.get('map_revision')):
+                return (0,0,0,0)
+            twist=checked_proposal['twist']
+        if checked_twist is not None and tuple(twist) != tuple(checked_twist):
+            return (0,0,0,0)
+        raw=self.model.raw_command(twist)
         return tuple(round(v) for v in raw)+(0,)
 
 
@@ -308,7 +386,7 @@ def offset_convex_footprint(points, distance):
     return result
 
 
-def nav2_trial_config(template, root, namespace='/s4_nav2_trial', *, map_target=False, manipulation_alignment=False, fine_alignment=False):
+def nav2_trial_config(template, root, namespace='/s4_nav2_trial', *, map_target=False, manipulation_alignment=False, fine_alignment=False, travel_body=None, saved_scene=None):
     """Keep the reviewed omni/full-lift parameters; use existing LiDAR pose TF."""
     import copy
     config=copy.deepcopy(template)
@@ -325,6 +403,8 @@ def nav2_trial_config(template, root, namespace='/s4_nav2_trial', *, map_target=
         raise ValueError('installed controller wheel limit exceeds command model')
     scale=limit/command['maximum_raw']
     dwb=controller['FollowPath']
+    if travel_body is not None:
+        dwb['debug_trajectory_details']=True
     if manipulation_alignment:
         if not map_target:raise ValueError('alignment requires an explicit map target')
         config[namespace+'/planner_server']['ros__parameters']['GridBased']['tolerance']=0.
@@ -390,9 +470,20 @@ def nav2_trial_config(template, root, namespace='/s4_nav2_trial', *, map_target=
     # Live lidar/depth swept-body checks still use the physical margin and
     # 15 cm stopping zone; neither obstacle data nor the body is reduced.
     for costmap in (local,global_map):
-        distance=costmap['footprint_padding']
-        costmap['footprint']=json.dumps(offset_convex_footprint(json.loads(costmap['footprint']),distance))
+        if travel_body is not None:
+            costmap['footprint']=json.dumps(travel_body['padded_outline_xy_m'])
+        else:
+            distance=costmap['footprint_padding']
+            costmap['footprint']=json.dumps(offset_convex_footprint(json.loads(costmap['footprint']),distance))
         costmap['footprint_padding']=0.  # already offset once along edge normals
+    if saved_scene is not None:
+        # DWB tests the actual SE(2) poses against original 3-D evidence.
+        # Navfn uses centre cells, so this layer is added after inflation.
+        dwb['critics'].insert(0, 'SavedDepth')
+        dwb['SavedDepth.class'] = 'cabinet::SavedDepthCritic'
+        dwb['SavedDepth.scene'] = str(saved_scene)
+        global_map['plugins'].append('saved_centres')
+        global_map['saved_centres'] = dict(global_map['depth_layer'], map_topic=namespace+'/saved_centres')
     return config
 
 
@@ -412,8 +503,10 @@ class Nav2SensorBridge:
         self.node,self.state,self.args,self.root=node,state,args,Path(root)
         self.namespace='/s4_nav2_trial';self.processes=[];self.logs=[]
         self.activated=False;self.lifecycle=None;self.life_future=None;self.life_index=0
+        self.rejected_goal=None
         self.life_started=time.monotonic();self.plan_future=None;self.planned_goal=None;self.path=None
         self.goal=None;self.active=None;self.sequence=0;self.cancelling=False;self.error=None
+        self.depth_frames = deque()
         self.result=None;self.command_s=-1.;self.twist=(0.,0.,0.);self.last_pose=self.last_depth=-1.
         self.last_motion_s=-math.inf;self.last_motion_twist=(0.,0.,0.)
         self.retry_after=0.;self.wait_reason=None;self.last_plan_request=-math.inf
@@ -433,12 +526,21 @@ class Nav2SensorBridge:
         data=np.array(saved['data']).reshape(saved['height'],saved['width'])
         self.global_grid_geometry=dict(shape=data.shape,resolution=saved['resolution'],origin=tuple(saved['origin']))
         if area['rgbd_obstacles'].shape!=data.shape:raise ValueError('saved depth/map grids differ')
-        data[area['rgbd_obstacles']]=100
+        body = getattr(args, 'navigation_body', None) or {}
+        saved_scene = None
+        if body.get('saved_depth_scene'):
+            saved_scene = (Path(args.area).parent / body['saved_depth_scene']).resolve(strict=True)
+            centres = np.where(area['feasible_by_yaw'].any(axis=0), -1, 100)
+            self.centres_pub = node.create_publisher(OccupancyGrid, self.namespace+'/saved_centres', q)
+            self.centres_pub.publish(self.grid_message(centres, saved['resolution'], saved['origin'], 'map'))
+        else:
+            data[area['rgbd_obstacles']]=100
         self.map=self.grid_message(data,saved['resolution'],saved['origin'],'map')
         self.map_pub.publish(self.map)
         config=nav2_trial_config(yaml.safe_load((root/'config/nav2.alohamini.candidate.yaml').read_text()),root,
                                 map_target=state.trial.target_pose is not None,
-                                manipulation_alignment=state.trial.manipulation_alignment, fine_alignment=state.trial.fine_alignment)
+                                manipulation_alignment=state.trial.manipulation_alignment, fine_alignment=state.trial.fine_alignment,
+                                travel_body=getattr(args,'navigation_body',None), saved_scene=saved_scene)
         params=args.output/'nav2-params.yaml';params.write_text(yaml.safe_dump(config))
         self.node.create_timer(1.,lambda:self.map_pub.publish(self.map))
         from geometry_msgs.msg import TransformStamped
@@ -450,11 +552,18 @@ class Nav2SensorBridge:
         laser.transform.translation.x,laser.transform.translation.y,laser.transform.translation.z=review['base_from_lidar_translation_m']
         laser.transform.rotation.z=math.sin(review['yaw_rad']/2);laser.transform.rotation.w=math.cos(review['yaw_rad']/2)
         self.static_tf.sendTransform([identity,laser])
+        import os
+        child_env = os.environ.copy()
+        if saved_scene is not None:
+            prefix = Path(root).resolve()/'output/nav2-saved-depth'
+            if not (prefix/'lib/libcabinet_saved_depth.so').is_file():
+                raise RuntimeError('상단 주행에 필요한 저장 깊이 Nav2 평가기가 설치되지 않았습니다.')
+            child_env['AMENT_PREFIX_PATH'] = str(prefix)+os.pathsep+child_env.get('AMENT_PREFIX_PATH','')
         try:
             for package,name in [('nav2_planner','planner_server'),('nav2_controller','controller_server')]:
                 log=(args.output/('nav2-'+name+'.log')).open('w');self.logs.append(log)
                 self.processes.append(subprocess.Popen([str(Path(get_package_prefix(package))/'lib'/package/name),
-                    '--ros-args','-r','__ns:='+self.namespace,'--params-file',str(params)],stdout=log,stderr=subprocess.STDOUT))
+                    '--ros-args','-r','__ns:='+self.namespace,'--params-file',str(params)],stdout=log,stderr=subprocess.STDOUT,env=child_env))
         except Exception:self.close();raise
 
     def grid_message(self,data,resolution,origin,frame):
@@ -496,6 +605,18 @@ class Nav2SensorBridge:
         m.angle_max=m.angle_min+359*m.angle_increment;m.range_min=.25;m.range_max=3.5
         m.ranges=list(scan['ranges']);self.scan_pub.publish(m)
 
+    def depth_at_known_pose(self, stamp, points, history, now):
+        # Camera frames often arrive ahead of LiDAR. Keep fresh exposures until
+        # their pose is bracketed, while the live obstacle check uses the newest.
+        frames = self.depth_frames
+        if stamp > self.last_depth and (not frames or stamp > frames[-1][0]) and 0 <= now-stamp <= .8:
+            frames.append((stamp, points))
+        while frames and (now-frames[0][0] > .8 or frames[0][0] <= self.last_depth
+                          or (history and frames[0][0] < history[0][0])):
+            frames.popleft()
+        if len(history) >= 2:
+            return next((frame for frame in reversed(frames) if frame[0] <= history[-1][0]), None)
+
     def publish_pose_depth(self):
         from nav_msgs.msg import Odometry
         from geometry_msgs.msg import TransformStamped
@@ -519,22 +640,21 @@ class Nav2SensorBridge:
             tf=TransformStamped();tf.header=m.header;tf.child_frame_id=m.child_frame_id
             tf.transform.translation.x,tf.transform.translation.y=pose[:2];tf.transform.rotation=m.pose.pose.orientation
             self.tf.sendTransform(tf);self.last_pose=at
-        if depth_at!=self.last_depth and 0<=time.monotonic()-depth_at<=.8:
-            # Project using the pose at exposure, not the newest pose. If the
-            # next scan has not arrived, defer this frame rather than extrapolate.
-            if len(history)<2 or not history[0][0]<=depth_at<=history[-1][0]:return
+        frame = self.depth_at_known_pose(depth_at, depth, history, time.monotonic())
+        if frame is not None:
+            depth_at, depth = frame
             from .s4_recorded_mapping import interpolate
             rows=np.asarray([[t,*p] for t,p in history]);rows[:,3]=np.unwrap(rows[:,3])
             q=interpolate(rows,[depth_at])[0]
             origin=tuple(np.floor((np.asarray(q[:2])-1.25)/.025)*.025)
-            data=obstacle_grid(depth,self.state.trial.navigation_body['footprint_xy_m'],pose=q,origin=origin)
+            data=obstacle_grid(depth,self.state.trial.navigation_body.get('self_mask_xy_m',self.state.trial.navigation_body['footprint_xy_m']),pose=q,origin=origin)
             m=self.grid_message(data,.025,origin,'odom')
             m.header.stamp=self.stamp(depth_at);self.depth_pub.publish(m);self.last_depth=depth_at
             # Keep exactly the saved global map geometry; a moving small grid
             # would resize the non-rolling master costmap. Unknown depth cells
             # cannot clear the saved occupancy or the independent LiDAR layer.
             geometry=self.global_grid_geometry
-            data=obstacle_grid(depth,self.state.trial.navigation_body['footprint_xy_m'],pose=q,**geometry)
+            data=obstacle_grid(depth,self.state.trial.navigation_body.get('self_mask_xy_m',self.state.trial.navigation_body['footprint_xy_m']),pose=q,**geometry)
             m=self.grid_message(data,geometry['resolution'],geometry['origin'],'map')
             m.header.stamp=self.stamp(depth_at);self.global_depth_pub.publish(m)
 
@@ -572,6 +692,9 @@ class Nav2SensorBridge:
                 or tuple(update['map']['origin'])!=geometry['origin']):
             raise ValueError('updated navigation map lattice changed')
         self.map=self.grid_message(update['fused'],geometry['resolution'],geometry['origin'],'map')
+        if hasattr(self, 'centres_pub'):
+            centres = np.where(update['area']['feasible_by_yaw'].any(axis=0), -1, 100)
+            self.centres_pub.publish(self.grid_message(centres, geometry['resolution'], geometry['origin'], 'map'))
         self.map_pub.publish(self.map);self.map_revision=update['revision']
         self.planned_goal=None;self.path=None;self.command_s=-1.;self.twist=(0.,0.,0.)
         if self.active is not None and not self.cancelling:
@@ -591,6 +714,7 @@ class Nav2SensorBridge:
             with self.state.lock:control=dict(self.state.nav2_control)
             goal=control.get('goal');execute=control.get('execute',False)
             if goal!=self.goal:
+                self.rejected_goal=None
                 self.goal=goal;self.result=None;self.error=None;self.wait_reason=None;self.retry_after=0.
             if self.active is not None:
                 result=self.follow.poll(self.active)
@@ -623,17 +747,23 @@ class Nav2SensorBridge:
                     else:self.plan_future=value.get_result_async();self.plan_accepted=True
                 else:
                     self.plan_future=None
-                    if self.plan_revision!=self.map_revision:
+                    if self.plan_revision!=self.map_revision or self.planned_goal!=goal:
                         self.path=None;self.planned_goal=None
                     elif value.status!=4 or value.result.error_code:
                         if not recoverable_nav2_result('plan',value.result.error_code):raise RuntimeError('Nav2 planner could not find a route')
+                        # Only a goal-specific failure advances parked cabinet
+                        # selection. TF, start occupancy and timeouts can recover.
+                        if value.result.error_code in (204,206,208):
+                            self.rejected_goal=list(goal)
                         self.wait_reason='Nav2 통과 경로 대기';self.retry_after=time.monotonic()+1.;self.planned_goal=None
                     else:
+                        self.rejected_goal=None
                         self.path=[[p.pose.position.x,p.pose.position.y,2*math.atan2(p.pose.orientation.z,p.pose.orientation.w)] for p in value.result.path.poses]
                         if len(self.path)<2:raise RuntimeError('Nav2 returned an empty path')
                         self.path[-1][2]=goal[2];self.wait_reason=None
                         if self.state.trial.manipulation_alignment and not alignment_goal_matches(self.path,goal):
                             self.path=None;self.planned_goal=None;self.retry_after=time.monotonic()+1.
+                            self.rejected_goal=list(goal)
                             self.wait_reason='승인한 정렬 목표까지 경로 계산 대기'
             ready=(self.activated and self.path is not None and self.planned_goal==goal and self.follow.ready()
                    and self.last_depth>=0 and self.last_pose>=0)
@@ -644,6 +774,7 @@ class Nav2SensorBridge:
             with self.state.lock:
                 self.state.nav2_feedback=dict(ready=bool(ready),observed_s=time.monotonic(),goal=goal,
                     map_revision=getattr(self,'map_revision',None),
+                    rejected_goal=getattr(self,'rejected_goal',None),
                     odom_s=self.last_pose,depth_s=self.last_depth,
                     executing=self.active is not None and not self.cancelling,result=self.result,error=self.error,
                     command_s=self.command_s,twist=list(self.twist),path=self.path,sequence=self.sequence,wait_reason=self.wait_reason)

@@ -145,6 +145,7 @@ class StreamValidationTransportV2:
         self,
         message_type: StreamMessageTypeV2,
         payload: bytes = b"",
+        *, flags: int = 0,
     ) -> tuple[int, int]:
         sequence = self._next_sequence()
         if self._active_timing is not None:
@@ -154,6 +155,7 @@ class StreamValidationTransportV2:
             FrameV2(
                 message_type=message_type,
                 sequence=sequence,
+                flags=flags,
                 sender_time_ms=sender_time_ms,
                 payload=payload,
             )
@@ -484,7 +486,7 @@ class StreamValidationTransportV2:
         )
 
     @_serialized
-    def exchange_mobile(self, packet: bytes) -> bytes:
+    def exchange_mobile(self, packet: bytes, *, checked_wheels=False) -> bytes:
         """Same port/sequence/lock as arm traffic; does not open another device.
 
         Hardware defaults to an unbound endpoint and rejects this operation.
@@ -512,7 +514,7 @@ class StreamValidationTransportV2:
         elif packet[:3] == b"AL\x01":
             from .lift_wire import LiftCommand
             LiftCommand.decode(packet)
-        elif packet[3] in (1, 2, 3):
+        elif packet[3] in (1, 2, 3, 7):
             MobileCommand.decode(packet)
         elif (
             packet[3] not in (4, 5, 6)
@@ -520,7 +522,12 @@ class StreamValidationTransportV2:
             or any(packet[16:32])
         ):
             raise StreamTransportV2Error("invalid mobile query")
-        seq, _ = self._send(StreamMessageTypeV2.MOBILE_REQUEST, packet)
+        if checked_wheels:
+            if packet[:4] != b"AM\x01\x02" or any(packet[28:32]):
+                raise StreamTransportV2Error("checked expiry requires a wheel-only velocity")
+            seq, _ = self._send(StreamMessageTypeV2.MOBILE_REQUEST, packet, flags=1)
+        else:
+            seq, _ = self._send(StreamMessageTypeV2.MOBILE_REQUEST, packet)
         payload = self._receive(seq, StreamMessageTypeV2.MOBILE_RESPONSE).payload
         if payload == b"\x01":
             raise StreamTransportV2Error(
@@ -543,3 +550,6 @@ class MobileV2Exchange:
 
     def exchange(self, packet: bytes) -> bytes:
         return self.transport.exchange_mobile(packet)
+
+    def exchange_checked(self, packet: bytes) -> bytes:
+        return self.transport.exchange_mobile(packet, checked_wheels=True)
