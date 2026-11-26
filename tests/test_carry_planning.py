@@ -112,6 +112,49 @@ def test_complete_route_selection_tries_other_grasp_after_carry_failure(arm):
     assert plan.failures[0]['stage']=='carry'
 
 
+def test_inspection_only_checks_open_and_pregrasp_without_requesting_contact(arm):
+    checked=[]
+    backend=FakePlanner(blocked=('one','approach'))
+    def clearance(candidate,paths):
+        checked.append([p.label for p in paths])
+    result=plan_pick_carry(arm,backend,arm.anchor,[candidate(arm)],scene_id='scene-1',
+                           pregrasp_check=True,check_route_clearance=clearance)
+    assert result.status=='OFFLINE_ROUTE_FOUND'
+    assert checked==[['open_geometry','pregrasp']]
+    assert backend.calls==[('one','open_geometry',False),('one','pregrasp',False)]
+
+
+def test_close_at_pregrasp_keeps_arm_at_checked_endpoint(arm):
+    backend=FakePlanner()
+    result=plan_pick_carry(arm,backend,arm.anchor,[candidate(arm)],scene_id='scene-1',
+                           close_at_pregrasp=True)
+    assert result.status=='OFFLINE_ROUTE_FOUND'
+    assert [stage for _,stage,_ in backend.calls]==['open_geometry','pregrasp','close_geometry','lift','carry']
+    for stage in result.stages[2:4]:
+        np.testing.assert_array_equal(stage.joints,[result.stages[1].end])
+
+
+def test_default_first_route_stop_still_checks_close_lift_and_carry(arm):
+    backend=FakePlanner()
+    plan=plan_pick_carry(arm,backend,arm.anchor,[candidate(arm),candidate(arm,'two')],
+                         scene_id='scene-1')
+    assert plan.status=='OFFLINE_ROUTE_FOUND'
+    assert plan.selection['policy']=='first_complete_route'
+    assert {name for name,_,_ in backend.calls}=={'one'}
+    assert [s.label for s in plan.stages]==['open_geometry','pregrasp','approach','close_geometry','lift','carry']
+    assert not plan.motion_authorized
+
+
+def test_failed_route_advances_but_success_does_not_preplan_backups(arm):
+    backend = FakePlanner(blocked=('one', 'carry'))
+    plan = plan_pick_carry(arm, backend, arm.anchor,
+        [candidate(arm, name) for name in ('one', 'two', 'three')], scene_id='scene-1')
+    assert plan.status == 'OFFLINE_ROUTE_FOUND' and plan.candidate_id == 'two'
+    assert {name for name, _, _ in backend.calls} == {'one', 'two'}
+    assert plan.selection['policy'] == 'first_complete_route'
+    assert any(f['candidate'] == 'one' for f in plan.failures)
+
+
 def test_partial_approach_never_attaches_or_lifts(arm):
     backend=FakePlanner(blocked=('one','approach'))
     result=plan_pick_carry(arm,backend,arm.anchor,[candidate(arm)],scene_id='scene-1')
@@ -133,7 +176,7 @@ def test_balance_precedes_carry_comfort_but_never_overrides_failed_path(arm,monk
         return [SimpleNamespace(model_rad=q,cost=10. if near else 0.)]
     monkeypatch.setattr(carry_planning,'carry_goals',goals)
     backend=FakePlanner(blocked=('center','approach') if center_blocked else None)
-    result=plan_pick_carry(arm,backend,arm.anchor,[edge,center],scene_id='scene-1')
+    result=plan_pick_carry(arm,backend,arm.anchor,[edge,center],scene_id='scene-1',stop_after_first=False)
     assert result.status=='OFFLINE_ROUTE_FOUND'
     assert result.candidate_id==('edge' if center_blocked else 'center')
     assert result.selection['policy']=='near_best_feasible_balance_then_grasp_and_carry_cost'
@@ -188,6 +231,33 @@ def bound_input(arm):
     from test_installed_jaw import synthetic_jaw
     installed=synthetic_jaw(arm.profile)
     return review,group,payload,installed
+
+
+def test_direct_closure_measures_section_on_trimmed_line_at_contact_height(arm, monkeypatch):
+    from home_robot_tasks import carry_binding
+    review,group,payload,installed=bound_input(arm)
+    # The closing axis is base Y. Moving the line in base X selects a
+    # different section of a tapered object without changing its height.
+    grip=np.eye(4)
+    grip[:3,:3]=[[0,-1,0],[1,0,0],[0,0,1]]
+    arm.tcp_from_stock=np.eye(4)
+    vertices=[[x,y,z] for x,w in [(-.01,.010),(.01,.020)]
+              for y in [-w,w] for z in [-.01,.01]]
+    payload=replace(payload,base_from_object=np.eye(4),mesh={'vertices':vertices})
+    monkeypatch.setattr(carry_binding,'_bound_candidate',lambda *a,**kw:grip.copy())
+    bind_section=carry_binding.bind_observed_fixed_contact
+    class SectionMeasured(Exception):
+        pass
+    def measure(arm,pose,points,**options):
+        _,_,section=bind_section(arm,pose,points,**options)
+        assert pose[0,3]==pytest.approx(-.005)
+        assert pose[2,3]==pytest.approx(0.)
+        assert section['width_m']==pytest.approx(.025)
+        raise SectionMeasured
+    monkeypatch.setattr(carry_binding,'bind_observed_fixed_contact',measure)
+    with pytest.raises(SectionMeasured):
+        carry_binding.bind_grasp(arm,review,group,0,payload,installed,close_at_pregrasp=True,
+            approach_mode='vertical',approach_distance_m=0.,grasp_base_x_offset_m=-.005)
 
 
 def test_existing_graspnet_convention_and_measured_jaw_bind_to_carry(arm):
@@ -397,7 +467,7 @@ def test_candidate_evaluation_reused_but_contact_and_next_plan_are_fresh(arm, mo
     pose[0, 3] += .001  # FakePlanner reaches the anchor, leaving an IK residual.
     grasp = replace(grasp, base_from_grasp_tcp=pose)
     for run in range(2):
-        plan = plan_pick_carry(arm, FakePlanner(), arm.anchor, [grasp], scene_id='scene-1')
+        plan = plan_pick_carry(arm, FakePlanner(), arm.anchor, [grasp], scene_id='scene-1',stop_after_first=False)
         assert plan.status == 'OFFLINE_ROUTE_FOUND'
         assert len(plan.selection['alternatives']) > 1
         # Ranking and each carry alternative share one evaluation per pose.
@@ -407,3 +477,99 @@ def test_candidate_evaluation_reused_but_contact_and_next_plan_are_fresh(arm, mo
         assert actual is not nominal and actual.candidate_id == nominal.candidate_id
         assert not np.array_equal(actual.tcp_from_object, nominal.tcp_from_object)
     assert evaluated[1] is not evaluated[3]
+
+
+def test_historical_calibration_range_is_advisory_and_full_route_is_still_checked(arm):
+    planner=FakePlanner()
+    result=plan_pick_carry(arm,planner,arm.anchor,[candidate(arm)],scene_id='scene-1',top_calibrated=True)
+    assert result.status=='OFFLINE_ROUTE_FOUND'
+    review=result.carry_quality['top_calibration']
+    assert review['outside_recorded_stages'] and review['hard_limit'] is False
+    assert not result.motion_authorized and not result.physical_task_completed
+    assert [s.label for s in result.stages]==['open_geometry','pregrasp','approach','close_geometry','lift','carry']
+
+
+@pytest.mark.parametrize('stage',['pregrasp','approach','lift','carry'])
+def test_posture_advisory_never_overrides_a_failed_motion_stage(arm,stage):
+    result=plan_pick_carry(arm,FakePlanner(blocked=('one',stage)),arm.anchor,[candidate(arm)],
+                           scene_id='scene-1',top_calibrated=True)
+    assert result.status=='NO_COMPLETE_ROUTE' and not result.motion_authorized
+    assert any(f['stage']==stage for f in result.failures)
+
+
+@pytest.mark.parametrize('accept_last', [False, True])
+def test_table_clearance_rejection_advances_beyond_first_batch(arm, accept_last):
+    from home_robot_tasks.pick_table_clearance import TableClearanceRejected
+    examined = []
+    def check(grasp, paths):
+        assert paths[-1].label == 'carry'
+        examined.append(grasp.candidate_id)
+        if grasp.candidate_id == 'one' or not accept_last:
+            raise TableClearanceRejected('approach','fixed',-.00058,0.)
+    plan = plan_pick_carry(arm, FakePlanner(), arm.anchor,
+                          [candidate(arm), candidate(arm,'two')], scene_id='scene-1',
+                          maximum_grasps=1, exhaust_candidates=True, check_route_clearance=check)
+    assert examined == ['one','two']
+    assert plan.status == ('OFFLINE_ROUTE_FOUND' if accept_last else 'NO_COMPLETE_ROUTE')
+    assert [row['candidate'] for row in plan.failures if row['stage']=='table_clearance'] == (
+        ['one'] if accept_last else ['one','two'])
+    if accept_last:
+        assert plan.candidate_id == 'two'
+
+
+@pytest.mark.parametrize('rotation_deg', [0, 67, 180])
+def test_tabletop_pinch_line_uses_observed_axes_and_stock_jaw(rotation_deg):
+    from types import SimpleNamespace
+    from scipy.spatial.transform import Rotation
+    from home_robot_tasks.grasp_preferences import tabletop_pinch_alignment
+
+    obj = np.eye(4)
+    obj[:3,:3] = Rotation.from_euler('zy', [rotation_deg, 12], degrees=True).as_matrix()
+    obj[:3,3] = [.25, -.1, .7]
+    jaw = np.eye(4)
+    jaw[:3,:3] = Rotation.from_euler('z', 90, degrees=True).as_matrix()
+    jaw[:3,3] = [.004, .020, .003]
+    tcp_from_stock = np.eye(4)
+    tcp_from_stock[:3,3] = [.025, -.012, 0.]
+    grasp = SimpleNamespace(observed_base_from_object=obj, object_size_m=(.06,.02,.10),
+                            base_from_grasp_tcp=obj @ jaw @ np.linalg.inv(tcp_from_stock))
+    alignment = tabletop_pinch_alignment(grasp,tcp_from_stock)
+    assert alignment['short_axis_angle_deg'] == pytest.approx(0,abs=1e-8)
+    assert alignment['longitudinal_center_offset_m'] == pytest.approx(.004)
+    assert alignment['preferred']
+    grasp.object_size_m = (.035,.034,.10)
+    assert tabletop_pinch_alignment(grasp,tcp_from_stock) is None
+
+
+@pytest.mark.parametrize('blocked,selected', [(None,'center'), (('center','approach'),'edge')])
+def test_short_axis_candidates_survive_budget_and_prefer_longitudinal_center(arm,monkeypatch,blocked,selected):
+    from home_robot_tasks import carry_planning as planning
+    from home_robot_tasks.grasp_preferences import TabletopGraspPolicy
+    monkeypatch.setattr(planning, 'contact_posture', lambda *args: {'accepted':True})
+    base = candidate(arm)
+    candidates = [replace(base,candidate_id=name,observed_base_from_object=base.base_from_grasp_tcp)
+                  for name in ('oblique','edge','center')]
+    def alignment(c,stock):
+        offset={'oblique':None,'edge':.006,'center':.001}[c.candidate_id]
+        return dict(preferred=offset is not None,longitudinal_center_offset_m=offset)
+    monkeypatch.setattr(planning,'tabletop_pinch_alignment',alignment)
+    plan=plan_pick_carry(arm,FakePlanner(blocked),arm.anchor,candidates,scene_id='scene-1',
+                         grasp_policy=TabletopGraspPolicy(),maximum_grasps=2)
+    assert plan.candidate_id == selected
+
+
+@pytest.mark.parametrize('blocked', [False, True])
+def test_contact_margin_orders_search_without_excluding_zero_score(arm, monkeypatch, blocked):
+    from home_robot_tasks import carry_planning
+    def margin(arm, c, plane, close_angle):
+        return dict(passed=9 if c.candidate_id=='robust' else 0, trials=9, minimum_fixed_clearance_m=.002, minimum_moving_clearance_m=.002)
+    monkeypatch.setattr(carry_planning, 'tabletop_contact_margin', margin)
+    planner = FakePlanner(blocked=('robust','pregrasp') if blocked else None)
+    result = plan_pick_carry(arm, planner, arm.anchor,
+        [candidate(arm,'fallback'), candidate(arm,'robust')], scene_id='scene-1',
+        close_at_pregrasp=True, exhaust_candidates=True, maximum_grasps=1,
+        support_plane=[0.,0.,1.,0.])
+    assert result.status == 'OFFLINE_ROUTE_FOUND'
+    assert planner.calls[0][0] == 'robust'
+    assert result.candidate_id == ('fallback' if blocked else 'robust')
+    assert result.carry_quality['tabletop_contact_margin']['passed'] == (0 if blocked else 9)

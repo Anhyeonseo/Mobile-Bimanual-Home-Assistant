@@ -11,7 +11,7 @@ from .mobile_wire import MobileCommand, MobileStatus, MobileClock, mobile_query
 class MobileReplyError(RuntimeError):
     def __init__(self, packet, sequence, kind, result):
         self.diagnostics=dict(expected_kind=kind,expected_sequence=sequence,response=asdict(result))
-        if kind in (1,2,3):self.diagnostics['command']=asdict(MobileCommand.decode(packet))
+        if kind in (1,2,3,7):self.diagnostics['command']=asdict(MobileCommand.decode(packet))
         rejected=result.request_sequence==sequence and result.kind==(kind|0x80)
         label='controller rejected request' if rejected else 'response mismatch'
         super().__init__(f'{label}: kind={kind}, sequence={sequence}, reply_kind={result.kind}, '
@@ -110,6 +110,18 @@ class MobileClient:
             seq,
             2,
         )
+
+    def park(self):
+        if self.session is None:
+            raise RuntimeError("no owned mobile session")
+        deadline, boot = self._deadline(150)
+        seq = self._sequence()
+        result = self._exchange(MobileCommand(7, self.session, seq, deadline).encode(), seq, 7)
+        if (result.boot_id != boot or result.state or result.session or result.reason or
+                result.flags != 31 or not result.feedback_is_fresh(200)):
+            raise RuntimeError("unarmed stationary platform not confirmed")
+        self.session = None
+        return result
 
     def stop(self):
         if self.session is None:

@@ -124,3 +124,17 @@ def test_six_millimetre_sdk_quantization_at_inclusive_scene_boundary():
     mask=np.ones((20,20),dtype=bool);guard=StationarySceneCheck(image,depth,mask)
     assert guard.compare(image,depth+6*scale,target_only=True)['unchanged']
     assert not guard.compare(image,depth+7*scale,target_only=True)['unchanged']
+
+
+def test_encoder_top_capture_uses_the_calibrated_planning_extent(scene):
+    from home_robot_tasks.pick_calibration import planning_lift_limit
+    prepared, profile = scene
+    profile['base_profile_id'] = 's2-dev-4683680db9f74ce58184eced'
+    profile['lift']['meters_per_count'] = .6545894664845344 / 30717
+    review = prepared['review']
+    joints = review['model_joint_positions_si']
+    joints['s2_lift_joint'] = review['lift_height_m'] = .6545888973919574
+    from_prepared_capture(prepared, profile)
+    joints['s2_lift_joint'] = review['lift_height_m'] = planning_lift_limit(profile) + .001
+    with pytest.raises(ValueError, match='captured arm/jaw/lift state'):
+        from_prepared_capture(prepared, profile)

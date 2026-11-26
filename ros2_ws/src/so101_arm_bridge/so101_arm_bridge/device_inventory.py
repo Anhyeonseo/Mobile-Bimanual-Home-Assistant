@@ -37,7 +37,8 @@ def decode_inventory(data, bus, motor_id):
     if mask & 4:
         result['offset_and_mode'] = dict(offset_raw=word(23), operating_mode=data[25])
     if mask & 8:
-        result['command'] = dict(torque_enabled_raw=data[26], goal_position_raw=word(28),
+        result['command'] = dict(torque_enabled_raw=data[26], acceleration_raw=data[27],
+                                goal_position_raw=word(28), goal_time_raw=word(30),
                                 goal_speed_raw=word(32), torque_limit_raw=word(34))
     if mask & 16:
         result['feedback'] = dict(lock_raw=data[36], position_raw=word(37), speed_raw=word(39),

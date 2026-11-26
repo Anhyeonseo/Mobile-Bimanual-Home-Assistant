@@ -77,7 +77,7 @@ def test_clock_correction_does_not_hide_discontinuities(failure):
 
 
 def fixture():
-    p=dev.build(ROOT)
+    p=dev.build(ROOT, measured=False)
     samples=[]
     for bus,i in acq.EXPECTED:
         raw=2048 if i==10 else p['arms']['left' if bus==0 else 'right']['reference_raw'][acq.s2.JOINTS[i-1]]
@@ -123,6 +123,21 @@ def test_rgbd_clock_rejects_hardware_domain_and_wall_steps():
     with pytest.raises(ValueError):clock.convert(999000.,'timestamp_domain.global_time')
     times['wall']+=1
     with pytest.raises(ValueError):clock.convert(1000950.,'timestamp_domain.global_time')
+
+
+def test_camera_clock_discards_delayed_pairs_on_startup_and_conversion():
+    from home_robot_tasks.s2_rgbd_acquisition import GlobalClock
+    mono = iter([10., 10.010, 10.010, 10.010, 10.020, 10.034, 10.034, 10.034, 10.034])
+    wall = iter([1234., 1000.010, 2345., 1000.034])
+    clock = GlobalClock(wall=wall.__next__, mono=mono.__next__)
+    assert clock.convert(1000000., 'timestamp_domain.global_time') == pytest.approx(10.)
+
+
+def test_camera_clock_stops_after_consecutive_delayed_pairs():
+    from home_robot_tasks.s2_rgbd_acquisition import GlobalClock
+    mono = iter([10., 10.01, 10.01, 10.02, 10.02, 10.03])
+    with pytest.raises(ValueError, match='3 consecutive measurements'):
+        GlobalClock(wall=lambda: 1000., mono=mono.__next__)
 
 
 def test_association_accounts_for_motor_read_interval():
@@ -515,3 +530,62 @@ def test_bad_gripper_sample_invalidates_the_binding(change):
     with pytest.raises(ValueError):
         reader.sample(left_gripper_only=True)
     assert not reader.valid
+
+
+def test_continuous_camera_discards_stale_pair_and_keeps_new_exposure(monkeypatch):
+    from home_robot_tasks.s2_rgbd_acquisition import StaleCameraFrame
+    camera,recorded=continuous_camera(monkeypatch,[((11,1033.),(20,1000.)),((12,1066.),(21,1066.))])
+    def convert(stamp,domain):
+        if stamp==1000.:raise StaleCameraFrame(.241)
+        return stamp/1000
+    camera.clock.convert=convert
+    row,_=camera.next_frame(100)
+    assert row['depth_time_s']==1.066 and len(recorded)==1
+    assert camera.stale_framesets==1 and camera.last_stale_age_s==.241
+
+
+def test_continuous_camera_discards_alignment_delay(monkeypatch):
+    from home_robot_tasks.s2_rgbd_acquisition import StaleCameraFrame
+    camera,recorded=continuous_camera(monkeypatch,[((11,1033.),(21,1033.)),((12,1066.),(22,1066.))])
+    original=camera._record
+    def align(frames):
+        if frames.get_color_frame().get_frame_number()==11:raise StaleCameraFrame(.25)
+        return original(frames)
+    camera._record=align
+    row,_=camera.next_frame(100)
+    assert row['depth_time_s']==1.066 and len(recorded)==1
+    assert camera.stale_framesets==1
+
+
+def test_continuous_stale_pairs_expire_original_deadline(monkeypatch):
+    from home_robot_tasks.s2_rgbd_acquisition import StaleCameraFrame
+    camera,recorded=continuous_camera(monkeypatch,[((11,1033.),(21,1033.))])
+    def stale(*_):raise StaleCameraFrame(.25)
+    camera.clock.convert=stale
+    with pytest.raises(ValueError,match='no fresh RGB-D pair.*250.0 ms'):camera.next_frame(100)
+    assert not recorded and camera.stale_framesets>0
+    assert .1<=camera.pipeline.elapsed()<=.101
+
+
+@pytest.mark.parametrize('failure',['future','domain','wall_step','stream_reset'])
+def test_stale_color_cannot_hide_other_stream_fault(monkeypatch,failure):
+    from home_robot_tasks.s2_rgbd_acquisition import StaleCameraFrame
+    depth=(19,999.) if failure=='stream_reset' else (21,1034.)
+    camera,recorded=continuous_camera(monkeypatch,[((11,1033.),depth)])
+    def convert(stamp,domain):
+        if stamp==1033.:raise StaleCameraFrame(.25)
+        raise ValueError(failure)
+    camera.clock.convert=convert
+    with pytest.raises(ValueError,match='regressed' if failure=='stream_reset' else failure):camera.next_frame(100)
+    assert not recorded and camera.stale_framesets==0
+
+
+def test_camera_clock_distinguishes_stale_and_future_with_measured_age():
+    from home_robot_tasks.s2_rgbd_acquisition import GlobalClock,StaleCameraFrame
+    clock=GlobalClock(wall=lambda:1000.,mono=lambda:10.)
+    with pytest.raises(StaleCameraFrame,match='250.0 ms') as error:
+        clock.convert(999750.,'timestamp_domain.global_time')
+    assert error.value.age_s==pytest.approx(.25)
+    with pytest.raises(ValueError,match='future camera acquisition: age=-10.0 ms') as error:
+        clock.convert(1000010.,'timestamp_domain.global_time')
+    assert not isinstance(error.value,StaleCameraFrame)

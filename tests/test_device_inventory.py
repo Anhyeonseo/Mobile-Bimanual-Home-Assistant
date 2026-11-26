@@ -128,6 +128,7 @@ int Servo_ReadData(uint8_t id,uint8_t address,uint8_t length,uint8_t *data);
 ''')
     (tmp_path/'right_servo_bus.h').write_text('''#include <stdint.h>
 int RightServoBus_ReadInventoryBlock(uint8_t id,unsigned block,uint8_t *data);
+int RightServoBus_ReadTuningBlock(uint8_t id,unsigned block,uint8_t *data);
 ''')
     harness=tmp_path/'harness.c'
     harness.write_text(r'''
@@ -148,6 +149,9 @@ int Servo_ReadData(uint8_t id,uint8_t address,uint8_t length,uint8_t *data){
 }
 int RightServoBus_ReadInventoryBlock(uint8_t id,unsigned block,uint8_t *data){
  return read_block(1,id,block,data);
+}
+int RightServoBus_ReadTuningBlock(uint8_t id,unsigned block,uint8_t *data){
+ (void)id;(void)block;(void)data;assert(0);return 3;
 }
 int main(void){
  uint8_t q[4]={1,0,1,0},out[56];
@@ -170,7 +174,7 @@ int main(void){
  calls=0;fail_mask=6;DeviceInventory_Read(q,4,true,out);assert(out[5]==1 && out[4]==25);
  q[1]=1;expected_bus=1;calls=0;DeviceInventory_Read(q,4,true,out);assert(out[7]==2);
  calls=0;
- q[0]=2;DeviceInventory_Read(q,4,true,out);assert(out[1]==1);
+ q[0]=3;DeviceInventory_Read(q,4,true,out);assert(out[1]==1);
  q[0]=1;q[1]=2;DeviceInventory_Read(q,4,true,out);assert(out[1]==1);
  q[1]=0;q[3]=1;DeviceInventory_Read(q,4,true,out);assert(out[1]==1);
  DeviceInventory_Read(q,3,true,out);DeviceInventory_Read(0,4,true,out);assert(calls==0);

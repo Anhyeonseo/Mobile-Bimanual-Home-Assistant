@@ -290,3 +290,73 @@ def test_visible_hole_prevents_absorbing_an_unmasked_object_inside_convex_extent
     x0,y0,x1,y1=scene.ownership_assessment['roi_xyxy']
     assert x0<=50<x1 and y0<=50<y1
     assert scene.ownership_assessment['next_action']=='recapture_target_boundary'
+
+
+@pytest.mark.parametrize('separation', ['continuous', 'missing', 'distinct'])
+def test_subpixel_mask_boundary_needs_connected_measured_material(separation):
+    from home_perception.geometry.target_ownership import associate
+
+    depth = np.full((16, 20), .375)
+    mask = np.zeros_like(depth, dtype=bool)
+    mask[4:12, 4:10] = True
+    heights = np.zeros_like(depth)
+    heights[mask] = .012
+    heights[8, 10:16] = .009
+    protected = np.zeros_like(mask)
+    if separation == 'missing':
+        depth[8, 12] = 0.
+    if separation == 'distinct':
+        protected[8, 12:16] = True
+    intr = dict(fx=617., fy=617., ppx=10., ppy=8.)
+    valid = depth > 0
+    result = associate(depth, intr, mask, backproject(depth, intr, valid),
+                       heights[valid], backproject(depth, intr, mask), .00073, protected=protected)
+    # 5 pixel centers, but only 4.5 px to the mask footprint. 6 centers
+    # remains outside the same metric budget even with continuous material.
+    assert bool(result.target[8, 14]) == (separation == 'continuous')
+    assert not result.target[8, 15]
+
+
+@pytest.mark.parametrize('edge', ['continuous', 'step', 'missing', 'protected'])
+def test_measured_exterior_face_or_retained_collision_geometry(monkeypatch, edge):
+    # Hold the seed/association result fixed and vary only local measurements.
+    # The convex payload overhangs this corner outside the segmentation mask.
+    from home_perception.geometry import pick_scene
+    from home_perception.geometry.target_ownership import TargetOwnership
+    intr = dict(fx=550., fy=550., ppx=40., ppy=40.)
+    depth = np.full((81, 81), .45)
+    mask = np.zeros_like(depth, dtype=bool)
+    mask[30:51, 30:51] = True
+    depth[28:53, 28:53] = .43
+    owned = depth == .43
+    y, x = 29, 29
+    owned[y, x] = False
+    protected = np.zeros_like(mask)
+    if edge == 'step':
+        depth[y, x] += .004
+    if edge == 'protected':
+        protected[y, x] = True
+    if edge == 'missing':
+        for dv in (-1, 1):
+            for du in (-1, 1):
+                depth[y+dv, x+du] = 0.
+                owned[y+dv, x+du] = False
+    uncertain = np.zeros_like(mask)
+    uncertain[y, x] = True
+    monkeypatch.setattr(pick_scene, 'associate', lambda *args, **kwargs:
+                        TargetOwnership(owned.copy(), uncertain.copy(), {}))
+    plane = Plane(np.array([0., 0., -1.]), np.array([0., 0., .45]), .0007, .95)
+    scene = build_pick_scene(depth, intr, plane, mask, backproject(depth, intr, mask), protected=protected)
+    assert bool(scene.target_pixels[y, x]) == (edge == 'continuous')
+    status = scene.ownership_assessment['status']
+    if edge == 'continuous':
+        assert status == 'CONSISTENT' and scene.ownership_evidence['measured_patch_corners'] == 1
+    else:
+        assert status == ('TARGET_WORLD_OWNERSHIP_UNRESOLVED' if edge == 'protected'
+                          else 'CHECK_RETAINED_BOUNDARY_IN_PLANNER')
+        only_corner = np.zeros_like(mask)
+        only_corner[y, x] = True
+        xyz = backproject(depth, intr, only_corner)[0]
+        point = (scene.support_from_optical @ [*xyz, 1.])[:3]
+        assert covered(scene.nominal_obstacle_boxes, point)
+        assert covered(scene.obstacle_boxes, point)

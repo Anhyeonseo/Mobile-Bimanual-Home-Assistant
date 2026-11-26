@@ -3,7 +3,7 @@
   "arm": "left",
   "motor_id": 6,
   "section": "installed_left_front_opposing_contact_faces",
-  "calibration_id": "s2-dev-5bfc28c62078dfb0377bfdb7",
+  "calibration_id": "s2-dev-4683680db9f74ce58184eced",
   "assembly_revision": "mini1-fixed-d415-official-home-20261110",
   "samples": [
     {
@@ -245,5 +245,12 @@
     "arm_and_jaw_mapping_changed": false,
     "new_measurements": false,
     "reason": "camera base-Z only; preserve historical measured jaw evidence"
+  },
+  "measured_calibration_profile_rebind": {
+    "previous_profile_id": "s2-dev-5bfc28c62078dfb0377bfdb7",
+    "current_profile_id": "s2-dev-4683680db9f74ce58184eced",
+    "gripper_mapping_changed": false,
+    "new_measurements": false,
+    "reason": "measured camera/arm/lift calibration; left gripper alignment and installed pads unchanged"
   }
 }

@@ -85,14 +85,14 @@ def test_calibrated_height_is_absolute_distance_dependent_and_leaves_input_uncha
     height=load_surface_height_model(ROOT)
     points=np.array([[0.,0.,.4],[0.,0.,1.],[.1,0.,1.]])
     original=points.copy();actual=height.heights(points)
-    # Independent full precision row from yeoeun/fit_best model 3. A fixed
-    # 9.1mm or 14.6mm subtraction cannot satisfy both depths and lateral roll.
-    expected=1.0100224280799914-height.ground_z_m + np.array([
-        -.7203967709309439*.4,-.7203967709309439,
-        -.7203967709309439-.021361692866709636*.1])
+    # Independent full precision row: z row of the measured camera in
+    # measured_calibration.development.json (2026-11-17 joint calibration).
+    # A fixed 9.1mm or 14.6mm subtraction cannot satisfy both depths and lateral roll.
+    r=json.loads((ROOT/'config/home_assistant/measured_calibration.development.json').read_text())['base_from_optical'][2]
+    expected=r[3]-height.ground_z_m + np.array([r[2]*.4,r[2],r[2]+r[0]*.1])
     np.testing.assert_allclose(actual,expected,atol=1e-12,rtol=0)
     np.testing.assert_array_equal(points,original)
-    assert height.heights([0.,0.,0.])==pytest.approx(1.0100224280799914-height.ground_z_m)
+    assert height.heights([0.,0.,0.])==pytest.approx(r[3]-height.ground_z_m)
     assert not np.isclose(actual[1]-actual[0],-.7071067811865475*.6)
 
 

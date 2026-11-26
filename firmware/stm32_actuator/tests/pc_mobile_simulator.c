@@ -26,6 +26,9 @@ void pc_mobile_reset(uint32_t boot_id) {
     actuator_mobile_endpoint_init(&endpoint,&supervisor,boot_id);
     actuator_bus_router_init(&router);transmitted=0;
 }
+static bool parked_in_fixture;
+static bool fixture_park_proof(uint32_t now){(void)now;return parked_in_fixture;}
+void pc_mobile_set_park_proof(int proven){endpoint.park_proven=fixture_park_proof;parked_in_fixture=proven!=0;}
 static int output(uint32_t now) {
     uint8_t packet[26];size_t length;const uint8_t *bytes;uint32_t token;
     actuator_bus_work_t kind;uint32_t us=now*1000u;

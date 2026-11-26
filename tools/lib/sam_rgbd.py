@@ -11,14 +11,23 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class SAMMasks:
-    def __init__(self, device, *, cache_dir=None):
+    def __init__(self, device, *, cache_dir=None, local_files_only=False):
         from transformers import Sam2Model, Sam2Processor
 
         self.device = device
         options = {"revision": MODEL_REVISION, "cache_dir": str(cache_dir or ROOT / "artifacts/models/huggingface")}
+        model_source = MODEL_ID
+        if local_files_only:
+            options["local_files_only"] = True
+            # Pass the pinned snapshot directory, not a Hub ID. Some processor
+            # discovery paths otherwise issue HEAD requests despite this flag.
+            local = Path(options["cache_dir"])/('models--'+MODEL_ID.replace('/','--'))/'snapshots'/MODEL_REVISION
+            if not local.is_dir():
+                raise FileNotFoundError('installed pinned model snapshot required: '+str(local))
+            model_source = str(local)
         print(f"Loading {MODEL_ID} on {device} ...", flush=True)
-        self.processor = Sam2Processor.from_pretrained(MODEL_ID, **options)
-        self.model = Sam2Model.from_pretrained(MODEL_ID, use_safetensors=True, **options).to(device).eval()
+        self.processor = Sam2Processor.from_pretrained(model_source, **options)
+        self.model = Sam2Model.from_pretrained(model_source, use_safetensors=True, **options).to(device).eval()
 
     def segment(self, rgb, boxes):
         import torch

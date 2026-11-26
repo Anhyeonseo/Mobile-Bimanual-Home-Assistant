@@ -14,6 +14,7 @@ class TabletopGraspPolicy:
     maximum_closing_deg: float = 20.
     preferred_balance_offset: float = .10
     maximum_balance_offset: float = .35
+    primary_balance_offset: float = .35
 
     def __post_init__(self):
         for preferred,maximum in ((self.preferred_approach_deg,self.maximum_approach_deg),
@@ -34,12 +35,16 @@ def contact_posture(pose, policy):
         cost=(approach/policy.preferred_approach_deg)**2+(closing/policy.preferred_closing_deg)**2)
 
 
-def contact_roll_interval(pose, policy, limit=np.pi/3):
-    """Intersect the original roll freedom with the tabletop envelope.
+def contact_roll_interval(pose, policy, limit=np.pi/2):
+    """Intersect contact-line roll freedom with the tabletop envelope.
 
     Rotating about TCP X preserves both contact positions and closing slope.
     Restrict the search itself so a rejected tilted solution cannot hide a
-    reachable moderate one. Neither the contact point nor the base moves.
+    reachable moderate one. The old +/-60 degree search clipped near-horizontal
+    source grasps before they could rotate into reachable overhead attitudes.
+    A quarter turn preserves the same closing line and pinch center; the
+    actual approach/closing angles and joint limits remain independently bound.
+    Neither the contact point nor the base moves.
     """
     rotation=rigid(pose)[:3,:3]
     if abs(rotation[2,0])>np.sin(np.deg2rad(policy.maximum_closing_deg))+1e-12:return None
@@ -50,6 +55,33 @@ def contact_roll_interval(pose, policy, limit=np.pi/3):
     intervals=[(max(-limit,center+shift-half),min(limit,center+shift+half)) for shift in (-2*np.pi,0,2*np.pi)]
     intervals=[(lo,hi) for lo,hi in intervals if hi-lo>1e-10]
     return max(intervals,key=lambda bounds:bounds[1]-bounds[0]) if intervals else None
+
+
+def tabletop_pinch_alignment(candidate, tcp_from_stock):
+    """Planar stock-jaw line relative to the observed object's footprint."""
+    if candidate.observed_base_from_object is None:
+        return None
+    length_axis = int(np.argmax(candidate.object_size_m[:2]))
+    width_axis = 1 - length_axis
+    ratio = candidate.object_size_m[length_axis] / candidate.object_size_m[width_axis]
+    if ratio < 1.5:
+        return None
+    # The observed object's XY axes lie in the support plane. Its Z extent
+    # (notably for upright objects) does not determine its in-plane direction.
+    observed = rigid(candidate.observed_base_from_object)
+    stock = rigid(candidate.base_from_grasp_tcp) @ rigid(tcp_from_stock)
+    direction = observed[:3, :3].T @ stock[:3, 0]
+    if np.linalg.norm(direction[:2]) < 1e-8:
+        return None
+    angle = float(np.degrees(np.arctan2(abs(direction[length_axis]), abs(direction[width_axis]))))
+    offset = None
+    if angle <= 15.0:
+        origin = observed[:3, :3].T @ (stock[:3, 3] - observed[:3, 3])
+        # Intersect the closing line with the longitudinal midline (width=0).
+        offset = float(abs(origin[length_axis] - origin[width_axis] *
+                           direction[length_axis] / direction[width_axis]))
+    return dict(short_axis_angle_deg=angle, footprint_aspect_ratio=float(ratio),
+                preferred=offset is not None, longitudinal_center_offset_m=offset)
 
 
 def grasp_preferences(arm, start, candidate, policy=None):

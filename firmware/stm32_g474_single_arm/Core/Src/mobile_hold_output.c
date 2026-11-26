@@ -24,6 +24,9 @@ void MobileHoldOutput_OnTxComplete(UART_HandleTypeDef *uart) {
     completed_us=Timebase_NowUs();tx_done=1;
 }
 void MobileHoldOutput_OnUartError(UART_HandleTypeDef *uart){if(uart==right_uart && gate_token)error=1;}
+bool MobileHoldOutput_Pending(void) {
+    return transaction.active && !router.bus.faulted && !error;
+}
 static void fault(void){
     router.inhibited=true;router.bus.faulted=true;actuator_shared_bus_request_stop(&router.bus);
     ServoTransport_RequestStop(right_uart);

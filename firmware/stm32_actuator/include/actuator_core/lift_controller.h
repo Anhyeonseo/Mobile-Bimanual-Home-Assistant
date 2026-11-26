@@ -13,6 +13,7 @@ typedef struct {
     uint32_t feedback_timeout_ms, homing_timeout_ms, contact_dwell_ms;
     uint16_t maximum_encoder_step_raw;
     int8_t encoder_up_direction;
+    int32_t reference_top_um; /* Mechanical upper datum; 0 disables top registration. */
 } actuator_lift_config_t;
 typedef struct {
     uint32_t observed_ms;
@@ -34,14 +35,14 @@ typedef struct {
 bool actuator_lift_hold_observe(actuator_lift_hold_monitor_t *monitor,
     const actuator_lift_feedback_t *feedback,bool zero_drive_verified,
     uint32_t now_ms,uint32_t maximum_age_ms,uint32_t dwell_ms,uint16_t tolerance_raw);
-/* Existing HOLDING only: each fresh unchanged position plus fresh zero-drive
+/* Existing HOLDING only: each fresh position inside the fixed hold envelope plus zero-drive
  * readback retains hold for <100 ms despite bounded speed indication.
  * Repeated timestamps never renew the source sample lifetime.
  * Does not establish initial hold, home, moving completion or STOP proof. */
 bool actuator_lift_hold_observe_report(actuator_lift_hold_monitor_t *monitor,
     actuator_lift_feedback_t *feedback,bool zero_drive_verified,uint8_t moving,
     bool maintaining_hold,uint32_t now_ms,uint32_t maximum_age_ms,
-    uint32_t dwell_ms,uint16_t tolerance_raw);
+    uint32_t dwell_ms,uint16_t tolerance_raw,uint16_t hold_tolerance_raw);
 typedef struct {
     actuator_lift_config_t config;
     actuator_lift_state_t state;
@@ -50,7 +51,7 @@ typedef struct {
     uint32_t observed_ms, homing_started_ms, contact_started_ms;
     uint16_t previous_raw;
     int64_t accumulated_raw, home_raw;
-    int32_t height_um, target_um, command_raw;
+    int32_t height_um, target_um, command_raw, reference_height_um;
     actuator_lift_feedback_t feedback;
     bool zero_sent;
     uint32_t zero_sent_ms;
@@ -75,6 +76,9 @@ bool actuator_lift_home(actuator_lift_t *lift,uint32_t now_ms);
 /* Explicit operator-confirmed bottom reference. No motion or torque writes;
  * normal zero completion and independent hold proof are still required. */
 bool actuator_lift_reference_bottom(actuator_lift_t *lift,uint32_t now_ms);
+/* Register the configured mechanical top without moving. The command ceiling
+ * remains maximum_height_um, including when the top datum is above it. */
+bool actuator_lift_reference_top(actuator_lift_t *lift,int32_t expected_top_um,uint32_t now_ms);
 bool actuator_lift_move(actuator_lift_t *lift,int32_t height_um,uint32_t now_ms);
 /* Actual zero-speed packet completion; not the desired command value. */
 void actuator_lift_zero_sent(actuator_lift_t *lift,uint32_t completed_ms);

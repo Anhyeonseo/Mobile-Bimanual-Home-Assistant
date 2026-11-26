@@ -82,6 +82,12 @@ python -m pytest -c config/pytest.ini --rootdir=. -q tests/test_stream_protocol_
 
 위 명령은 통신 계약과 소프트웨어 동작을 검사하며 실제 모터를 실행하지 않는다. 실제 장치 연결·토크·동작은 별도 승인과 초기화·관절 제한·정지 조건 확인이 필요하다.
 
+통합 파지 펌웨어는 AS capabilities의 `0x08` 비트로 AM 7(PARK) 지원을 알린다.
+PARK는 소유한 ACTIVE 세션의 다음 sequence와 유효한 MCU deadline, 네 축의 0 명령을 요구한다.
+MCU는 세 바퀴의 실제 목표 속도 0과 최소 400 ms의 위치 관측, 팔 자세와 리프트 유지를 확인한다.
+승인 응답은 같은 boot에서 state=0, session=0이다. 완료한 세션 번호로 다시 ARM할 수 없다.
+STOP은 장애·취소 경로이며 PARK로 해제할 수 없다.
+
 ## 모바일 명령 프레임 초안 v1 — PC/C 상호 시험 단계
 
 `mobile_wire.py`와 `actuator_core/mobile_wire.c`는 아래 고정 길이 프레임을
@@ -94,7 +100,7 @@ encode/decode한다. **기존 팔 message ID에 등록하거나 live UART parser
 |---|---|---|
 | 0–1 | ASCII `AM` | magic |
 | 2 | u8 = 1 | version |
-| 3 | u8 | 1 ARM, 2 VELOCITY, 3 STOP |
+| 3 | u8 | 1 ARM, 2 VELOCITY, 3 STOP, 7 PARK (지원 시) |
 | 4–7 | u32 little endian | nonzero session |
 | 8–11 | u32 little endian | sequence; ARM은 0, 활성 session의 이동/정지는 증가 |
 | 12–15 | u32 little endian | **동기화된 MCU 시각 기준** valid_until_ms |

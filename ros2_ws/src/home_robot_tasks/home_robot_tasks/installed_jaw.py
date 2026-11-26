@@ -53,7 +53,14 @@ class StockLeftJaw:
             entry=self.raw_at_least(plan['entry_gap_m']*1000)
             floor=self.raw_at_least(target_gap(plan)*1000)
         except ValueError as exc:return dict(status='OUTSIDE_NOMINAL_STL_RANGE',reason=str(exc),hardware_authorized=False)
+        extra=plan.get('close_extra_raw',0)
+        if type(extra) is not int or extra<0:
+            raise ValueError('close extra must be a nonnegative raw count')
+        nominal_floor=floor
+        floor=max(self.raw_min,floor-extra)
         return dict(status='NOMINAL_STL_GAP_PREVIEW',section='official_tcp_closing_section',
+            **(dict(nominal_close_raw=nominal_floor,close_extra_raw=extra,
+                    applied_close_extra_raw=nominal_floor-floor) if extra else {}),
             entry_raw=entry,lower_search_raw=floor,entry_gap_mm=self.gap_mm(entry),
             lower_search_gap_mm=self.gap_mm(floor),physically_measured=False,hardware_authorized=False)
 
@@ -127,6 +134,8 @@ class InstalledLeftJaw:
         return raw
 
     def preview(self, plan):
+        if plan.get('close_extra_raw',0):
+            raise ValueError('extra raw closure requires the stock jaw conversion')
         if plan.get('status') != 'BOUNDED_CLOSE':
             return dict(status='WIDTH_UNRESOLVED',hardware_authorized=False)
         try:

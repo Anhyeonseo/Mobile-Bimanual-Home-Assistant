@@ -187,3 +187,18 @@ def test_independent_gap_error_changes_contact_classification_only():
     assert jaw.gap_mm(envelope['upper_contact_raw'])<=envelope['upper_contact_gap_mm']
     clipped=jaw.contact_envelope(dict(plan,entry_gap_m=.0374))
     assert clipped['upper_contact_gap_mm']==pytest.approx(37.4)
+
+
+def test_extra_closure_keeps_entry_and_contact_upper_bound_and_respects_raw_limit():
+    jaw,_=stock_conversion()
+    plan=dict(status='BOUNDED_CLOSE',entry_gap_m=.028462141717063356,
+              target_gap_m=.013462141717063354,upper_contact_gap_m=.020462141717063356)
+    old=jaw.preview(plan);updated=dict(plan,close_extra_raw=50);new=jaw.preview(updated)
+    assert old['lower_search_raw']==2027
+    assert new['lower_search_raw']==1977
+    assert new['entry_raw']==old['entry_raw']
+    assert new['applied_close_extra_raw']==50
+    assert jaw.contact_envelope(updated)==jaw.contact_envelope(plan)
+    limited=jaw.preview(dict(plan,close_extra_raw=4096))
+    assert limited['lower_search_raw']==jaw.raw_min
+    assert limited['applied_close_extra_raw']<4096

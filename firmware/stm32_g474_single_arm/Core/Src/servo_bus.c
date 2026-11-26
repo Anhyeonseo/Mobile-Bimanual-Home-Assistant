@@ -2137,6 +2137,15 @@ HAL_StatusTypeDef Servo_ConfigureForTrajectory(
 )
 {
     if (!ServoTransport_ServiceAllowed()) return HAL_ERROR;
+    /* Supervised LEFT shoulder P-gain trial. Keep the calibrated geometry,
+     * right bus and all other settings unchanged. The normal volatile write
+     * and readback below must verify the selected gain. This image is not
+     * approved for normal pick operation until the experiment is reviewed. */
+    if (servo_id == 2U)
+    {
+        if ((p_gain != 64U) || (d_gain != 64U)) return HAL_ERROR;
+        p_gain = 48U;
+    }
     if (Servo_ReadPosition(
             servo_id,
             initial_position

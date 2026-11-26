@@ -481,3 +481,22 @@ def test_off_window_does_not_admit_nonzero_drive_or_unknown_mode(field,value):
     elif field=='mode':d['offset_and_mode']['operating_mode']=value
     else:d['feedback']['speed_raw']=value
     with pytest.raises(ValueError):off.observe(r)
+
+
+@pytest.mark.parametrize('changes,reason', [
+    ({'stop_latched': True}, 'stop_latched=true'),
+    ({'firmware_version': 123}, '0x7b'),
+    ({'protocol_version': 1}, '통신 프로토콜 2 필요 (현재 1)'),
+    ({'joint_count': 6}, '양팔 12개 관절 필요 (현재 6)'),
+])
+def test_pick_rejection_identifies_actual_failed_condition(changes, reason):
+    from types import SimpleNamespace
+    from so101_arm_bridge.unified_commissioning import query_pick_controller
+    hello = SimpleNamespace(**dict(dict(firmware_version=0x2492E, protocol_version=2,
+                                       joint_count=12, stop_latched=False), **changes))
+    transport = SimpleNamespace(enter_binary_mode=lambda:hello,
+        exchange_mobile=lambda _:pytest.fail('commissioning after rejected controller'))
+    with pytest.raises(ValueError) as error:
+        query_pick_controller(transport, {})
+    assert reason in str(error.value)
+    assert hello.stop_latched == changes.get('stop_latched', False)

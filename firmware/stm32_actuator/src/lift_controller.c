@@ -24,22 +24,29 @@ bool actuator_lift_hold_observe(actuator_lift_hold_monitor_t *m,
 }
 bool actuator_lift_hold_observe_report(actuator_lift_hold_monitor_t *m,
     actuator_lift_feedback_t *f,bool drive,uint8_t moving,bool maintaining,
-    uint32_t now,uint32_t age,uint32_t dwell,uint16_t tolerance){
+    uint32_t now,uint32_t age,uint32_t dwell,uint16_t tolerance,uint16_t hold_tolerance){
     if(!m||!f)return false;
     f->hold_report_remaining_ms=0;
+    if(hold_tolerance>=2048){memset(m,0,sizeof(*m));return false;}
     if(moving==0&&f->velocity_raw==0){
         uint32_t previous=m->last_ms;
-        bool proven=actuator_lift_hold_observe(m,f,drive,now,age,dwell,tolerance);
+        uint16_t allowed=maintaining&&m->proven?hold_tolerance:tolerance;
+        bool proven=actuator_lift_hold_observe(m,f,drive,now,age,dwell,allowed);
         if(proven&&f->observed_ms!=previous){m->last_quiet_ms=m->last_ms;m->quiet_position_raw=f->position_raw;m->report_pending=false;}
         return proven;
     }
     /* A new, independently read position and zero-drive state renews hold
      * evidence, not a speed-byte exception timer. An unchanged old sample can
-     * never renew this 100 ms lease. Keep raw speed/moving visible, reject any
-     * position change during noisy reports, and never establish initial hold. */
+     * never renew this 100 ms lease. Keep raw speed/moving visible. Maintain
+     * the established anchor inside the configured position envelope, rather
+     * than requiring exact raw-count equality. Never walk that anchor forward
+     * on each sample or establish initial hold from noisy speed reports. */
+    int32_t delta=(int32_t)f->position_raw-m->anchor_raw;
+    if(delta>2048)delta-=4096;
+    if(delta< -2048)delta+=4096;
     if(maintaining&&m->tracking&&m->proven&&drive&&f->healthy&&moving<=1&&
        age&&dwell&&dwell<age&&tolerance<2048&&f->position_raw<4096&&
-       f->position_raw==m->quiet_position_raw&&
+       delta<=hold_tolerance&&delta>=-(int32_t)hold_tolerance&&
        f->velocity_raw>=-50&&f->velocity_raw<=50&&
        now-f->observed_ms<100&&now-f->observed_ms<age&&now-m->last_ms<age&&
        (!m->report_pending||now-m->last_ms<100)&&
@@ -76,7 +83,7 @@ bool actuator_lift_bottom_transport_observe(const actuator_lift_t *l,
     if(delta>2048)delta-=4096;
     if(delta< -2048)delta+=4096;
     if(delta>l->config.maximum_encoder_step_raw||delta< -(int32_t)l->config.maximum_encoder_step_raw)return false;
-    int64_t height=(l->accumulated_raw+(int64_t)delta*l->config.encoder_up_direction-l->home_raw)*l->config.um_per_turn/4096;
+    int64_t height=l->reference_height_um+(l->accumulated_raw+(int64_t)delta*l->config.encoder_up_direction-l->home_raw)*l->config.um_per_turn/4096;
     return height>=-l->config.tolerance_um&&height<=l->config.tolerance_um;
 }
 bool actuator_lift_bottom_transport_ready(const actuator_lift_t *l,uint32_t now) {
@@ -106,6 +113,8 @@ bool actuator_lift_init(actuator_lift_t *l,const actuator_lift_config_t *c) {
     memset(l,0,sizeof(*l));
     if(c==NULL || c->um_per_turn<=0 || c->um_per_turn>10000000 ||
         c->maximum_height_um<=0 || c->maximum_height_um>10000000 ||
+        c->reference_top_um<0 || c->reference_top_um>10000000 ||
+        (c->reference_top_um && c->reference_top_um<c->maximum_height_um) ||
         c->tolerance_um<=0 || c->tolerance_um>=c->maximum_height_um ||
         c->maximum_speed_raw<=0 || c->maximum_speed_raw>32767 ||
         c->homing_speed_raw<=0 || c->homing_speed_raw>c->maximum_speed_raw ||
@@ -123,7 +132,7 @@ void actuator_lift_reset(actuator_lift_t *l) {
     if(l==NULL || !l->configured) return;
     l->state=LIFT_UNHOMED;l->fault=LIFT_OK;l->command_raw=0;
     l->homed=false;l->have_sample=false;l->contact_tracking=false;
-    l->accumulated_raw=0;l->home_raw=0;
+    l->accumulated_raw=0;l->home_raw=0;l->reference_height_um=0;
 }
 void actuator_lift_poll(actuator_lift_t *l,uint32_t now) {
     int64_t error,magnitude,speed;
@@ -135,7 +144,8 @@ void actuator_lift_poll(actuator_lift_t *l,uint32_t now) {
         l->command_raw=-l->config.homing_speed_raw;
         /* Dwell is evaluated only from fresh advancing samples in observe(). */
     } else if(l->homed && (l->height_um< -l->config.tolerance_um ||
-                          l->height_um>l->config.maximum_height_um)) {
+                          (int64_t)l->height_um>(l->config.reference_top_um?
+                              (int64_t)l->config.reference_top_um+l->config.tolerance_um:l->config.maximum_height_um))) {
         fault(l,LIFT_TRAVEL_LIMIT);
     } else if(l->state==LIFT_MOVING) {
         error=(int64_t)l->target_um-l->height_um;
@@ -190,7 +200,7 @@ bool actuator_lift_observe(actuator_lift_t *l,const actuator_lift_feedback_t *f,
     }
     l->previous_raw=f->position_raw;l->observed_ms=f->observed_ms;l->feedback=*f;l->have_sample=true;
     if(l->homed) {
-        height=(l->accumulated_raw-l->home_raw)*l->config.um_per_turn/4096;
+        height=l->reference_height_um+(l->accumulated_raw-l->home_raw)*l->config.um_per_turn/4096;
         if(height<INT32_MIN || height>INT32_MAX) {fault(l,LIFT_TRAVEL_LIMIT);return false;}
         l->height_um=(int32_t)height;
     }
@@ -199,7 +209,7 @@ bool actuator_lift_observe(actuator_lift_t *l,const actuator_lift_feedback_t *f,
            f->current_ma<=l->config.maximum_current_ma) {
             if(!l->contact_tracking) {l->contact_tracking=true;l->contact_started_ms=f->observed_ms;}
             else if(f->observed_ms-l->contact_started_ms>=l->config.contact_dwell_ms) {
-                l->home_raw=l->accumulated_raw;l->height_um=0;l->target_um=0;
+                l->home_raw=l->accumulated_raw;l->reference_height_um=0;l->height_um=0;l->target_um=0;
                 l->homed=true;l->state=LIFT_HOLD_PENDING;l->command_raw=0;l->zero_sent=false;
             }
         } else l->contact_tracking=false;
@@ -215,16 +225,23 @@ bool actuator_lift_home(actuator_lift_t *l,uint32_t now) {
     l->homing_started_ms=now;l->contact_tracking=false;l->state=LIFT_HOMING;
     l->command_raw=-l->config.homing_speed_raw;return true;
 }
-bool actuator_lift_reference_bottom(actuator_lift_t *l,uint32_t now) {
+static bool reference_at(actuator_lift_t *l,int32_t height,uint32_t now) {
     if(l==NULL || !l->configured) return false;
     actuator_lift_poll(l,now);
     if(l->state!=LIFT_UNHOMED || l->homed || !fresh(l,now) ||
        !l->feedback.healthy || !stopped(l) ||
        l->feedback.current_ma>l->config.maximum_current_ma) return false;
-    l->home_raw=l->accumulated_raw;l->height_um=0;l->target_um=0;
+    l->home_raw=l->accumulated_raw;l->reference_height_um=height;l->height_um=height;l->target_um=height;
     l->homed=true;l->contact_tracking=false;l->state=LIFT_HOLD_PENDING;
     l->command_raw=0;l->zero_sent=false;
     return true;
+}
+bool actuator_lift_reference_bottom(actuator_lift_t *l,uint32_t now) {
+    return reference_at(l,0,now);
+}
+bool actuator_lift_reference_top(actuator_lift_t *l,int32_t height,uint32_t now) {
+    if(!l || !l->configured || height<=0 || height!=l->config.reference_top_um)return false;
+    return reference_at(l,height,now);
 }
 bool actuator_lift_move(actuator_lift_t *l,int32_t height,uint32_t now) {
     if(l==NULL || !l->configured) return false;

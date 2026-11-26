@@ -49,7 +49,7 @@ static const MobileBoardProfile profile={
  .feedback={.axes={{1,90,150,70,300},{1,90,150,70,300},{1,90,150,70,300},{1,90,150,70,300}},
     .sample_timeout_ms=200,.mode_timeout_ms=500,.response_timeout_ms=5,.maximum_sample_skew_ms=100},
  .output={{5000,1000,200,10000,20000,5000,500},500,400,600,4000,{1,1,1,1}},
- .lift={409600,500000,100,100,20,2,10000,500,1000,100,1000,20,200,1},
+ .lift={409600,500000,100,100,20,2,10000,500,1000,100,1000,20,200,1,643847},
  .read_period_us=5000,.read_budget_us=600,.quiet_us=50,.current_microamps_per_raw=1000,
  .stop={4000,600,600,200,100},.arm_hold_tolerance_raw=5,.arm_hold_dwell_ms=20,.arm_read_period_ms=10
 };
@@ -181,6 +181,9 @@ static void power_request(uint8_t q[36],uint8_t out[64],uint8_t kind){
 #endif
 int main(int argc,char **argv){
  CHECK(argc==2);unsigned scenario=(unsigned)atoi(argv[1]);
+ unsigned top_case=scenario==90;
+ if(top_case){scenario=42;test_base_lift_evidence=true;}
+ (void)top_case;
  unsigned transport_case=scenario>=82&&scenario<=89?scenario:0;
  if(transport_case)scenario=42;
  (void)transport_case;
@@ -319,16 +322,25 @@ int main(int argc,char **argv){
        advance(elapsed+500000);
        CHECK(!MobileBoard_StopActive());
       }
-      uint8_t ref[36]={'A','L',1,7},ls[64];
+      uint8_t ref[36]={'A','L',1,top_case?8:7},ls[64];
+      if(top_case)w32(ref+16,643847);
       w32(ref+4,1);w32(ref+8,1);w32(ref+12,HAL_GetTick()+150);w32(ref+20,42);w32(ref+32,actuator_crc32c(ref,32));
       CHECK(actuator_lift_endpoint_exchange(endpoint,ref,36,HAL_GetTick(),ls));
       if(idle_case==78){CHECK(ls[3]==135&&!endpoint->active&&!endpoint->lift->homed);return 0;}
-      CHECK(ls[3]==7);
+      CHECK(ls[3]==(top_case?8:7));
       CHECK(endpoint->lift->state==LIFT_HOLD_PENDING&&!endpoint->lift->zero_sent);
       advance(elapsed+30000);
       CHECK(endpoint->lift->state==LIFT_HOLDING&&endpoint->lift->zero_sent);
       MobileBoard_ObserveInterlocks(HAL_GetTick()+1,true,false);advance(elapsed+1000);
       CHECK(endpoint->lift->state==LIFT_HOLDING); /* no host fake-hold dependency */
+      if(top_case){
+       CHECK(endpoint->lift->height_um==643847&&endpoint->lift->target_um==643847);
+       CHECK(!actuator_mobile_arm(reader.supervisor,1,HAL_GetTick()));
+       int32_t held_arms[12]={0};BimanualFeedbackSnapshot_Seed(held_arms,HAL_GetTick());
+       MobileBoard_RequestStop();advance(elapsed+500000);
+       CHECK(endpoint->lift->state==LIFT_HOLDING&&endpoint->lift->height_um==643847);
+       CHECK(MobileBoard_StopState()->state==SYSTEM_STOP_CONFIRMED);return 0;
+      }
       if(transport_case){
        MobileArmObserver_Resume();advance(elapsed+65000);
        /* Finish the current observation without launching another. */
@@ -395,7 +407,12 @@ int main(int argc,char **argv){
        if(report_case==48)lift_report_position=1;
        if(report_case==49)lift_report_speed=51;
        advance(elapsed+1000);
-       if(report_case>=48){CHECK(endpoint->lift->state==LIFT_FAULT&&MobileBoard_StopActive());return 0;}
+       if(report_case==48){
+        CHECK(endpoint->lift->state==LIFT_HOLDING&&!MobileBoard_StopActive());
+        lift_report_position=3;advance(elapsed+1000);
+        CHECK(endpoint->lift->state==LIFT_FAULT&&MobileBoard_StopActive());return 0;
+       }
+       if(report_case==49){CHECK(endpoint->lift->state==LIFT_FAULT&&MobileBoard_StopActive());return 0;}
        CHECK(endpoint->lift->state==LIFT_HOLDING&&!MobileBoard_StopActive());
        CHECK(endpoint->lift->feedback.velocity_raw==50&&endpoint->lift->feedback.hold_report_remaining_ms);
        if(report_case==47){

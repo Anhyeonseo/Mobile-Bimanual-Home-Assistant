@@ -32,6 +32,12 @@ def load_inputs(report_path, prepared_path):
     ranges = json.loads((ROOT/'config/home_assistant/arm_ranges.development.json').read_text())
     lift = report['initial_model_joint_positions_si']['s2_lift_joint']
     arms = {side: StationaryArm(profile, geometry, ranges, lift, arm.jaw, side) for side, arm in arms.items()}
+    bounds = command_bounds(ranges)
+    program = compile_program(report, profile, installed, arms['left'], bounds=bounds)
+    return program, (report, profile, geometry, arms, boxes)
+
+
+def command_bounds(ranges):
     minimum, maximum = [], []
     for side in ('left', 'right'):
         for name in geo.JOINTS:
@@ -40,27 +46,43 @@ def load_inputs(report_path, prepared_path):
             minimum.append(spec['minimum_urad']/1e6)
             maximum.append(spec['maximum_urad']/1e6)
     # Development command-profile limits, not measured motor performance.
-    bounds = MotionBounds(tuple(minimum), tuple(maximum),
+    return MotionBounds(tuple(minimum), tuple(maximum),
                           (.3,)*5+(.08,)+(.3,)*5+(.08,),
                           (.6,)*5+(.2,)+(.6,)*5+(.2,),
                           (3.,)*5+(1.,)+(3.,)*5+(1.,))
-    program = compile_program(report, profile, installed, arms['left'], bounds=bounds)
-    return program, (report, profile, geometry, arms, boxes)
 
 
-def validate_native(program, inputs, mesh_dir, output):
+def review_top_clearance(surface_audit):
+    """Historical point residuals are context, not extra collision geometry."""
+    scope=('open','pregrasp') if [r['stage'] for r in surface_audit['stages']]==['open','pregrasp'] else ('approach','close','probe','lift')
+    rows=[dict(stage=row['stage'], finger=name, clearance_m=value['clearance_m'])
+          for row in surface_audit['stages'] if row['stage'] in scope
+          for name,value in row['minimum_by_finger'].items()]
+    return dict(historical_vertical_residual_m=.004, hard_limit=False,
+                minimum_clearance_m=min(row['clearance_m'] for row in rows),
+                below_historical_residual=[row for row in rows if row['clearance_m']<=.004],
+                physical_accuracy_verified=False)
+
+
+def validate_native(program, inputs, mesh_dir, output, *, session_factory=None):
     from home_robot_tasks.grasp_preferences import TabletopGraspPolicy, contact_posture
     from moveit_msgs.msg import RobotState
     from home_robot_tasks.carry_model import parameters
     from home_robot_tasks.carry_moveit import MoveItCarryPlanner
-    from home_robot_tasks.carry_planning import GraspRouteCandidate, fixed_contact_review, at_actual_contact
+    from home_robot_tasks.carry_planning import GraspRouteCandidate, fixed_contact_review, at_actual_contact, closing_sweep_candidate
     from home_robot_tasks.carry_posture import ObjectAxisConstraint
     from home_robot_tasks.carry_scene import apply_boxes
     from tools.diagnostics.carry_moveit_session import session
     report, profile, geometry, arms, boxes = inputs
     surface_audit=audit_native_surfaces(program,profile,arms['left'],boxes,
                                       approach_mode=report.get('approach_mode','tool_axis'),
-                                      support_plane=report.get('observed_support_plane_base'))
+                                      support_plane=report.get('observed_support_plane_base'),
+                                      close_at_pregrasp=report.get('close_at_pregrasp',False))
+    from home_robot_tasks.pick_calibration import TOP_BASIS, TOP_BASES, audit_top_program
+    calibration_review=None
+    if report.get('lift_reference_basis') in TOP_BASES:
+        calibration_review=audit_top_program(program, profile,expected_lift_m=report['initial_model_joint_positions_si']['s2_lift_joint'])
+        calibration_review['surface_clearance'] = review_top_clearance(surface_audit)
     posture_spec=report.get('grasp_posture_policy')
     posture_policy=TabletopGraspPolicy(**posture_spec) if posture_spec else None
     joints = report['initial_model_joint_positions_si']
@@ -74,21 +96,26 @@ def validate_native(program, inputs, mesh_dir, output):
         candidate['object_constraint'] = ObjectAxisConstraint(**candidate['object_constraint'])
     candidate = GraspRouteCandidate(**candidate)
     # Audit the rounded wire endpoint too, not only the intended grasp pose.
-    contact_point=next(s for s in program.stages if s.name=='approach').points[-1]
-    control=np.round(contact_point.positions_rad,6)
-    contact_q=np.array([geo.model_from_control(float(control[i]),profile['arms']['left']['alignment'][n])
-                        for i,n in enumerate(geo.JOINTS[:5])])
-    contact_audit=fixed_contact_review(arms['left'],at_actual_contact(candidate,arms['left'].fk(contact_q)[0]))
-    if not contact_audit['accepted']:
-        raise ValueError('wire fixed-finger contact binding failed: '+str(contact_audit))
+    contact_audit=None
+    if not program.inspection_only:
+        contact_point=next(s for s in program.stages if s.name=='approach').points[-1]
+        control=np.round(contact_point.positions_rad,6)
+        contact_q=np.array([geo.model_from_control(float(control[i]),profile['arms']['left']['alignment'][n])
+                            for i,n in enumerate(geo.JOINTS[:5])])
+        contact_audit=fixed_contact_review(arms['left'],at_actual_contact(candidate,arms['left'].fk(contact_q)[0]),
+            support_normal=report['observed_support_plane_base'][:3] if calibration_review else None)
+        if not contact_audit['accepted']:
+            raise ValueError('wire fixed-finger contact binding failed: '+str(contact_audit))
     config = parameters(ROOT, profile, geometry, arms, mesh_dir)
     output.mkdir(parents=True, exist_ok=True)
     results = []
-    with session(config, state, output) as call:
+    with (session_factory or session)(config, state, output) as call:
         apply_boxes(call, boxes)
-        planner = MoveItCarryPlanner(arms['left'], state, call)
+        planner = MoveItCarryPlanner(arms['left'], state, call,allow_target_touch=not program.inspection_only)
         for stage in program.stages:
-            planner.prepare(candidate, stage.attached)
+            checking=(closing_sweep_candidate(candidate) if stage.name=='close' else candidate)
+            attached=stage.attached or (stage.name=='close' and candidate.observed_base_from_object is not None)
+            planner.prepare(checking, attached)
             before = planner.checked_states
             previous = None
             for point in stage.points:
@@ -106,7 +133,7 @@ def validate_native(program, inputs, mesh_dir, output):
                 # Rigid contact blocks the physical finger at observed width.
                 # The smaller command is pressure intent, not a smaller object.
                 jaw = max(model[5], candidate.held_jaw_model_rad) if stage.name in ('close','probe','lift','carry','hold') else model[5]
-                planner.valid(model[:5], candidate, stage.attached, jaw=jaw)
+                planner.valid(model[:5], checking, attached, jaw=jaw)
             results.append(dict(stage=stage.name, checked_states=planner.checked_states-before))
         # Negative control: a new independent obstacle intersecting the held
         # object must still fail. This never changes the recorded scene or
@@ -118,6 +145,10 @@ def validate_native(program, inputs, mesh_dir, output):
         point=(candidate.payload_mesh['vertices'][0] if candidate.payload_mesh else [0.,0.,0.])
         payload_pose=arms['left'].fk(model[:5])[0]@candidate.tcp_from_object
         obstacle_pose=np.eye(4);obstacle_pose[:3,3]=(payload_pose@np.r_[point,1])[:3]
+        if program.inspection_only:
+            arm=arms['left']
+            stock=arm.fk(model[:5])[0]@arm.tcp_from_stock
+            obstacle_pose[:3,3]=(stock@np.r_[arm.jaw.fixed_vertices[0],1])[:3]
         obstacle=CollisionObject(id='validation_independent_obstacle',operation=CollisionObject.ADD)
         obstacle.header.frame_id='base_link'
         obstacle.primitives=[SolidPrimitive(type=SolidPrimitive.BOX,dimensions=[.01]*3)]
@@ -127,20 +158,21 @@ def validate_native(program, inputs, mesh_dir, output):
         if not call('apply_planning_scene',request).success:raise ValueError('negative-control obstacle insertion failed')
         rejected=False
         try:
-            try:planner.valid(model[:5],candidate,True,jaw=jaw)
+            try:planner.valid(model[:5],candidate,attached,jaw=jaw)
             except PlanRejected as exc:
                 rejected=any(obstacle.id in c['bodies'] for c in getattr(exc,'diagnostics',{}).get('contacts',[]))
             if not rejected:raise ValueError('independent obstacle was not rejected')
         finally:
             obstacle.operation=CollisionObject.REMOVE
             if not call('apply_planning_scene',request).success:raise ValueError('negative-control obstacle removal failed')
-        planner.valid(model[:5],candidate,True,jaw=jaw)
+        planner.valid(model[:5],candidate,attached,jaw=jaw)
     return dict(status='PASSED', stages=results, continuous_collision_proof=False,
                 independent_obstacle_rejected=rejected,scene_restored_and_rechecked=True,
-                stock_finger_surfaces=surface_audit,fixed_finger_contact=contact_audit)
+                stock_finger_surfaces=surface_audit,fixed_finger_contact=contact_audit,
+                top_calibration=calibration_review)
 
 
-def audit_native_surfaces(program,profile,arm,boxes, *, approach_mode='tool_axis',support_plane=None):
+def audit_native_surfaces(program,profile,arm,boxes, *, approach_mode='tool_axis',support_plane=None,close_at_pregrasp=False):
     """Reuse the verified STL, checking wire FK and actual commanded jaw sweep.
 
     The plane is extended only for local descent/closure/lift acceptance. A
@@ -165,7 +197,15 @@ def audit_native_surfaces(program,profile,arm,boxes, *, approach_mode='tool_axis
         support=np.eye(4);support[:3,:3]=np.column_stack((x,np.cross(normal,x),normal))
         support[:3,3]=-plane[3]*normal
     results=[]
+    pregrasp_arm=None
     for stage in program.stages:
+        if close_at_pregrasp:
+            if stage.name=='pregrasp':
+                pregrasp_arm=np.round(stage.points[-1].positions_rad[:5],6)
+            elif stage.name in ('approach','close'):
+                if pregrasp_arm is None or any(not np.array_equal(np.round(p.positions_rad[:5],6),pregrasp_arm)
+                                               for p in stage.points):
+                    raise ValueError('wire arm target changed before closing at pregrasp')
         minima={name:dict(clearance_m=float('inf')) for name in ('fixed','moving')}
         poses=[]
         for index,point in enumerate(stage.points):
@@ -179,9 +219,12 @@ def audit_native_surfaces(program,profile,arm,boxes, *, approach_mode='tool_axis
                     minima[name]=dict(record,point_index=index,offset_ms=point.offset_ms)
         row=dict(stage=stage.name,samples=len(stage.points),minimum_by_finger=minima)
         if approach_mode=='vertical':
-            if stage.name=='approach':row['vertical_descent']=validate_vertical_descent(poses)
-            if stage.name in ('approach','close','probe','lift') and min(v['clearance_m'] for v in minima.values())<=0:
-                raise ValueError('stock finger surface crosses the support plane during '+stage.name)
+            if stage.name=='approach' and not close_at_pregrasp:row['vertical_descent']=validate_vertical_descent(poses)
+            if stage.name in ('approach','close','probe','lift'):
+                from home_robot_tasks.pick_table_clearance import TableClearanceRejected
+                for finger, row_minimum in minima.items():
+                    if row_minimum['clearance_m'] <= 0:
+                        raise TableClearanceRejected(stage.name, finger, row_minimum['clearance_m'], 0.)
         results.append(row)
     return dict(basis='verified_official_STL_surface_vertices',base_from_support=support.tolist(),
                 approach_mode=approach_mode,stages=results,physical_accuracy_verified=False,

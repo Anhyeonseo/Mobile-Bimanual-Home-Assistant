@@ -80,7 +80,7 @@ bool actuator_mobile_arm(actuator_mobile_supervisor_t *s,
     uint32_t session, uint32_t now_ms) {
     if (s == NULL) return false;
     actuator_mobile_poll(s, now_ms);
-    if (session == 0u || session <= s->session ||
+    if (session == 0u || session <= s->session || session <= s->last_parked_session ||
         (s->state != ACTUATOR_MOBILE_DISABLED && s->state != ACTUATOR_MOBILE_STOP_LATCHED) ||
         !actuator_mobile_measured_stopped(s, now_ms)) return false;
     s->session = session;

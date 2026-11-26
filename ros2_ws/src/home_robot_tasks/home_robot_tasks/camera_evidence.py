@@ -186,12 +186,16 @@ def load_capture_profile(root, mode='wide'):
     """Select measured live profiles without rewriting historical camera evidence."""
     import json
     from pathlib import Path
-    if mode not in ('wide', 'legacy'):
+    if mode not in ('wide', 'legacy', 'near'):
         raise ValueError('unknown camera mode')
     folder=Path(root)/'config/home_assistant'
     suffix='.wide' if mode=='wide' else ''
     profile=json.loads((folder/('s2_coordinates'+suffix+'.development.json')).read_text())
     reference=json.loads((folder/('camera_device'+suffix+'.observed.json')).read_text())
+    if mode=='near':
+        near=json.loads((folder/'camera_device.near.observed.json').read_text())
+        profile=near_depth_profile(profile,reference,near)
+        reference=near
     if profile['camera_device']!=reference['camera_device']:
         raise ValueError('live camera profile and evidence mismatch')
     return profile, reference

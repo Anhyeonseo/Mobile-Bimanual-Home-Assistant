@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "record_kind": "base_lateral_alignment_demo",
+  "frame": "base_link (x forward, y left)",
+  "left_target_y_m": 0.148,
+  "left_target_basis": "2026-11-18 grasp-execution-20261118-40 success, eraser centre (375.0, 148.2) mm, extended posture; single success, not a validated region",
+  "tolerance_m": 0.03,
+  "maximum_shift_m": 0.30,
+  "wheel_order": [7, 8, 9],
+  "wheel_raw": {
+    "left": [-50, -50, 100, 0],
+    "right": [50, 50, -100, 0]
+  },
+  "wheel_raw_basis": "s4_base.command-candidate.json pattern L [-100,-100,200] scaled to s4_unified.policy.json maximum_wheel_speed_raw 100; fourth value is the unused lift channel as in the commissioning base pulse",
+  "speed_m_per_s": {
+    "left": 0.0067,
+    "right": 0.0072
+  },
+  "speed_basis": "half of the raw-200 lidar median strafe speeds in s4_base.command-candidate.json (L 0.01347, R 0.01445 m/s); linear scaling and the raw-100 deadband are unmeasured. Replace with the field value from two top-inspect captures before and after a timed move.",
+  "maximum_duration_s": 60,
+  "settle_zero_feedback_ms": 400,
+  "motion_authorized": true,
+  "limitations": [
+    "Open-loop timed strafe; the next top-inspect is the measurement of the actual shift.",
+    "Ends with whole-system STOP; the unified firmware requires a fresh controller reset before arm use."
+  ]
+}

@@ -229,14 +229,14 @@ exec /home/hyper/robot/shared/venvs/room-scan-bag/bin/python tools/run/prepare_u
     firmware_sources={str(p.relative_to(ROOT)):checksum(p.read_bytes())
         for base in ('firmware/stm32_actuator','firmware/stm32_g474_single_arm')
         for p in (ROOT/base).rglob('*') if p.is_file() and p.suffix in ('.c','.h','.txt','.ld','.cmake')}
-    files['build.json']=(json.dumps(dict(firmware='0x0002492D',source_sha256=firmware_sources,
+    files['build.json']=(json.dumps(dict(firmware='0x00024930',source_sha256=firmware_sources,
         profile_sha256=manifest['profile_sha256'],physical_tested=False,automatic_setup=False),indent=2)+'\n').encode()
     name='s4-unified-'+checksum(json.dumps({n:checksum(b) for n,b in sorted(files.items())},sort_keys=True).encode())[:12]
     remote='/home/hyper/robot/releases/'+name
     logs='/home/hyper/robot/shared/diagnostics/s4-unified/'+name+'/install'
     for name_in in ('install.sh','control.sh','program.cfg','verify-backup.py'):
         files[name_in]=files[name_in].replace(b'@RELEASE@',remote.encode()).replace(b'@DIAGNOSTICS@',logs.encode())
-    files['release.json']=(json.dumps(dict(release=name,firmware='0x0002492D',hardware_authorized=False,
+    files['release.json']=(json.dumps(dict(release=name,firmware='0x00024930',hardware_authorized=False,
         physical_test_ready=False,automatic_setup=False,boot_motor_writes=0,
         files_sha256={n:checksum(b) for n,b in sorted(files.items())}),indent=2)+'\n').encode()
     files['SHA256SUMS']=''.join(checksum(b)+'  '+n+'\n' for n,b in sorted(files.items())).encode()

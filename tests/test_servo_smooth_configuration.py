@@ -62,11 +62,12 @@ int main(int argc,char **argv){
  if(scenario==8){printf("%08X\n",Host_CalibrationHash());return 0;}
  memset(registers,0,sizeof(registers));registers[41]=88;registers[44]=77;registers[45]=1;
  registers[42]=123;registers[43]=4;registers[40]=scenario==3?1:0;
+ if(scenario==9){uint16_t pos=0;assert(Servo_ConfigureForTrajectory(2,900,16,32,&pos)==HAL_ERROR);assert(!pos&&!goal_writes);return 0;}
  if(scenario>=5){
    unsigned fault=scenario-5;scenario=fault;uint16_t initial=0;
-   HAL_StatusTypeDef result=Servo_ConfigureForTrajectory(2,900,16,32,&initial);
+   HAL_StatusTypeDef result=Servo_ConfigureForTrajectory(2,900,64,64,&initial);
    assert(result==(fault?HAL_ERROR:HAL_OK));assert(initial==2345);
-   if(!fault){assert(registers[41]==0&&registers[44]==0&&registers[45]==0);assert(RightServo_ReadU16Le(registers+46)==800);}
+   if(!fault){assert(registers[21]==48&&registers[22]==64);assert(registers[41]==0&&registers[44]==0&&registers[45]==0);assert(RightServo_ReadU16Le(registers+46)==800);}
  }else{
    RightServoConfigureSnapshot s=RightServoBus_ConfigureAtPresentPositionOnce(2,16,32,800,900);
    assert((s.status==RIGHT_SERVO_CONFIGURE_OK)==(scenario==0));
@@ -83,7 +84,7 @@ int main(int argc,char **argv){
         str(CORE/'src/crc32c.c'),'-o',str(out)],check=True)
     return out
 
-@pytest.mark.parametrize('scenario',range(8))
+@pytest.mark.parametrize('scenario',[*range(8),9])
 def test_register_setup_and_silent_write_readback_failures(binary,scenario):
     subprocess.run([str(binary),str(scenario)],check=True)
 

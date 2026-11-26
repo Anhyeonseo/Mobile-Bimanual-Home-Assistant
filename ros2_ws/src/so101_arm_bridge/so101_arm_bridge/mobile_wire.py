@@ -32,7 +32,7 @@ class MobileCommand:
             if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
                 raise ValueError("mobile header fields must be uint32 integers")
         if (
-            self.opcode not in (1, 2, 3)
+            self.opcode not in (1, 2, 3, 7)
             or not self.session
             or (self.opcode == 1 and self.sequence != 0)
         ):
@@ -134,7 +134,7 @@ class MobileStatus:
         ) = values
         if not boot or state > 3 or reason > 4 or flags & ~63:
             raise ValueError("unsupported status fields")
-        if kind not in tuple(range(1, 7)) + tuple(v | 0x80 for v in range(1, 7)):
+        if kind not in tuple(range(1, 8)) + tuple(v | 0x80 for v in range(1, 8)):
             raise ValueError("unsupported reply kind")
         return cls(
             kind,

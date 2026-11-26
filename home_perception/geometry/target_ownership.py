@@ -1,8 +1,8 @@
 """Associate observed RGB-D material with a target without filling unseen space.
 
 SAM supplies seeds, not a hard 3-D silhouette. Only adjacent, measured surfaces
-can extend those seeds across a bounded image rim. A depth discontinuity, table
-return or missing pixel breaks connectivity. Unresolved returns remain occupied.
+can extend those seeds across a bounded image rim. Measured gaps block joins;
+missing pixels never supply material. Unresolved returns remain occupied.
 The limits below are development association budgets, not calibrated sensor errors.
 """
 from dataclasses import dataclass
@@ -45,7 +45,10 @@ def associate(depth, intr, mask, optical, heights, clean_target, plane_rms_m, *,
     spacing=optical[:,2]/focal
     radius=np.clip(2*plane_rms_m+2*spacing,.003,.006)
     image_distance=distance_transform_edt(~mask)[valid]
-    rim=(image_distance<=6)&(image_distance*spacing<=radius)
+    # The mask represents pixel areas. The inscribed half-pixel disk is a
+    # conservative footprint even for a diagonally separated pixel center.
+    distance_to_footprint=np.maximum(image_distance-.5,0.)
+    rim=(image_distance<=6)&(distance_to_footprint*spacing<=radius)
     top=float(np.percentile(heights[seeds],99))
     eligible=(mask[valid]|rim)&(heights>.003)&(heights<=top+np.minimum(.003,2*plane_rms_m+.001))
     eligible|=seeds
@@ -56,10 +59,20 @@ def associate(depth, intr, mask, optical, heights, clean_target, plane_rms_m, *,
     pixel_index.flat[valid_index[rows]]=np.arange(len(rows))
     vertices=optical[rows]
     edges=[]
-    for a,b in ((pixel_index[:-1,:],pixel_index[1:,:]),(pixel_index[:,:-1],pixel_index[:,1:])):
-        present=(a>=0)&(b>=0);left,right=a[present],b[present]
+    # RGB alignment can leave same-surface returns connected only diagonally.
+    # Scale image spacing for diagonal steps, retaining the metric cap. Do not cross a measured
+    # table/background pixel or another protected instance at the corner.
+    corner_ok=((~valid)|(pixel_index>=0))&~protected
+    pairs=((pixel_index[:-1,:],pixel_index[1:,:],None,1.),
+           (pixel_index[:,:-1],pixel_index[:,1:],None,1.),
+           (pixel_index[:-1,:-1],pixel_index[1:,1:],corner_ok[:-1,1:]&corner_ok[1:,:-1],np.sqrt(2)),
+           (pixel_index[:-1,1:],pixel_index[1:,:-1],corner_ok[:-1,:-1]&corner_ok[1:,1:],np.sqrt(2)))
+    for a,b,corners,step_pixels in pairs:
+        present=(a>=0)&(b>=0)
+        if corners is not None:present&=corners
+        left,right=a[present],b[present]
         local_spacing=np.minimum(vertices[left,2],vertices[right,2])/focal
-        limit=np.clip(2*plane_rms_m+2*local_spacing,.0025,.006)
+        limit=np.clip(2*plane_rms_m+2*step_pixels*local_spacing,.0025,.006)
         connected=np.linalg.norm(vertices[left]-vertices[right],axis=1)<=limit
         edges.append((left[connected],right[connected]))
     source=np.concatenate([e[0] for e in edges]);dest=np.concatenate([e[1] for e in edges])
@@ -76,7 +89,36 @@ def associate(depth, intr, mask, optical, heights, clean_target, plane_rms_m, *,
         seed_points=int(seeds.sum()),associated_rim_points=int((target&~mask).sum()),
         unresolved_rim_points=int(uncertain.sum()),maximum_pixels=6,
         radius_m_range=[float(radius.min()),float(radius.max())],
-        radius_m_cap=.006,seed_distance_m=.005,adjacency=4,
+        distance_basis='inscribed_mask_pixel_footprint',radius_m_cap=.006,seed_distance_m=.005,adjacency=8,diagonal_measured_gap_guard=True,
         protected_instance_pixels=int(protected.sum()),
         missing_depth_filled=False,unresolved_policy='retain_as_occupied',
         sensor_accuracy_calibrated=False))
+
+
+def measured_patch_corners(depth, owned, candidates, intr, plane_rms_m):
+    """Finish one measured 2x2 face without growing or filling the silhouette.
+
+    Three already associated corners predict the fourth on a local plane.
+    Inverse optical depth is affine in image coordinates on a plane. Test the
+    prediction at the sampling scale and independently bound both edge steps.
+    Decisions use the original ownership for the whole pass.
+    """
+    matched = np.zeros_like(owned)
+    y, x = np.nonzero(candidates)
+    focal = min(intr['fx'], intr['fy'])
+    for dy, dx in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
+        inside = (y+dy >= 0) & (y+dy < depth.shape[0]) & (x+dx >= 0) & (x+dx < depth.shape[1])
+        v, u = y[inside], x[inside]
+        face = owned[v+dy, u] & owned[v, u+dx] & owned[v+dy, u+dx]
+        v, u = v[face], u[face]
+        z = depth[v, u]
+        a, b, c = depth[v+dy, u], depth[v, u+dx], depth[v+dy, u+dx]
+        pitch = z/focal
+        limit = np.clip(2*plane_rms_m+2*pitch, .0025, .006)
+        # A coherent plane alone could span a step. Require short measured
+        # depth steps on every edge, including both sides of the diagonal.
+        step = np.maximum.reduce((abs(z-a), abs(z-b), abs(c-a), abs(c-b)))
+        residual = abs(1/z - (1/a + 1/b - 1/c))*z*z
+        continuous = (step <= limit) & (residual <= pitch)
+        matched[v[continuous], u[continuous]] = True
+    return matched

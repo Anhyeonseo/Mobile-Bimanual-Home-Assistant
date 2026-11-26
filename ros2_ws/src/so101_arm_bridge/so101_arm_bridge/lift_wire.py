@@ -23,7 +23,7 @@ class LiftCommand:
     def encode(self):
         if (
             type(self.kind) is not int
-            or not 1 <= self.kind <= 7
+            or not 1 <= self.kind <= 8
             or not _u32(self.session)
             or not _u32(self.boot_id)
         ):
@@ -33,7 +33,8 @@ class LiftCommand:
         if (
             type(self.target_um) is not int
             or not -(2**31) <= self.target_um < 2**31
-            or (self.kind != 2 and self.target_um)
+            or (self.kind not in (2, 8) and self.target_um)
+            or (self.kind == 8 and not 0 < self.target_um <= 10000000)
         ):
             raise ValueError("invalid lift height")
         if self.kind == 4 and self.valid_until_ms:
@@ -101,7 +102,7 @@ class LiftStatus:
         ):
             raise ValueError("invalid lift status")
         kind = data[3]
-        if not 1 <= (kind & 127) <= 7 or data[24] > 6 or data[25] > 5 or data[26] & ~31:
+        if not 1 <= (kind & 127) <= 8 or data[24] > 6 or data[25] > 5 or data[26] & ~31:
             raise ValueError("invalid lift state")
         value = cls(
             kind,
@@ -176,6 +177,15 @@ class LiftClient:
         if operator_confirmed is not True:
             raise ValueError('current physical bottom confirmation required')
         result = self._request(7, session)
+        self.session = session
+        self.last_session = session
+        return result
+
+    def reference_top(self, session, height_um, *, operator_confirmed=False):
+        """Register the configured physical top; never infer it from encoder modulo."""
+        if operator_confirmed is not True:
+            raise ValueError("current physical top confirmation required")
+        result = self._request(8, session, height_um)
         self.session = session
         self.last_session = session
         return result

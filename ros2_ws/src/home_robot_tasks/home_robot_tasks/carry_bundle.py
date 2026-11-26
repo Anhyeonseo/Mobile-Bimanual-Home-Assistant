@@ -50,7 +50,9 @@ def load_bundle(folder,*,for_execution=False):
     data['bounds']=MotionBounds(**{k:tuple(v) for k,v in data['bounds'].items()})
     data['stages']=tuple(CarryStage(s['name'],tuple(TimedJointPoint(p['offset_ms'],tuple(p['positions_rad'])) for p in s['points']),s['timing'],s['attached']) for s in data['stages'])
     program=CarryProgram(**data)
-    if [s.name for s in program.stages]!=['open','pregrasp','approach','close','probe','lift','carry','hold']:
+    if program.inspection_only != (model.get('inspection_only') is True):
+        raise ValueError('inspection stage binding changed')
+    if not program.inspection_only and [s.name for s in program.stages]!=['open','pregrasp','approach','close','probe','lift','carry','hold']:
         raise ValueError('stage order changed')
     for s in program.stages:
         q=np.asarray([p.positions_rad for p in s.points]);ticks=np.asarray([p.offset_ms for p in s.points])
@@ -63,7 +65,10 @@ def load_bundle(folder,*,for_execution=False):
     if for_execution and (program.hypothetical_lift or proof['native_geometry'].get('status')!='PASSED'
                           or proof.get('simulation_passed') is not True):
         raise ValueError('actual-height native-checked plan required; preview cannot execute')
-    if for_execution and proof['native_geometry'].get('fixed_finger_contact',{}).get('accepted') is not True:
+    if program.inspection_only and for_execution:
+        from .pick_table_clearance import require_table_clearance
+        require_table_clearance(proof,pregrasp_check=True)
+    elif for_execution and proof['native_geometry'].get('fixed_finger_contact',{}).get('accepted') is not True:
         raise ValueError('observed fixed-finger contact proof required; rebuild old centre-only bundle')
     if program.calibration_id!=model['profile']['calibration_id']:raise ValueError('model profile changed')
     validate_program_winding(program.stages,model['profile'])
@@ -77,3 +82,39 @@ def load_bundle(folder,*,for_execution=False):
     depth=np.asarray(Image.open(folder/'depth_aligned.png'),dtype=np.uint16).astype(float)*md['depth_scale_m']
     if mask.shape!=depth.shape or sweep.shape!=depth.shape or color.shape[:2]!=depth.shape or not mask.any():raise ValueError('bundle image alignment mismatch')
     return program,model,proof,(color,depth),mask,sweep,md
+
+
+def validate_request_binding(checked, *, prepared, snapshot, profile, session_id, prompt, candidate_source):
+    """File/provenance validation in the compute worker, never the serial service loop."""
+    program=checked[0]
+    prepared=json.loads(Path(prepared).read_text())
+    capture=json.loads((Path(snapshot)/'robot_capture.json').read_text())
+    capture_session=capture['session_id']
+    record=prepared.get('start_revalidation',{})
+    if record.get('kind')=='resumed_bottom_observation_measured_top':
+        from .pick_lift_transition import validate_revalidation
+        arrival=validate_revalidation(record,profile,prepared['capture_id'],prepared['source_sha256'])
+        capture_session=arrival['session_id']
+    if (program.capture_id != Path(snapshot).name
+            or program.source_sha256 != prepared['source_sha256']
+            or capture_session != session_id):
+        raise ValueError('current request/capture/controller binding mismatch')
+    if not prompt or checked[1].get('target_label') != prompt or prepared.get('label') != prompt:
+        raise ValueError('requested target differs from planned target')
+    if candidate_source in ('graspnet', 'graspnet-so101'):
+        from home_perception.grasp.graspnet_assets import BASELINE_REVISION, CHECKPOINT_SHA256
+        group = prepared.get('group', {})
+        if (prepared.get('candidate_source') != candidate_source
+                or (candidate_source == 'graspnet' and program.candidate_source != 'graspnet')
+                or group.get('baseline_revision') != BASELINE_REVISION
+                or group.get('checkpoint_sha256') != CHECKPOINT_SHA256):
+            raise ValueError('실행 경로의 GraspNet 후보 또는 모델 버전을 확인할 수 없습니다.')
+        if candidate_source == 'graspnet-so101':
+            import re
+            match = re.fullmatch(re.escape(program.capture_id) + r':(0|[1-9][0-9]*)(?::reversed)?', program.candidate_id)
+            rows = group['refined_grasps']
+            if (not match or int(match[1]) >= len(rows)
+                    or rows[int(match[1])]['source'] != program.candidate_source
+                    or program.candidate_source not in ('graspnet', 'so101-geometric')
+                    or (program.candidate_source == 'so101-geometric' and group.get('supplemental_revision') not in ('so101-geometric-v1', 'so101-geometric-v2'))):
+                raise ValueError('실행 후보와 촬영 당시 후보 출처가 일치하지 않습니다.')

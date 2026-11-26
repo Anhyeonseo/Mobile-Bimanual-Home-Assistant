@@ -6,6 +6,7 @@ config/grasp_ik.virtual.json: TCP +Z approaches, -X closes. No device imports.
 from dataclasses import dataclass
 import math
 import numpy as np
+from .pick_calibration import planning_lift_limit
 from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation
 from scipy.spatial import ConvexHull
@@ -48,7 +49,7 @@ class StationaryArm:
         dev.validate(profile,geometry)
         if profile.get('arm_coordinate_convention') != arm_coords.CONVENTION:
             raise ValueError('stationary planning requires official SO-ARM101 model coordinates')
-        if not 0 <= lift_m <= profile['lift']['travel_m']:
+        if not 0 <= lift_m <= planning_lift_limit(profile):
             raise ValueError('fixed lift outside model')
         arm=profile['arms'][side]
         self.profile=profile;self.lift_m=lift_m
@@ -70,7 +71,11 @@ class StationaryArm:
             self.raw_windows[name]=single_turn_window(r)
             limits=sorted(geo.model_angle_from_raw(raw, a, name)
                           for raw in self.raw_windows[name])
-            bounds.append([max(float(j['limit']['lower']),limits[0]),min(float(j['limit']['upper']),limits[1])])
+            # Directly measured installation ranges already include calibrated
+            # zero offsets. CAD defaults must not reject an attainable start.
+            # Copied/unmeasured ranges retain the nominal intersection.
+            bounds.append(limits if r.get('measured_on_this_arm') is True else
+                          [max(float(j['limit']['lower']),limits[0]),min(float(j['limit']['upper']),limits[1])])
             self.joints.append((geo.origin(j),np.array([float(x) for x in j['axis']['xyz'].split()])))
         self.tcp=geo.origin(spec['gripper_frame_joint'])@geo.rigid(arm['reference_from_tcp'])
         self.tcp_from_stock = np.linalg.inv(geo.rigid(arm['reference_from_tcp']))
@@ -287,7 +292,7 @@ def _bound_candidate(review, group, candidate, arm, *, target_vertices_base=None
             type(review['observation_index']) is not int or review['observation_index']<0 or
             group.get('coordinate_frame')!=arm.profile['source_frame']):
         raise Rejected('CANDIDATE_FRAME_MISMATCH')
-    if (candidate.get('source') in ('rule', 'graspnet', 'surface_variant')
+    if (candidate.get('source') in ('rule', 'graspnet', 'surface_variant', 'so101-geometric')
             and group.get('tcp_convention') != 'graspnet_origin_plus_depth_to_pad_tip'):
         raise Rejected('UNKNOWN_GRASP_TCP_CONVENTION')
     width=geo.number(candidate['width_m'],'opening',.5)

@@ -8,7 +8,7 @@ from scipy.spatial import ConvexHull, QhullError
 
 from .mask_cloud import MIN_POINTS, SUPPORT_MARGIN_M
 from .plane import backproject
-from .target_ownership import associate
+from .target_ownership import associate, measured_patch_corners
 from .obstacle_envelopes import separate_target_padding
 
 CELL_M = .005
@@ -270,22 +270,46 @@ def build_pick_scene(depth, intr, plane, mask, target_cloud, *, protected=None):
     footprint = np.unique(np.vstack((cells, target_cells)), axis=0)
     support_boxes = _column_boxes(footprint, np.full(len(footprint), SUPPORT_BOTTOM_M), np.zeros(len(footprint)))
 
-    # Keep all measured non-target points, including unnamed objects and outliers inside the SAM mask.
-    clutter = points[~(support | target)]
-    # A conflicting scene is an observation/model problem, not proof that the
-    # arm cannot reach. Preserve the returns and identify a bounded reobserve
-    # region before spending time on IK or generating hardware commands.
     all_local=points@rotation
     in_payload=(np.all(all_local[:,:2]@footprint_equations[:,:2].T+footprint_equations[:,2]<=1e-10,axis=1)
                 &(points[:,2]>=.000001)&(points[:,2]<=payload_high[2]))
     conflicting=in_payload&~(support|target)
+    if conflicting.any():
+        # Only finish measured faces at the exterior silhouette. An internal
+        # hole or a separate detected instance must remain in the world.
+        rows,cols=np.nonzero(valid)
+        indices=np.flatnonzero(conflicting & ownership.uncertain_boundary[valid] & ~protected[valid])
+        my,mx=np.nonzero(mask)
+        rim=np.zeros_like(mask)
+        if indices.size and len(mx)>=3:
+            try:
+                image_planes=ConvexHull(np.column_stack((mx,my))).equations
+            except QhullError:
+                pass  # A line of seeds cannot establish an exterior silhouette.
+            else:
+                xy=np.column_stack((cols[indices],rows[indices]))
+                exterior=np.any(xy@image_planes[:,:2].T+image_planes[:,2]>1e-10,axis=1)
+                rim[rows[indices[exterior]],cols[indices[exterior]]]=True
+        patch=measured_patch_corners(depth,ownership.target,rim,intr,plane.rms_m)
+        target_pixels |= patch
+        target=target_pixels[valid]
+        boundary_count+=int(patch.sum())
+        ownership.evidence.update(measured_patch_corners=int(patch.sum()),total_target_points=int(target.sum()),
+            unresolved_rim_points=int((ownership.uncertain_boundary&~target_pixels).sum()))
+        conflicting &= ~target
     assessment=dict(status='CONSISTENT',world_returns_inside_payload=int(conflicting.sum()))
     if conflicting.any():
-        vv,uu=np.nonzero(valid);x=uu[conflicting];y=vv[conflicting]
-        assessment.update(status='TARGET_WORLD_OWNERSHIP_UNRESOLVED',
-            next_action='recapture_target_boundary',retryable=True,
-            roi_xyxy=[max(0,int(x.min())-8),max(0,int(y.min())-8),
-                      min(depth.shape[1],int(x.max())+9),min(depth.shape[0],int(y.max())+9)])
+        x=cols[conflicting];y=rows[conflicting]
+        if np.all(rim[y,x]):
+            # Keep the raw returns in BOTH world obstacle representations.
+            # The candidate and its attached load still need a clear route.
+            assessment.update(status='CHECK_RETAINED_BOUNDARY_IN_PLANNER')
+        else:
+            assessment.update(status='TARGET_WORLD_OWNERSHIP_UNRESOLVED',
+                next_action='recapture_target_boundary',retryable=True,
+                roi_xyxy=[max(0,int(x.min())-8),max(0,int(y.min())-8),
+                          min(depth.shape[1],int(x.max())+9),min(depth.shape[0],int(y.max())+9)])
+    clutter = points[~(support | target)]
     grid = np.floor(clutter / CELL_M).astype(int)
     above = grid[clutter[:, 2] > 0]
     columns, indices = np.unique(above[:, :2], axis=0, return_inverse=True)

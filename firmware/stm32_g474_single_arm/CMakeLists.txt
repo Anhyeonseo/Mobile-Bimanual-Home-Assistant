@@ -491,7 +491,7 @@ if(BIMANUAL_DMA_DISPATCH_CANDIDATE OR
                 else()
                     if(S3_STATIONARY_PICK_CANDIDATE)
                         if(S4_UNIFIED_CANDIDATE)
-                            target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x0002492DUL HOST_S3_STATIONARY_PICK=1U)
+                            target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024930UL HOST_S3_STATIONARY_PICK=1U)
                         else()
                             target_compile_definitions(${TARGET_NAME} PRIVATE HOST_BINARY_FIRMWARE_VERSION=0x00024911UL HOST_S3_STATIONARY_PICK=1U)
                         endif()

@@ -69,3 +69,7 @@ static bool Host_InventoryPermitted(void){(void)host_binary_mode;return MobileBo
 @pytest.mark.parametrize('scenario',list(range(20,50))+list(range(50,70))+list(range(70,90)))
 def test_explicit_commissioning_without_torque_or_motion(commissioning_board,scenario):
     subprocess.run([str(commissioning_board),str(scenario)],check=True,capture_output=True,text=True)
+
+
+def test_registered_top_preserves_whole_stop_and_blocks_high_lift_driving(commissioning_board):
+    subprocess.run([str(commissioning_board),'90'],check=True,capture_output=True,text=True)

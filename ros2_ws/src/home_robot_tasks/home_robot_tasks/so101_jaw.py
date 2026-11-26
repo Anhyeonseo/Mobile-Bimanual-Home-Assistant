@@ -190,7 +190,7 @@ class StockJaw:
             raise ValueError('SO101_JAW_SECTION_LIMIT')
         return self.fixed_face_m + width/2
 
-    def contact_section(self, base_from_stock_tcp, vertices_base):
+    def contact_section(self, base_from_stock_tcp, vertices_base, *, support_normal=None):
         """Intersect the actual signed closing line with observed convex geometry.
 
         A stored width or object centroid is not a fixed-finger contact. The
@@ -215,7 +215,23 @@ class StockJaw:
         high=float(np.min(-offset[slope > 1e-10]/slope[slope > 1e-10]))
         if high-low<=1e-6:raise ValueError('closing line misses observed object')
         axis=-pose[:3,0];shift=low-self.fixed_face_m
-        return dict(basis='observed_convex_section_along_signed_stock_closing_line',
+        sides = {}
+        if support_normal is not None:
+            up = np.asarray(support_normal, dtype=float)
+            if up.shape != (3,) or not np.isfinite(up).all() or np.linalg.norm(up) < 1e-8:
+                raise ValueError('finite support normal required')
+            up = up / np.linalg.norm(up)
+            tangent = axis - up * (up @ axis)
+            if np.linalg.norm(tangent) < 1e-8:
+                raise ValueError('closing axis perpendicular to support')
+            tangent /= np.linalg.norm(tangent)
+            normals = hull.equations[:, :3] @ pose[:3, :3].T
+            # At an edge all incident limiting faces must offer opposed lateral contact.
+            for name, q, entering in [('fixed', low, slope < -1e-10), ('moving', high, slope > 1e-10)]:
+                hit = normals[entering & (abs(offset + slope*q) <= 1e-8)]
+                sides[name+'_on_sidewall'] = bool(len(hit) and np.all(abs(hit @ tangent) > abs(hit @ up)))
+            sides['moving_minus_fixed_height_m'] = float((high-low) * (up @ axis))
+        return dict(**sides,basis='observed_convex_section_along_signed_stock_closing_line',
             low_m=low,high_m=high,width_m=high-low,
             fixed_intrusion_m=self.fixed_face_m-low,
             fixed_contact_base_m=(pose[:3,3]+axis*low).tolist(),

@@ -184,7 +184,7 @@ def test_lift_position_evidence_retains_hold_only_with_advancing_samples(lift,ba
 
 
 @pytest.mark.parametrize('changes', [
-    {'pos':3833}, {'speed':51}, {'speed':-51}, {'drive':0},
+    {'pos':3835}, {'speed':51}, {'speed':-51}, {'drive':0},
     {'healthy':0}, {'moving':2}, {'maintaining':0}, {'stamp':99}, {'now':400},
 ])
 def test_lift_report_rejects_position_power_time_or_scope_changes(lift,changes):
@@ -317,7 +317,7 @@ def test_sustained_lift_report_requires_independent_position_drive_and_freshness
     if failure=='stale':
         assert lib.lift_test_poll_state(1542)==6
     elif failure=='position':
-        lib.lift_test_reported_sample(1522,1001,50,1)
+        lib.lift_test_reported_sample(1522,1003,50,1)
         assert lib.lift_test_poll_state(1522)==6
     elif failure=='speed':
         lib.lift_test_reported_sample(1522,1000,51,1)
@@ -422,3 +422,13 @@ def test_keepalive_finishing_hold_race_uses_actual_c_terminal_reply(lift,corrupt
         result=client.keepalive()
         assert result.holding(100) and result.kind==133 and client.session is None
     assert calls==[7,5]  # no renewal retry or new movement operation
+
+
+def test_established_hold_tolerates_bounded_jitter_but_never_walks_its_anchor(lift):
+    lib, _ = lift
+    for t in (0, 50, 100):
+        lib.lift_test_report(t,t,3832,0,1,1,0,1)
+    for i, delta in enumerate((1,-1,2,-2,0,1,2), start=1):
+        t = 100 + i*60
+        assert lib.lift_test_report(t,t,3832+delta,50,1,1,1,1) == 3
+    assert lib.lift_test_report(580,580,3835,50,1,1,1,1) == 0

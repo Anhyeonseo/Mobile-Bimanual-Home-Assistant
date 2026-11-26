@@ -9,7 +9,7 @@
 static void w32(uint8_t *p,uint32_t v){p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);p[2]=(uint8_t)(v>>16);p[3]=(uint8_t)(v>>24);}
 static int lift_test(void){
  actuator_lift_t l;
- actuator_lift_config_t c={409600,500000,100,100,20,2,10000,500,1000,100,1000,20,200,1};
+ actuator_lift_config_t c={409600,500000,100,100,20,2,10000,500,1000,100,1000,20,200,1,0};
  actuator_lift_feedback_t f={0,4090,0,0,true,false,false,false,0};
  CHECK(actuator_lift_init(&l,&c));CHECK(!actuator_lift_home(&l,0));
  CHECK(actuator_lift_observe(&l,&f,0));CHECK(!actuator_lift_move(&l,10000,0));

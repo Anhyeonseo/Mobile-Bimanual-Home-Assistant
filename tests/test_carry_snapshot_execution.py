@@ -258,3 +258,17 @@ def test_constant_hold_admission_is_not_available_for_moving_visual_tracking():
     with pytest.raises(ValueError,match='stationary snapshot'):
         LiveCarryInputs(program(),lambda q:np.eye(4),(color,depth),mask,intr,np.eye(4),
                         None,stationary_hold_admission=True)
+
+
+def test_fixed_bottom_skips_visual_comparison_but_keeps_fresh_mechanics():
+    inputs,now,record,images=admitted_inputs()
+    inputs.fixed_bottom_observation=True;inputs.validation=None
+    inputs.scene.compare=lambda *a,**k: (_ for _ in ()).throw(AssertionError('no visual comparison'))
+    color,depth,md=images
+    inputs.add_frame(record,(np.zeros_like(color),np.zeros_like(depth),md))
+    assert inputs.failure is None
+    assert inputs.validation['unchanged'] is None
+    assert inputs.validation['live_target_revalidated'] is False
+    inputs.admit_snapshot()
+    now[0]+=.3
+    with pytest.raises(ValueError):inputs.feedback()

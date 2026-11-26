@@ -74,7 +74,7 @@ class MobileRoutePlanner:
                         candidates.append(candidate);previews[candidate.candidate_id]=preview
                     except (ValueError,PlanRejected):continue
             plan=plan_pick_carry(arm,data.planner,start,candidates,scene_id=scene.stamp.capture_id,
-                                 grasp_policy=TabletopGraspPolicy())
+                                 grasp_policy=TabletopGraspPolicy(),stop_after_first=True)
             if plan.status!='OFFLINE_ROUTE_FOUND':raise PlanRejected('no complete fresh pick/carry route: '+str(plan.failures[-3:]))
             preview=previews[plan.candidate_id]
             gap=preview.get('measured_gap_preview',preview.get('nominal_gap_preview'))

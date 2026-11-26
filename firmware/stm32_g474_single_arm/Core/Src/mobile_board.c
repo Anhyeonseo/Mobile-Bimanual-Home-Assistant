@@ -62,7 +62,19 @@ static UART_HandleTypeDef *left_uart,*right_uart;
 static uint32_t first_stop_diagnostics[24];
 #if HOST_S4_UNIFIED_CANDIDATE
 static actuator_mobile_stationary_window_t wheel_stop_windows[3],wheel_idle_windows[3];
-static uint32_t runtime_started_ms;
+static uint32_t runtime_started_ms, park_zero_ms;
+static bool park_tracking, park_wheels_still;
+static actuator_mobile_stationary_window_t park_windows[3];
+
+static bool park_proven(uint32_t now){
+    return !stop_requested && park_tracking && park_wheels_still &&
+        MobileServoOutput_CommandAllowed(&supervisor) && MobileArmObserver_OwnsFeedback() &&
+        host_evidence_bound && actuator_robot_evidence_fresh(&host_evidence,now,profile.stop.feedback_max_age_ms) &&
+        arms_safe && lift_hold && lift.homed && lift.state==LIFT_HOLDING && !lift_endpoint.active &&
+        lift.zero_sent && !lift.command_raw && lift.have_sample && now-lift.observed_ms<profile.lift.feedback_timeout_ms &&
+        actuator_mobile_wheels_stop_observe(park_windows,MobileServoFeedback_State(),park_zero_ms,now);
+}
+
 #endif
 static void record_board_stop(uint32_t source){
     if(first_stop_diagnostics[0])return;
@@ -120,6 +132,9 @@ bool MobileBoard_Prepare(UART_HandleTypeDef *uart,UART_HandleTypeDef *right,cons
        !actuator_lift_endpoint_init(&lift_endpoint,&lift,boot,200)||
        !actuator_mobile_endpoint_init(&mobile_endpoint,&supervisor,boot)||
        !BinaryControl_AttachMobileEndpoint(&mobile_endpoint))return false;
+#if HOST_S4_UNIFIED_CANDIDATE
+    mobile_endpoint.park_proven=park_proven;
+#endif
     profile=*p;left_uart=uart;right_uart=right;prepared=true;return true;
 #endif
 }
@@ -242,7 +257,7 @@ bool MobileBoard_ArmsPrepared(void){
 }
 bool MobileBoard_PrepareArmMotion(int32_t anchor[12]){
     if(!prepared)return true;
-    if(!runtime_started||stop_requested||supervisor.transport_only||!anchor||!MobileArmObserver_Suspend())return false;
+    if(!runtime_started||stop_requested||supervisor.transport_only||supervisor.state!=ACTUATOR_MOBILE_DISABLED||supervisor.session||!anchor||!MobileArmObserver_Suspend())return false;
 #if MOBILE_BOARD_SUPPORTED
     /* The first trajectory uses the existing freshly prepared torque-off
      * anchor. Background observation starts after its finite completion. */
@@ -411,9 +426,13 @@ void MobileBoard_Poll(void){
         if(f.bottom_transport_verified){
             lift_hold=true;
         }else{
+            /* Holding accuracy uses the same commissioned millimetre envelope
+             * as arrival. The initial zero-speed dwell remains unchanged. */
+            uint64_t counts=(uint64_t)profile.lift.tolerance_um*4096u/profile.lift.um_per_turn;
+            uint16_t hold_tolerance=(uint16_t)(counts<2?2:counts>2047?2047:counts);
             lift_hold=actuator_lift_hold_observe_report(&lift_hold_monitor,&f,drive,sample->moving,
                 lift.state==LIFT_HOLDING,now,
-                profile.lift.feedback_timeout_ms,profile.arm_hold_dwell_ms,2);
+                profile.lift.feedback_timeout_ms,profile.arm_hold_dwell_ms,2,hold_tolerance);
         }
         f.hold_verified=lift_hold;
 #endif
@@ -446,6 +465,12 @@ void MobileBoard_Poll(void){
                  r->axes[i].velocity_raw<-profile.mobile.stopped_velocity_raw))base_stopped=false;
     }
 #if HOST_S4_UNIFIED_CANDIDATE
+    bool park_zero=!stop_requested && !supervisor.transport_only && supervisor.state==ACTUATOR_MOBILE_ACTIVE &&
+        !supervisor.target_raw[0] && !supervisor.target_raw[1] && !supervisor.target_raw[2] && !supervisor.target_raw[3];
+    if(park_zero){
+        if(!park_tracking){park_tracking=true;park_zero_ms=now;memset(park_windows,0,sizeof(park_windows));}
+        park_wheels_still=actuator_mobile_wheels_stop_observe(park_windows,r,park_zero_ms,now);
+    }else{park_tracking=false;park_wheels_still=false;}
     /* Supported power activation has already written/read back wheel-zero.
      * Before the first base ARM only, corroborate noisy stationary speed bytes
      * with the same complete position window used for STOP. Never use this

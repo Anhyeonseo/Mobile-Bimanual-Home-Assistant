@@ -8,5 +8,8 @@ actuator_bus_router_t *MobileHoldOutput_Router(void);
 void MobileHoldOutput_Poll(void);
 void MobileHoldOutput_OnTxComplete(UART_HandleTypeDef *uart);
 void MobileHoldOutput_OnUartError(UART_HandleTypeDef *uart);
+/* Let a healthy STOP transaction finish before blocking RX recovery on the
+ * other UART. A failed transaction never prevents that independent recovery. */
+bool MobileHoldOutput_Pending(void);
 bool MobileHoldOutput_Recover(bool rx_quiet_verified);
 #endif

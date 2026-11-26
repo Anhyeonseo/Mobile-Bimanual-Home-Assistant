@@ -1,0 +1,78 @@
+{
+  "observations": [
+    {
+      "capture_id": "rgbd-676",
+      "captured_at_utc": "2026-11-20T01:46:39.453955+00:00",
+      "frame_id": "color_camera_optical_frame",
+      "source_sha256": {
+        "color.png": "dc235ce40d52d70ef9d0688b0544a6c57e478dbb2708f77f7388efccaf7f4aa8",
+        "depth_aligned.png": "d58914c6784d613274e192e3f8b350415e74592e2abbe16f195ef7b0211061f0",
+        "metadata.json": "252606749839a7f33bb6215664b5f85504c7788c78c2faf4981308c2381dbe31"
+      },
+      "box_xyxy": [
+        301.3172607421875,
+        260.127197265625,
+        351.3056640625,
+        345.89898681640625
+      ],
+      "label": "white eraser",
+      "detection_score": 0.7988441586494446,
+      "status": "accepted",
+      "failure": null,
+      "reason": null,
+      "center_xyz_m": [
+        0.004174394339516935,
+        0.037620333459945386,
+        0.331515996138321
+      ],
+      "mask_sha256": "94323cb5441d1ec05e6b5f6bb71318c835819674fd2fef3d0b559f16c15728d6",
+      "clock_domain": "global_time",
+      "calibration_id": "unmeasured",
+      "support_height_m": 0.018533702826332422,
+      "valid_depth_fraction": 0.9953449005501481
+    },
+    {
+      "capture_id": "rgbd-676",
+      "captured_at_utc": "2026-11-20T01:46:39.453955+00:00",
+      "frame_id": "color_camera_optical_frame",
+      "source_sha256": {
+        "color.png": "dc235ce40d52d70ef9d0688b0544a6c57e478dbb2708f77f7388efccaf7f4aa8",
+        "depth_aligned.png": "d58914c6784d613274e192e3f8b350415e74592e2abbe16f195ef7b0211061f0",
+        "metadata.json": "252606749839a7f33bb6215664b5f85504c7788c78c2faf4981308c2381dbe31"
+      },
+      "box_xyxy": [
+        128.37948608398438,
+        222.7303924560547,
+        152.16822814941406,
+        233.90011596679688
+      ],
+      "label": "white eraser",
+      "detection_score": 0.34228241443634033,
+      "status": "rejected",
+      "failure": "INVALID_DEPTH",
+      "reason": "no_coherent_cluster",
+      "center_xyz_m": null,
+      "mask_sha256": "8a24536ff2bef046162fd47092f914769150f78e801f37bc23ca0fee21599411",
+      "clock_domain": "global_time",
+      "calibration_id": "unmeasured",
+      "support_height_m": null,
+      "valid_depth_fraction": 1.0
+    }
+  ],
+  "meta": {
+    "captured_at_utc": "2026-11-20T01:46:39.453955+00:00",
+    "color_intrinsics": {
+      "width": 640,
+      "height": 480
+    }
+  },
+  "profile": {
+    "source_frame": "color_camera_optical_frame",
+    "calibration_id": "unused"
+  },
+  "source": {
+    "color.png": "dc235ce40d52d70ef9d0688b0544a6c57e478dbb2708f77f7388efccaf7f4aa8",
+    "depth_aligned.png": "d58914c6784d613274e192e3f8b350415e74592e2abbe16f195ef7b0211061f0",
+    "metadata.json": "252606749839a7f33bb6215664b5f85504c7788c78c2faf4981308c2381dbe31"
+  }
+}

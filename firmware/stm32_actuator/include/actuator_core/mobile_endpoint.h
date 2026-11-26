@@ -11,6 +11,7 @@
 typedef struct {
     actuator_mobile_supervisor_t *supervisor;
     uint32_t boot_id, rejected_frames;
+    bool (*park_proven)(uint32_t now_ms);
     uint8_t buffer[ACTUATOR_MOBILE_WIRE_SIZE];
     uint8_t used;
     uint32_t last_byte_ms;

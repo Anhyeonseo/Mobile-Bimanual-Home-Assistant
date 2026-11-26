@@ -13,7 +13,7 @@ static struct {
     uint32_t period_ms,age_ms,resumed_ms,last_read_ms;
     uint16_t raw_left[6],raw_right[6];
     uint8_t joint;
-    bool configured,owned,paused,fault,started;
+    bool configured,owned,paused,fault,started,draining;
 } observer;
 
 bool MobileArmObserver_Configure(UART_HandleTypeDef *left,UART_HandleTypeDef *right,
@@ -38,11 +38,19 @@ bool MobileArmObserver_Suspend(void)
     }
     return !observer.fault;
 }
+MobileArmHandoff MobileArmObserver_PrepareMotion(void)
+{
+    if(observer.fault)return MOBILE_ARM_HANDOFF_FAULT;
+    if(!observer.configured)return MOBILE_ARM_HANDOFF_READY;
+    observer.draining=true;
+    if(observer.owned && BimanualTrackingFeedback_Pending())return MOBILE_ARM_HANDOFF_WAIT;
+    return MobileArmObserver_Suspend()?MOBILE_ARM_HANDOFF_READY:MOBILE_ARM_HANDOFF_FAULT;
+}
 void MobileArmObserver_Resume(void)
 {
     if(!observer.configured||observer.fault)return;
     if(BimanualTrackingFeedback_Active()){observer.fault=true;return;}
-    observer.paused=false;observer.started=true;observer.resumed_ms=HAL_GetTick();
+    observer.draining=false;observer.paused=false;observer.started=true;observer.resumed_ms=HAL_GetTick();
 }
 static bool measured(uint8_t j,uint16_t raw,BimanualArm arm,int32_t *urad)
 {
@@ -95,7 +103,7 @@ bool MobileArmObserver_Poll(void)
          * the previous sample with its ORIGINAL stamp while retrying; the
          * unchanged age checks below still stop stale feedback. */
 
-        if(now-observer.last_read_ms>=observer.period_ms&&BimanualTrackingFeedback_CanStart()){
+        if(!observer.draining&&now-observer.last_read_ms>=observer.period_ms&&BimanualTrackingFeedback_CanStart()){
             observer.last_read_ms=now;
             uint8_t slot=observer.joint;
 #if HOST_S3_STATIONARY_PICK
@@ -119,5 +127,6 @@ bool MobileArmObserver_Poll(void){return true;}
 bool MobileArmObserver_OwnsFeedback(void){return false;}
 bool MobileArmObserver_HasStarted(void){return false;}
 bool MobileArmObserver_Suspend(void){return true;}
+MobileArmHandoff MobileArmObserver_PrepareMotion(void){return MOBILE_ARM_HANDOFF_READY;}
 void MobileArmObserver_Resume(void){}
 #endif

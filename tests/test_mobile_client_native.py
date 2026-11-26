@@ -175,3 +175,24 @@ def test_initial_clock_still_requires_a_precise_exchange(library):
     p.exchange=delayed
     with pytest.raises(ValueError,match='delayed'):c.synchronize()
     assert c.clock.sample is None and c.session is None
+
+
+@pytest.mark.parametrize('proven', [False, True])
+def test_owned_park_needs_board_proof_and_retires_the_session(library, proven):
+    c, p, t = client(library)
+    p.library.pc_mobile_set_park_proof(int(proven))
+    assert c.synchronize().capabilities & 8
+    c.arm(123)
+    c.velocity((0, 0, 0, 0))
+    t[0] += 10
+    if not proven:
+        with pytest.raises(RuntimeError):
+            c.park()
+        assert c.status().state == 2
+        return
+    result = c.park()
+    assert result.state == 0 and result.session == 0 and c.session is None
+    with pytest.raises(RuntimeError):
+        c.arm(123)
+    t[0] += 10
+    c.arm(124)

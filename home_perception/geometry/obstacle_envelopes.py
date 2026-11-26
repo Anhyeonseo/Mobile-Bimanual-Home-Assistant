@@ -51,17 +51,24 @@ def _clip(vertices, equation):
 def separate_target_padding(bounds, returns, target_vertices):
     """Return convex mesh pieces, or None when the original box must remain.
 
-    The one-micrometre separation is numerical only. No measured return may
-    fall in it. Real target/world overlap and exact touching remain unresolved.
+    Use up to 0.1 mm of numerical separation, bounded by half the nearest
+    observed return's plane distance. This is not physical clearance. No
+    measured return is removed; overlap and unresolved touching stay blocked.
     """
     bounds, returns, target_vertices = map(np.asarray, (bounds, returns, target_vertices))
     if (len(returns) == 0 or np.any(bounds[1] < target_vertices.min(axis=0))
             or np.any(bounds[0] > target_vertices.max(axis=0))):
         return None
     equations = ConvexHull(target_vertices).equations.copy()
-    equations[:, 3] -= 1e-6
-    if np.any(np.max(returns @ equations[:, :3].T + equations[:, 3], axis=1) <= 1e-10):
+    gaps = np.max(returns @ equations[:, :3].T + equations[:, 3], axis=1)
+    nearest = float(gaps.min())
+    if nearest <= 1e-6 + 1e-10:
         return None
+    # FCL/Cartesian interpolation can perturb an exact boundary by several
+    # micrometres. Keep a small gap in synthetic padding, bounded by the
+    # actual data, instead of treating that rounding as a physical obstacle.
+    separation = min(.0001, nearest / 2.)
+    equations[:, 3] -= separation
     vertices = np.array(list(product(*zip(bounds[0], bounds[1]))))
     # First establish a genuine volumetric envelope overlap.
     intersection = vertices

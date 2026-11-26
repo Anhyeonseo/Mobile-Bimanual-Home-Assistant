@@ -50,6 +50,10 @@ class CarryProgram:
     close_raw: int
     observed_width_m: float
 
+    @property
+    def inspection_only(self):
+        return tuple(stage.name for stage in self.stages)==('open','pregrasp')
+
 
 def _control(profile, side, name, value):
     return control_from_model(float(value), profile['arms'][side]['alignment'][name])
@@ -100,11 +104,22 @@ def compile_program(report, profile, installed_jaw, arm, *, bounds):
         raise ValueError('successful bound left-arm plan required')
     plan = report['plan']
     stages = plan['stages']
-    if [s['label'] for s in stages] != ['open_geometry', 'pregrasp', 'approach', 'close_geometry', 'lift', 'carry']:
+    inspection=report.get('inspection_only',False)
+    expected_stages=['open_geometry','pregrasp']
+    if not inspection:
+        expected_stages+=['approach','close_geometry','lift','carry']
+    if [s['label'] for s in stages] != expected_stages:
         raise ValueError('incomplete or reordered carry plan')
     mode=report.get('approach_mode','tool_axis')
     if mode not in ('tool_axis','vertical'):raise ValueError('unknown approach mode')
-    if mode=='vertical':
+    if inspection:
+        if mode!='vertical' or report.get('close_at_pregrasp'):
+            raise ValueError('invalid open-gripper inspection plan')
+    elif report.get('close_at_pregrasp'):
+        anchor=np.asarray(stages[1]['joints'][-1])
+        if mode != 'vertical' or any(not np.all(np.asarray(s['joints']) == anchor) for s in stages[2:4]):
+            raise ValueError('arm must stay at the pregrasp endpoint through close')
+    elif mode=='vertical':
         from .carry_cartesian import validate_vertical_descent
         validate_vertical_descent([arm.fk(q)[0] for q in stages[2]['joints']])
     chosen = [c for c in report['candidates'] if c['candidate']['candidate_id'] == plan['candidate_id']]
@@ -137,7 +152,6 @@ def compile_program(report, profile, installed_jaw, arm, *, bounds):
         path = np.vstack([expected, path])
         model_paths.append(path)
         expected = path[-1]
-    probe, lift = _split_probe(model_paths[4], arm.fk)
     compiled = []
     previous = anchor.copy()
     wire_intervals=[]
@@ -155,22 +169,32 @@ def compile_program(report, profile, installed_jaw, arm, *, bounds):
             state[5] = jaw_control
             controls.append(state)
         controls = np.vstack([previous, controls])
-        points, timing = retime(controls, bounds, dwell_s=dwell)
+        # A loaded finger can settle up to .15 rad short of its retained close
+        # command. Allow that same command a 100 ms lead (host: .009 rad / 5 ms).
+        points, timing = retime(controls, bounds, lead_ms=100 if attached else 50, dwell_s=dwell)
         compiled.append(CarryStage(name, points, timing, attached))
         previous = np.asarray(points[-1].positions_rad)
 
     add('open', model_paths[0], open_control)
     add('pregrasp', model_paths[1], open_control)
-    add('approach', model_paths[2], open_control)
-    # A constant target, not increased squeeze in response to poor evidence.
-    add('close', model_paths[3], close_control, dwell=2.)
-    add('probe', probe, close_control, attached=True)
-    add('lift', lift, close_control, attached=True)
-    add('carry', model_paths[5], close_control, attached=True)
-    add('hold', model_paths[5][-1:], close_control, attached=True, dwell=2.)
+    if not inspection:
+        probe, lift = _split_probe(model_paths[4], arm.fk)
+        add('approach', model_paths[2], open_control)
+        # A constant target, not increased squeeze in response to poor evidence.
+        add('close', model_paths[3], close_control, dwell=2.)
+        add('probe', probe, close_control, attached=True)
+        add('lift', lift, close_control, attached=True)
+        add('carry', model_paths[5], close_control, attached=True)
+        add('hold', model_paths[5][-1:], close_control, attached=True, dwell=2.)
     validate_program_winding(compiled,profile)
     captured = report['captured_model_joint_positions_si']['s2_lift_joint']
-    hypothetical = report.get('hypothetical_lift_m') is not None or abs(captured-arm.lift_m) > 1e-9
+    revalidation=report.get('start_revalidation')
+    if revalidation is not None:
+        from .pick_lift_transition import validate_revalidation
+        validate_revalidation(revalidation,profile,report['capture_id'],report['source_sha256'])
+        if revalidation['arrival_model_joint_positions_si'] != report['initial_model_joint_positions_si']:
+            raise ValueError('arrival anchor differs from planned start')
+    hypothetical = report.get('hypothetical_lift_m') is not None or (revalidation is None and abs(captured-arm.lift_m)>1e-9)
     return CarryProgram(report['capture_id'], report['calibration_id'], dict(report['source_sha256']),
                         digest(report), report['prepared_sha256'], plan['candidate_id'], candidate['source'],
                         arm.lift_m, captured, hypothetical, tuple(compiled), bounds, close_control,
@@ -180,7 +204,7 @@ def compile_program(report, profile, installed_jaw, arm, *, bounds):
 
 def manifest(program):
     """Keep provenance/limits visible; this artifact cannot arm a controller."""
-    return dict(schema_version=1, kind='stationary_pick_carry_preflight',
+    return dict(schema_version=1, kind=('open_pregrasp_preflight' if program.inspection_only else 'stationary_pick_carry_preflight'),
                 capture_id=program.capture_id, calibration_id=program.calibration_id,
                 source_sha256=program.source_sha256, report_sha256=program.report_sha256,
                 prepared_sha256=program.prepared_sha256, candidate_id=program.candidate_id,
@@ -192,5 +216,6 @@ def manifest(program):
                 motion_authorized=False, physical_task_completed=False,
                 required_before_live=['fresh_same_scene_and_joints', 'actual_fixed_lift',
                                       'resident_firmware_limits_and_gripper_cap_verified',
-                                      'live_contact_and_independent_target_follow_monitor',
+                                      ('open_pregrasp_checkpoint_and_stop' if program.inspection_only else
+                                       'live_contact_and_independent_target_follow_monitor'),
                                       'current_scene_revalidation'])

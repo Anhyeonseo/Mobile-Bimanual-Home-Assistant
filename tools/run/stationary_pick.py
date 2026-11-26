@@ -200,7 +200,7 @@ def run(transport,args):
                 except ValueError:
                     if time.monotonic()>deadline:raise
                 time.sleep(.01)
-            session=build_carry_session(p,adapter=adapter,coordinated_stop=stop,observe=reader.read,
+            session=build_carry_session(p,adapter=adapter,coordinated_stop=stop,observe=reader.read,transport_owner='stationary-pick',
                 clock=time.monotonic,validate_current_scene=inputs.validate_stage,
                 observation_policy=OBSERVATION_POLICY,ready_for_route=inputs.route_start_ready,
                 pause_before_descent=pause_before_descent)

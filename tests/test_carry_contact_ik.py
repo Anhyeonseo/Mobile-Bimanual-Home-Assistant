@@ -53,7 +53,7 @@ def test_moderate_tilt_is_softly_discouraged_not_rejected():
 def test_roll_search_bounds_match_physical_tabletop_envelope(roll,closing):
     policy=TabletopGraspPolicy();source=tabletop_pose(roll,closing)
     interval=contact_roll_interval(source,policy)
-    for angle in np.linspace(-np.pi/3,np.pi/3,241):
+    for angle in np.linspace(-np.pi/2,np.pi/2,361):
         pose=source.copy();pose[:3,:3]=source[:3,:3]@Rotation.from_rotvec([angle,0,0]).as_matrix()
         expected=contact_posture(pose,policy)['accepted']
         inside=interval is not None and interval[0]-1e-10<=angle<=interval[1]+1e-10
@@ -81,6 +81,38 @@ def test_posture_policy_searches_moderate_roll_instead_of_accepting_tilted_exact
     assert contact_posture(fk(q)[0],policy)['accepted']
     np.testing.assert_allclose(pose[:3,3],source[:3,3],atol=1e-12)
     np.testing.assert_allclose(pose[:3,0],source[:3,0],atol=1e-12)
+
+
+@pytest.mark.parametrize('source_roll', [-85., 85.])
+def test_horizontal_contact_can_reach_overhead_without_relaxing_pose_tolerance(monkeypatch, source_roll):
+    """A five-axis arm lacks independent contact roll; preserve the pinch line.
+
+    Reproduces the search-bound mechanism from the 2026-11-23 capture, whose
+    nearest fits hit +/-60 degrees despite reachable solutions beyond that.
+    """
+    from types import SimpleNamespace
+    from home_robot_tasks import carry_contact_ik
+    def fk(q):
+        pose=np.eye(4);pose[:3,3]=q[:3]
+        pose[:3,:3]=Rotation.from_euler('zy',[q[3],q[4]]).as_matrix()@np.diag([1.,-1.,-1.])
+        return pose,None
+    arm=SimpleNamespace(lo=np.array([-1.,-1.,-1.,-.1,-.1]),
+                        hi=np.array([1.,1.,1.,.1,.1]),anchor=np.zeros(5),fk=fk)
+    source=tabletop_pose(source_roll);policy=TabletopGraspPolicy()
+    original=carry_contact_ik.contact_roll_interval
+    with monkeypatch.context() as patch:
+        patch.setattr(carry_contact_ik,'contact_roll_interval',
+                      lambda pose,policy:original(pose,policy,limit=np.pi/3))
+        assert not fit_pregrasp(arm,source,arm.anchor,.02,contact_roll=True,
+                               grasp_policy=policy,approach_mode='vertical')[0]
+    ok,q,pose,fit=fit_pregrasp(arm,source,arm.anchor,.02,contact_roll=True,
+                             grasp_policy=policy,approach_mode='vertical')
+    assert ok and 60<abs(fit['contact_roll_deg'])<=90
+    assert fit['position_error_m']<=.001 and fit['orientation_error_deg']<=1
+    assert contact_posture(pose,policy)['accepted'] and contact_posture(fk(q)[0],policy)['accepted']
+    np.testing.assert_allclose(pose[:3,3],source[:3,3],atol=1e-12)
+    np.testing.assert_allclose(pose[:3,0],source[:3,0],atol=1e-12)
+    assert not fit['motion_authorized'] and not fit['full_path_collision_checked']
 
 
 @pytest.mark.parametrize('roll',[-25,25])

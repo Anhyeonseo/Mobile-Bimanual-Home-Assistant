@@ -250,13 +250,17 @@ def test_relocated_base_cannot_reuse_previous_obstacles(pair, changed):
 
 
 @pytest.mark.parametrize('surface_height,needs_lift', [(.20, False), (.75, True)])
-def test_anchored_saved_depth_builds_scene_without_supplied_boxes(pair, tmp_path, surface_height, needs_lift):
+def test_anchored_saved_depth_builds_scene_without_supplied_boxes(pair, tmp_path, surface_height, needs_lift, monkeypatch):
     """Synthetic matched exposure with actual segmentation/point-cloud and arm-planner entry points."""
     pytest.importorskip('open3d')
     from PIL import Image
     import hashlib
     from tools.diagnostics import replay_s3_grasp as replay
 
+    # This exposure is generated with the released camera calibration. Restore the
+    # matching default arm profile overridden for the session's nominal lab fixtures.
+    from tools.diagnostics import run_s3_stationary_lab as lab
+    monkeypatch.setattr(lab, 'PROFILE', ROOT/'config/home_assistant/s2_coordinates.development.json')
     original, report, _, profile, geometry = pair
     row = report['records'][0]
     intr = replay.read(replay.CONFIG/'camera_device.observed.json')['sdk_calibration']['color_intrinsics']

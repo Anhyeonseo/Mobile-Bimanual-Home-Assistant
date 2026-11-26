@@ -1,5 +1,7 @@
 #include "mobile_servo_feedback.h"
 #include "mobile_servo_output.h"
+#include "mobile_hold_output.h"
+#include "actuator_core/motor_groups.h"
 #include "servo_bus_reader.h"
 #include "control_tick.h"
 #include "actuator_core/mobile_endpoint.h"
@@ -17,10 +19,18 @@ static unsigned hot_once;
 static bool hot_wheel_only;
 static uint8_t hot_temperature=76;
 static unsigned reads,writes,zero_writes,lift_reads,lift_writes;
+static uint32_t right_tx_at,recovery_delay_us;
+static bool right_answer=true;
+
 static int32_t device_speed[4];
 static bool check_direction;
 static UART_HandleTypeDef left={.Init={1000000},.gState=HAL_UART_STATE_READY};
 static UART_HandleTypeDef right={.Init={1000000},.gState=HAL_UART_STATE_READY};
+static void complete_right(void){
+    if(right_answer && right.gState==HAL_UART_STATE_BUSY_TX && elapsed-right_tx_at>=270){
+        right.gState=HAL_UART_STATE_READY;MobileHoldOutput_OnTxComplete(&right);
+    }
+}
 static actuator_mobile_supervisor_t supervisor;
 static const actuator_mobile_config_t limits={{1000,1000,1000,100},2,200,200,0,500000};
 static const actuator_mobile_output_config_t output_config={{5000,1000,200,10000,20000,5000,500},500,400,600,4000,{1,-1,1,1}};
@@ -30,6 +40,7 @@ bool ControlTick_PeekEpoch(uint32_t *epoch){*epoch=origin+(elapsed/5000)*5000;re
 bool ControlTick_PeekClock(uint32_t *now,uint32_t *epoch){bool valid=ControlTick_PeekEpoch(epoch);*now=Timebase_NowUs();return valid;}
 static void complete(void){left.gState=HAL_UART_STATE_READY;MobileServoOutput_OnTxComplete(&left);MobileServoFeedback_OnTxComplete(&left);}
 HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *u,const uint8_t *p,uint16_t n){
+    if(u==&right){CHECK(n==26);u->sent++;u->gState=HAL_UART_STATE_BUSY_TX;right_tx_at=elapsed;return HAL_OK;}
     CHECK(n<=sizeof(packet));memcpy(packet,p,n);packet_size=n;tx_at=elapsed;
     if(u->fail_tx)return HAL_ERROR;
     u->sent++;u->gState=HAL_UART_STATE_BUSY_TX;
@@ -48,6 +59,7 @@ HAL_StatusTypeDef HAL_UART_AbortTransmit(UART_HandleTypeDef *u){
 bool ServoBus_PrepareReader(UART_HandleTypeDef *u,bool proof){return u==&left && proof && rx_healthy;}
 bool ServoBus_RecoverReader(UART_HandleTypeDef *u,uint32_t token){
     if(!ServoTransport_Owns(u,token)||HAL_UART_AbortTransmit(u)!=HAL_OK)return false;
+    for(uint32_t until=elapsed+recovery_delay_us;elapsed<until;elapsed+=50)complete_right();
     rx_healthy=true;reply_pending=false;return true;
 }
 bool ServoBus_ReaderCursor(UART_HandleTypeDef *u,uint32_t token,uint32_t *p){
@@ -82,7 +94,7 @@ static void poll(void){
         actuator_mobile_lift_evidence_t f={HAL_GetTick(),12000,true,true};
         MobileServoFeedback_SetLiftEvidence(&f);last_lift_ms=HAL_GetTick();
     }
-    MobileServoOutput_Poll();MobileServoFeedback_Poll();
+    complete_right();MobileServoOutput_Poll();MobileHoldOutput_Poll();MobileServoFeedback_Poll();
     if(service_stopped)MobileServoFeedback_ServiceStopped(true);
 }
 static void advance(uint32_t until){for(;elapsed<until;elapsed+=50)poll();poll();}
@@ -294,6 +306,24 @@ int main(int argc,char **argv){
         advance(elapsed+250000);CHECK(supervisor.state==ACTUATOR_MOBILE_STOP_LATCHED);
         if(which==36){answer=true;advance(elapsed+300000);}
         CHECK(zero_writes==1);break;
+    }
+    case 38: /* Actual left RX recovery must not stall the other UART's STOP receipt. */
+    case 39: /* A genuinely missing right completion must still fail independently. */
+    {
+        CHECK(MobileHoldOutput_Configure(&right,700,50));
+        bind_output();answer=false;advance(90000);
+        CHECK(MobileServoFeedback_State()->fault!=MOBILE_FEEDBACK_OK);
+        actuator_bus_router_t *r=MobileHoldOutput_Router();
+        uint8_t hold[26];size_t n;uint16_t pose[6]={2048,2048,2048,2048,2048,2048};
+        CHECK(actuator_motor_group_positions(ACTUATOR_GROUP_RIGHT_ARM,pose,6,hold,&n)==ACTUATOR_GROUP_OK);
+        CHECK(actuator_bus_router_submit(r,ACTUATOR_BUS_WORK_STOP,hold,n,Timebase_NowUs(),Timebase_NowUs()+10000,700));
+        answer=true;right_answer=which!=39;recovery_delay_us=4800;service_stopped=true;
+        advance(elapsed+60000);
+        CHECK(zero_writes==1&&MobileServoFeedback_State()->fault==MOBILE_FEEDBACK_OK);
+        CHECK(right.sent==1&&supervisor.state==ACTUATOR_MOBILE_STOP_LATCHED);
+        if(which==38)CHECK(r->completed_token==1&&!r->bus.faulted);
+        else CHECK(r->completed_token==0&&r->bus.faulted);
+        break;
     }
     default:CHECK(false);
     }

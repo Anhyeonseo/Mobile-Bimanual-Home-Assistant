@@ -9,19 +9,34 @@ from . import s2_geometry as s2
 from .camera_evidence import from_metadata, match_observed_identity
 
 
+class StaleCameraFrame(ValueError):
+    """An expired exposure may be discarded; its timestamp must never be renewed."""
+    def __init__(self, age_s):
+        self.age_s=age_s
+        super().__init__(f'stale camera acquisition: age={age_s*1000:.1f} ms, limit=200 ms')
+
+
 class GlobalClock:
     def __init__(self,*,wall=time.time,mono=time.monotonic):
         self.wall,self.mono=wall,mono
         self.offset=self._offset()
     def _offset(self):
-        a=self.mono();w=self.wall();b=self.mono()
-        if b-a>.002:raise ValueError('clock sampling delayed')
-        return (a+b)/2-w
+        # A scheduling pause makes this clock pair uncertain. Sample a fresh
+        # pair without changing the camera exposure or its SDK timestamp.
+        for _ in range(3):
+            before = self.mono()
+            wall = self.wall()
+            after = self.mono()
+            if after - before <= .002:
+                return (before + after) / 2 - wall
+        raise ValueError('clock sampling delayed on 3 consecutive measurements')
     def convert(self,timestamp_ms,domain):
         if domain!='timestamp_domain.global_time':raise ValueError('SDK global_time required; arrival time is not acquisition time')
         if abs(self._offset()-self.offset)>.005:raise ValueError('host wall clock stepped; restart capture')
         t=s2.number(timestamp_ms,'RGB-D timestamp',1e15)/1000+self.offset
-        if not 0<=self.mono()-t<=.2:raise ValueError('stale/future camera acquisition')
+        age=self.mono()-t
+        if age<0:raise ValueError(f'future camera acquisition: age={age*1000:.1f} ms')
+        if age>.2:raise StaleCameraFrame(age)
         return t
 
 
@@ -54,6 +69,7 @@ class Capture:
             raise ValueError('native depth retention requires retained RGB-D frames')
         self.retain_native_depth=retain_native_depth
         self.native_depth_images={}
+        self.stale_framesets=0;self.last_stale_age_s=None
         self.repeated_framesets=0
         self.repeated_stream_frames={'color':0,'depth':0}
         if self.reference is not None and self.reference['camera_device']!=self.expected:
@@ -184,7 +200,9 @@ class Capture:
 
         A frameset may pair a new color frame with the previous depth frame.
         Skip that pair within the original timeout, without relabeling its time
-        or admitting a restarted/regressing stream as a duplicate.
+        or admitting a restarted/regressing stream as a duplicate. Expired
+        exposures (including alignment delays) are discarded within that same
+        deadline. Future clocks, identity changes and stream resets still fail.
         """
         if not self.started or not self.retain_frame:
             raise ValueError('retaining camera stream required')
@@ -193,24 +211,34 @@ class Capture:
         deadline=time.monotonic()+timeout_ms/1000
         while True:
             remaining=deadline-time.monotonic()
-            if remaining<=0:raise ValueError('no fresh RGB-D pair within camera timeout')
+            if remaining<=0:
+                detail='' if self.last_stale_age_s is None else f'; last discarded age={self.last_stale_age_s*1000:.1f} ms'
+                raise ValueError('no fresh RGB-D pair within camera timeout'+detail)
             frames=self.pipeline.wait_for_frames(max(1,int(remaining*1000)))
-            repeated=[]
+            repeated=[];stale=None
             for stream,frame in (('color',frames.get_color_frame()),('depth',frames.get_depth_frame())):
                 number=frame.get_frame_number();stamp=frame.get_timestamp()
-                # Apply the same clock-domain/age checks even to a reused frame.
-                self.clock.convert(stamp,str(frame.get_frame_timestamp_domain()))
                 if self.buffer:
                     prior=self.buffer[-1][stream+'_frame']
                     if number<prior['number'] or stamp<prior['timestamp_ms']:
                         raise ValueError('camera stream reset or exposure time regressed: '+stream)
                     if number==prior['number'] or stamp==prior['timestamp_ms']:
                         repeated.append(stream)
+                # Check both streams even when one exposure is stale: do not
+                # hide a reset or clock-domain failure in the other stream.
+                try:self.clock.convert(stamp,str(frame.get_frame_timestamp_domain()))
+                except StaleCameraFrame as exc:stale=exc
+            if stale is not None:
+                self.stale_framesets+=1;self.last_stale_age_s=stale.age_s
+                continue
             if repeated:
                 self.repeated_framesets+=1
                 for stream in repeated:self.repeated_stream_frames[stream]+=1
                 continue
-            record=self._record(frames)
+            try:record=self._record(frames)
+            except StaleCameraFrame as exc:
+                self.stale_framesets+=1;self.last_stale_age_s=exc.age_s
+                continue
             return record, self.images[record['capture_id']]
     def match(self,motors):
         center=sum(r['acquired_s'] for r in motors['samples'])/len(motors['samples'])

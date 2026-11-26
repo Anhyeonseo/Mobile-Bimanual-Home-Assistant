@@ -9,6 +9,7 @@ import numpy as np
 
 from .s2_geometry import rigid, JOINTS
 from .carry_binding import BoundPayload
+from .pick_calibration import planning_lift_limit
 
 
 # The supported near-field capture is at most 640 x 480. A measured envelope
@@ -58,7 +59,7 @@ def from_prepared_capture(prepared,profile, *, nominal_obstacles=None, obstacle_
     required={'s2_lift_joint'}|{f'{side}_model_{j}' for side in ('left','right') for j in JOINTS}
     if (set(joints)!=required or not all(np.isfinite(v) for v in joints.values())
             or joints['s2_lift_joint']!=review['lift_height_m']
-            or not 0<=joints['s2_lift_joint']<=profile['lift']['travel_m']):
+            or not 0<=joints['s2_lift_joint']<=planning_lift_limit(profile)):
         raise ValueError('complete captured arm/jaw/lift state required')
     for side in ('left','right'):
         if any(joints[f'{side}_model_{j}']!=review[side+'_anchor_rad'][j] for j in JOINTS[:5]):

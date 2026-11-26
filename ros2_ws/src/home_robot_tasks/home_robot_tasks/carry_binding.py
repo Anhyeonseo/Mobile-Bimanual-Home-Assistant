@@ -74,7 +74,9 @@ def bind_grasp(arm, review, group, index, payload, installed_left_jaw, *,
                approach_distance_m=.02, upright_object_axis=None,
                maximum_tilt_rad=None, orientation_evidence=None, hypothetical_lift_m=None,
                jaw_sign=1, entry_clearance_m=.004, fixed_finger_clearance_m=0., grasp_policy=None,
-               close_allowance_m=RIGID_CLOSE_ALLOWANCE_M, approach_mode='tool_axis'):
+               close_allowance_m=RIGID_CLOSE_ALLOWANCE_M, close_extra_raw=0, approach_mode='tool_axis',
+               contact_clearance_m=0., support_normal_base=(0.,0.,1.), close_at_pregrasp=False,
+               grasp_base_x_offset_m=0.):
     """Return (offline candidate, jaw command preview); neither authorizes motion.
 
     An IK pregrasp seed is not a path. MoveIt must subsequently plan/check the
@@ -90,12 +92,19 @@ def bind_grasp(arm, review, group, index, payload, installed_left_jaw, *,
             payload.source_sha256 != review.get('source_sha256') or
             payload.calibration_id != arm.profile['calibration_id']):
         raise PlanRejected('payload, grasp and robot must share the capture and fixed lift')
-    if not .005 <= approach_distance_m <= .05:
+    if close_at_pregrasp and approach_mode != 'vertical':
+        raise ValueError('closing at pregrasp requires a vertical entry')
+    minimum_distance=0. if close_at_pregrasp else .005
+    if not minimum_distance <= approach_distance_m <= .05:
         raise ValueError('bounded approach distance required')
     if (not np.isfinite(fixed_finger_clearance_m)
             or not 0 <= fixed_finger_clearance_m <= .010
             or fixed_finger_clearance_m > entry_clearance_m-.002):
         raise ValueError('fixed-finger entry clearance must leave at least 2 mm for moving finger')
+    if not np.isfinite(contact_clearance_m) or not 0<=contact_clearance_m<=.010 or contact_clearance_m>entry_clearance_m-.002:
+        raise ValueError('fixed contact clearance must retain moving-side entry room')
+    if contact_clearance_m and fixed_finger_clearance_m:
+        raise ValueError('do not combine entry-only and retained contact clearances')
     candidates=group['refined_grasps']
     if not isinstance(candidates,list) or len(candidates)>64 or type(index) is not int or not 0<=index<len(candidates):
         raise ValueError('invalid bounded candidate index')
@@ -105,10 +114,6 @@ def bind_grasp(arm, review, group, index, payload, installed_left_jaw, *,
         object_pose=geo.rigid(payload.base_from_object)
         target_vertices=np.asarray(payload.mesh['vertices'])@object_pose[:3,:3].T+object_pose[:3,3]
     grip=_bound_candidate(review,group,source,arm,target_vertices_base=target_vertices)
-    close=closure_plan(arm.jaw,source,entry_clearance_m=entry_clearance_m,close_allowance_m=close_allowance_m)
-    gap=installed_left_jaw.preview(close)
-    if gap['status'] not in ('MEASURED_GAP_PREVIEW','NOMINAL_STL_GAP_PREVIEW'):
-        raise PlanRejected(gap['status'])
     # GraspNet Y points from the fixed side to the moving side (-TCP X).
     # Align the fixed face with the observed low contact, independent of the
     # entry opening. Centring the OPEN gap would leave the fixed finger outside
@@ -116,26 +121,70 @@ def bind_grasp(arm, review, group, index, payload, installed_left_jaw, *,
     fixed_extent=-source['closing_section']['low_m']
     shift=fixed_extent-source['width_m']/2
     grip[:3,3]+=grip[:3,0]*shift
+    if not np.isfinite(grasp_base_x_offset_m):
+        raise ValueError('finite base X grasp offset required')
+    # Direct closure has one endpoint. Select the line at its final height
+    # and fore/aft aim before measuring its two boundaries on the fixed scene.
+    before_trim=grip[:3,3].copy()
+    if close_at_pregrasp:
+        if target_vertices is None:
+            raise PlanRejected('direct closure requires observed target geometry')
+        grip[0,3]+=grasp_base_x_offset_m
+        grip[2,3]+=approach_distance_m
     section_binding=None
     if target_vertices is not None:
         grip,effective,section_binding=bind_observed_fixed_contact(
             arm,grip,target_vertices,entry_clearance_m=entry_clearance_m)
         source=dict(source,**effective)
-        close=closure_plan(arm.jaw,source,entry_clearance_m=entry_clearance_m,close_allowance_m=close_allowance_m)
-        gap=installed_left_jaw.preview(close)
-        if gap['status'] not in ('MEASURED_GAP_PREVIEW','NOMINAL_STL_GAP_PREVIEW'):
-            raise PlanRejected(gap['status'])
         fixed_extent=source['width_m']/2
+    close=closure_plan(arm.jaw,source,entry_clearance_m=entry_clearance_m,close_allowance_m=close_allowance_m,close_extra_raw=close_extra_raw)
+    gap=installed_left_jaw.preview(close)
+    if gap['status'] not in ('MEASURED_GAP_PREVIEW','NOMINAL_STL_GAP_PREVIEW'):
+        raise PlanRejected(gap['status'])
+    observed_object=geo.rigid(payload.base_from_object)
+    held_object=observed_object.copy()
+    planned_slide=np.zeros(3)
+    if contact_clearance_m:
+        # Leave both sides clear through the whole descent. The moving jaw may
+        # slide the object across this small gap while closing, along its support.
+        normal=np.asarray(support_normal_base,float)
+        if normal.shape!=(3,) or not np.isfinite(normal).all() or np.linalg.norm(normal)<1e-8:
+            raise ValueError('finite support normal required')
+        normal=normal/np.linalg.norm(normal)
+        outward=(grip@arm.tcp_from_stock)[:3,0]
+        tangent=outward-normal*(normal@outward)
+        projection=float(tangent@outward)
+        if projection<.5:raise PlanRejected('closing direction cannot slide along support')
+        planned_slide=contact_clearance_m*tangent/projection
+        grip[:3,3]+=planned_slide
+        held_object[:3,3]+=planned_slide
+    if not close_at_pregrasp:
+        before_trim=grip[:3,3].copy()
+        grip[0,3]+=grasp_base_x_offset_m
     seed=checked_joints(arm,[review['left_anchor_rad'][n] for n in geo.JOINTS[:5]])
     # Roll is free only for an observed pinch-line section. Legacy rectangular
     # sampling bands cannot justify changing the approach orientation.
     contact_roll=source.get('closing_section',{}).get('method')=='observed_contact_line'
-    ok,pre_joints,grip,fit=fit_pregrasp(arm,grip,seed,approach_distance_m,contact_roll=contact_roll,
+    from .pick_calibration import TOP_BASIS, TOP_BASES
+    if review.get('lift_reference_basis') in TOP_BASES:
+        # Seed the contact IK with the field-observed extended arm posture.
+        # MoveIt still connects from the actual measured twelve-joint start.
+        seed = np.clip([seed[0], 1.032, -.239, .127, seed[4]], arm.lo, arm.hi)
+    ok,pre_joints,grip,fit=fit_pregrasp(arm,grip,seed,0. if close_at_pregrasp else approach_distance_m,contact_roll=contact_roll,
                                      fixed_finger_clearance_m=fixed_finger_clearance_m,grasp_policy=grasp_policy,
                                      approach_mode=approach_mode)
+    fit.update(grasp_base_x_offset_m=grasp_base_x_offset_m,
+               untrimmed_contact_xyz_base_m=before_trim.tolist())
     if not ok:
         raise PregraspRejected(fit)
-    relative=np.linalg.inv(grip)@geo.rigid(payload.base_from_object)
+    if close_at_pregrasp:
+        # Preserve the observed payload in world coordinates. An elevated hand
+        # must still intersect the object on the real jaw closing line.
+        grip=arm.fk(pre_joints)[0]
+        source_pose=np.asarray(fit['source_base_from_grasp_tcp'])
+        fit.update(planned_base_from_grasp_tcp=grip.tolist(),
+                   pinch_center_displacement_m=float(np.linalg.norm(grip[:3,3]-source_pose[:3,3])))
+    relative=np.linalg.inv(grip)@held_object
     constraint=None
     if upright_object_axis is not None:
         if maximum_tilt_rad is None or not orientation_evidence:
@@ -152,14 +201,22 @@ def bind_grasp(arm, review, group, index, payload, installed_left_jaw, *,
     suffix='' if jaw_sign==1 else ':reversed'
     candidate=GraspRouteCandidate(f"{review['capture_id']}:{index}{suffix}",arm.profile['calibration_id'],
         review['capture_id'],pre_joints,grip,relative,tuple(payload.size_m),
-        angle(gap['entry_raw']),angle(held_raw),constraint,payload.mesh)
+        angle(gap['entry_raw']),angle(held_raw),constraint,payload.mesh,
+        observed_object if contact_clearance_m else None,contact_clearance_m)
+    if close_at_pregrasp:
+        from .carry_planning import fixed_contact_review
+        if not fixed_contact_review(arm,candidate)['accepted']:
+            raise PlanRejected('object is outside the jaw contact section at pregrasp height')
     preview_key='measured_gap_preview' if gap['status']=='MEASURED_GAP_PREVIEW' else 'nominal_gap_preview'
     return candidate, dict(closure=close,**{preview_key:gap},
                            observed_directed_section=section_binding,
                            held_geometry_raw=held_raw,contact_fit=fit,jaw_sign=jaw_sign,
-                           fixed_contact_binding=dict(policy='observed_low_contact_not_open_gap_center',
+                           fixed_contact_binding=dict(policy=('clear_entry_then_close_into_fixed_finger' if contact_clearance_m else 'observed_low_contact_not_open_gap_center'),
                                fixed_extent_m=fixed_extent,entry_gap_m=close['entry_gap_m'],
-                               fixed_side_clearance_m=0.,
+                               fixed_side_clearance_m=contact_clearance_m,
+                               moving_side_clearance_m=entry_clearance_m-contact_clearance_m,
+                               planned_object_translation_base_m=planned_slide.tolist(),
+                               object_translation_physically_verified=False,
                                pregrasp_fixed_side_clearance_m=fixed_finger_clearance_m,
                                entry_extra_gap_m=entry_clearance_m,
                                unplanned_object_translation_m=0.),

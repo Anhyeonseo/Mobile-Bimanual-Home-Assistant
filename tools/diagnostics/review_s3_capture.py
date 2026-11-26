@@ -36,6 +36,10 @@ def capture_profile(profile, geometry, calibration_id):
 def review(folder, report, observations, profile, geometry, label, location):
     """Never provides executable geometry. UTC is provenance, not the alignment clock."""
     dev.validate(profile, geometry)
+    if report.get('kind')=='unified_held_capture':
+        from home_robot_tasks.pick_capture import review_capture
+        answer,meta,source=review_capture(folder,report,profile)
+        return select_observation(answer,observations,profile,meta,source,label,location)
     if report.get('kind')=='resident_fixed_capture':
         from home_robot_tasks.resident_capture import review_fixed_capture
         answer,meta,source=review_fixed_capture(folder,report,profile)
@@ -117,10 +121,17 @@ def select_observation(answer,observations,profile,meta,source,label,location):
             continue
         points[field] = s2.optical_to_base(profile['base_from_optical'], o[field])
     if not points:
-        return dict(answer, status='REOBSERVE', reason='no_3d_point')
+        return dict(answer, status='REOBSERVE', reason='no_3d_point',
+                    next_observation=target_depth_observation(box))
     return dict(answer, status='TARGET_DISPLAY_ONLY', label=label, box_xyxy=box, observation_index=index,
                 source_sha256=source, calibration_id=profile['calibration_id'],
-                base_points_m=points, point_semantics='measured surface point / visible surface center; neither is a jaw contact')
+                base_points_m=points, point_semantics='measured surface point / visible surface center; neither is a jaw contact',
+                **({'target_selection': choice['target_selection']} if choice.get('target_selection') else {}))
+
+
+def target_depth_observation(box):
+    return dict(action='recapture_target_depth', roi_xyxy=box,
+                retryable=True, robot_motion_required=False)
 
 
 def choose_observation(observations, capture_id, profile, meta, source, label, location):
@@ -145,19 +156,47 @@ def choose_observation(observations, capture_id, profile, meta, source, label, l
             candidates.append((box.tolist(), o, index))
     if not candidates:
         return dict(status='NOT_FOUND')
+    selection = None
+    if len(candidates) > 1 and location is None:
+        # Choose identity from this exposure's detector scores FIRST. Depth
+        # validates the chosen target below; changing a weak alternative's
+        # geometry status must neither veto it nor substitute another object.
+        # These scores are rankings, not calibrated probabilities. Close or
+        # missing scores still require a spatial/user disambiguation.
+        scores = [item[1].get('detection_score') for item in candidates]
+        if all(type(v) in (int, float) and math.isfinite(v) and 0 <= v <= 1 for v in scores):
+            ranked = sorted(candidates, key=lambda item: item[1]['detection_score'], reverse=True)
+            winner, others = ranked[0], ranked[1:]
+            best = winner[1]['detection_score']
+            gap = best - others[0][1]['detection_score']
+            if best >= .5 and gap >= .2:
+                selection = dict(method='dominant_detection',
+                    selected_index=winner[2], selected_score=best, score_margin=gap,
+                    alternatives=[dict(index=item[2], score=item[1]['detection_score'],
+                        geometry_status=item[1]['status'], reason=item[1].get('reason')) for item in others],
+                    observations_preserved=True, previous_position_used=False)
+                candidates = [winner]
     if len(candidates) > 1:
         if location not in ('left','right'):
-            return dict(status='AMBIGUOUS_TARGET')
+            return dict(status='AMBIGUOUS_TARGET', reason='specify_image_side',
+                        target_selection=dict(method='unresolved', alternatives=[
+                            dict(index=i,box_xyxy=b,score=o.get('detection_score'),geometry_status=o['status'],
+                                 reason=o.get('reason')) for b,o,i in candidates]))
         candidates.sort(key=lambda x: x[0][0]+x[0][2], reverse=location=='right')
         box=candidates[0][0]
         # A wide third box can overlap the first even when the second does not.
         if any((box[2]>=other[0] if location=='left' else box[0]<=other[2])
                for other,_,_ in candidates[1:]):
             return dict(status='AMBIGUOUS_TARGET')
+        selection = dict(method='image_side', location=location, selected_index=candidates[0][2],
+                         observations_preserved=True, previous_position_used=False)
     box, o, index = candidates[0]
     if o['status'] != 'accepted':
-        return dict(status='REOBSERVE', reason=o.get('reason'))
-    return dict(status='SELECTED', observation_index=index, box_xyxy=box)
+        return dict(status='REOBSERVE', reason=o.get('reason'),
+                    next_observation=target_depth_observation(box),
+                    **({'target_selection': selection} if selection else {}))
+    return dict(status='SELECTED', observation_index=index, box_xyxy=box,
+                **({'target_selection': selection} if selection else {}))
 
 
 def render_review(folder, result, destination):

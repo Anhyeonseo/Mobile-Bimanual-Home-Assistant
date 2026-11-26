@@ -17,7 +17,7 @@ class HandoffRecheck(ValueError):
         super().__init__('measured anchor changed after planning: '+str(diagnostics))
 
 
-def build_carry_session(program, *, adapter, coordinated_stop, observe, clock,
+def build_carry_session(program, *, adapter, coordinated_stop, observe, clock, transport_owner,
                        validate_current_scene, simulation=False, observation_policy='continuous_patch',
                        ready_for_route=None, pause_before_descent=False, recoverable_handoffs=False):
     """Compose over prepared clients; never open a port, flash or auto-home.
@@ -29,7 +29,7 @@ def build_carry_session(program, *, adapter, coordinated_stop, observe, clock,
     from .device_ports import ResidentArmPort
     builder = CarryRouteBuilder(program, validate_current_scene,pause_before_descent=pause_before_descent)
     motion = ResidentArmPort(adapter, builder, coordinated_stop, clock,
-                             transport_owner='stationary-pick')
+                             transport_owner=transport_owner)
     return CarrySession(program, motion, coordinated_stop, observe, clock, simulation=simulation,
                         observation_policy=observation_policy,ready_for_route=ready_for_route,
                         pause_before_descent=pause_before_descent,recoverable_handoffs=recoverable_handoffs)
@@ -70,10 +70,12 @@ class CarryRouteBuilder:
         self.validate = validate_current_scene
         self.last_index = -1
         self.pregrasp_hold=None
+        if getattr(program,'inspection_only',False) and not pause_before_descent:
+            raise ValueError('inspection program requires an open-gripper checkpoint')
         if pause_before_descent:
             from .carry_trajectory import retime
             from .carry_program import CarryStage
-            if [s.name for s in program.stages[:3]]!=['open','pregrasp','approach']:
+            if not getattr(program,'inspection_only',False) and [s.name for s in program.stages[:3]]!=['open','pregrasp','approach']:
                 raise ValueError('checked pregrasp endpoint required for descent checkpoint')
             end=program.stages[1].points[-1].positions_rad
             points,timing=retime([end,end],program.bounds,dwell_s=1.)
@@ -95,7 +97,8 @@ class CarryRouteBuilder:
         if set(parameters) != {'carry_stage'} or type(parameters['carry_stage']) is not int:
             raise ValueError('explicit compiled stage required')
         index = parameters['carry_stage']
-        hold_repeat = index == self.last_index == len(self.program.stages)-1
+        hold_repeat = (index == self.last_index == len(self.program.stages)-1
+                       and self.program.stages[-1].name=='hold')
         if (index != self.last_index+1 and not hold_repeat) or not 0 <= index < len(self.program.stages):
             raise ValueError('carry stages cannot be reordered or replayed')
         raw = tuple(snapshot.positions_urad)
@@ -188,7 +191,7 @@ class CarrySession:
 
     def resume_descent(self):
         # Early input cannot pre-authorize a later checkpoint.
-        if self.state!='AWAITING_DESCENT_CONFIRMATION':
+        if self.state!='AWAITING_DESCENT_CONFIRMATION' or getattr(self.program,'inspection_only',False):
             raise ValueError('descent confirmation requires the active pregrasp checkpoint')
         self.descent_released=True
 
@@ -273,6 +276,8 @@ class CarrySession:
     @property
     def holding_reason(self):
         # Retained arm/jaw goals do not prove that an object came with them.
+        if self.observation_policy == 'snapshot_then_verify' and self.last_feedback is not None and self._held(self.last_feedback):
+            return 'HOLDING_VISUALLY_VERIFIED'
         return ('HOLDING_UNVERIFIED' if self.observation_policy == 'snapshot_then_verify'
                 else 'HOLDING')
 
@@ -379,7 +384,7 @@ class CarrySession:
                     self.phase_s = now
                     if stage.name=='pregrasp' and self.pause_before_descent:
                         self.state='AWAITING_DESCENT_CONFIRMATION'
-                    if self.index == len(self.program.stages):
+                    elif self.index == len(self.program.stages):
                         self.state = 'HOLDING'
                         self.active = True  # Retire the completed /hold/0 first.
         except Exception as exc:

@@ -363,6 +363,8 @@ class ResidentBimanualStreamAdapter:
             raise BimanualStreamError(
                 f"{self.physical_joint_count}-axis anchor failed: "
                 f"status={snapshot.status_code} reason={reason}; "
+                f"raw={getattr(snapshot, 'positions_raw', None)}; "
+                f"unwrapped={getattr(snapshot, 'unwrapped_positions_raw', None)}; "
                 "firmware stop is latched and STM32 reset is required"
             )
         if (

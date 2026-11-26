@@ -14,7 +14,7 @@ bool actuator_mobile_framed_reply(actuator_mobile_endpoint_t *endpoint,
     response->payload_length=1;response->payload[0]=2;
     const uint8_t *p=request->payload;
     if(request->flags!=0 || request->payload_length!=ACTUATOR_MOBILE_WIRE_SIZE || p[0]!='A' || p[1]!='M' || p[2]!=1 ||
-       p[3]<1 || p[3]>6 || read32(p+32)!=actuator_crc32c(p,32))return true;
+       p[3]<1 || p[3]>7 || read32(p+32)!=actuator_crc32c(p,32))return true;
     if(endpoint==NULL || endpoint->supervisor==NULL) {response->payload[0]=1;return true;}
     /* Outer frame is complete and CRC checked: discard any raw-stream residue.
      * This endpoint must be owned only by the framed route once attached. */
